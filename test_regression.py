@@ -43,8 +43,49 @@ import rag  # noqa: E402
 import regression_referenz as ref  # noqa: E402
 from regression_referenz import WISSEN, GOLDEN, FRAGEN, RASTER, achsen_embed, hash_embed  # noqa: E402
 
-with open(ref.JSON_PFAD, encoding="utf-8") as _f:
+# REGRESSION_REFERENZ=<pfad> prueft gegen eine anders erzeugte Referenz (andere Plattform,
+# --gleichstand-umgekehrt) -- der Vergleich muss fuer jede gueltige ed36f99-Ausgabe bestehen.
+with open(os.environ.get("REGRESSION_REFERENZ") or ref.JSON_PFAD, encoding="utf-8") as _f:
     SOLL = json.load(_f)
+TOL = 1e-6
+
+
+def voller_schluessel(key):
+    """Schluessel des k=alle-Falls derselben Frage/Konfiguration."""
+    teile = key.split("|")
+    teile[3] = "k=alle"
+    return "|".join(teile)
+
+
+def gleichstandsbewusst_gleich(ist, soll, voll):
+    """(gleich?, Grund). ist/soll: Top-k-Signaturen, voll: alle Chunks der Referenz.
+
+    - gleiche Laenge, Score je Platz gleich (Toleranz)
+    - je Scorewert: liegt die ganze Gleichstandsgruppe (laut voll) im Top-k, muessen
+      dieselben Treffer (Position, Seite, Hash) drin sein -- in beliebiger Folge;
+      schneidet die Gruppe die k-Grenze, nur gleich viele Mitglieder DIESER Gruppe.
+    Gruppen der Groesse 1 heissen damit: exakt derselbe Treffer.
+    """
+    from collections import Counter
+    if len(ist) != len(soll):
+        return False, f"Laenge {len(ist)} statt {len(soll)}"
+    for i, (a, b) in enumerate(zip(ist, soll)):
+        if abs(a[3] - b[3]) >= TOL:
+            return False, f"Platz {i}: Score {a[3]} statt {b[3]}"
+    werte = []
+    for e in soll:
+        if not any(abs(e[3] - w) < TOL for w in werte):
+            werte.append(e[3])
+    for w in werte:
+        ist_g = Counter(tuple(e[:3]) for e in ist if abs(e[3] - w) < TOL)
+        soll_g = Counter(tuple(e[:3]) for e in soll if abs(e[3] - w) < TOL)
+        voll_g = Counter(tuple(e[:3]) for e in voll if abs(e[3] - w) < TOL)
+        if sum(voll_g.values()) == sum(soll_g.values()):
+            if ist_g != soll_g:
+                return False, f"Score {w}: {sorted(ist_g)} statt {sorted(soll_g)}"
+        elif ist_g - voll_g or sum(ist_g.values()) != sum(soll_g.values()):
+            return False, f"Score {w}: {sorted(ist_g)} nicht aus der Gruppe {sorted(voll_g)}"
+    return True, ""
 
 
 class RegressionsTest(unittest.TestCase):
@@ -120,33 +161,72 @@ class RegressionsTest(unittest.TestCase):
             rag.cmd_eval_spiele(["food-chain-magnate"])
         return puffer.getvalue()
 
-    def vergleiche_mit_soll(self, ist, soll, wo):
+    def vergleiche_topk(self, ist, wo):
+        soll = SOLL["topk"]
         self.assertEqual(sorted(ist), sorted(soll), f"{wo}: andere Faelle als in der Referenz")
         abweichend = []
         for key in soll:
-            a, b = ist[key], soll[key]
-            gleich = len(a) == len(b) and all(x[:3] == y[:3] and abs(x[3] - y[3]) < 1e-6 for x, y in zip(a, b))
+            gleich, grund = gleichstandsbewusst_gleich(ist[key], soll[key], soll[voller_schluessel(key)])
             if not gleich:
-                abweichend.append(key)
-        self.assertEqual(abweichend[:5], [], f"{wo}: {len(abweichend)} von {len(soll)} Faellen weichen von "
-                                             f"{ref.REFERENZ_COMMIT} ab, z.B. {abweichend[:1]}: "
-                                             f"ist {ist[abweichend[0]] if abweichend else ''} "
-                                             f"soll {soll[abweichend[0]] if abweichend else ''}")
+                abweichend.append((key, grund))
+        self.assertEqual(abweichend[:3], [], f"{wo}: {len(abweichend)} von {len(soll)} Faellen weichen von "
+                                             f"{ref.REFERENZ_COMMIT} ab")
+
+    def vergleiche_rerank(self, ist, wo):
+        # Hash-Attrappe: Gleichstaende nur zwischen identischen Duplikaten (siehe
+        # test_hash_gleichstaende_nur_duplikate) -> Seite/Hash/Score-Folge ist
+        # plattformunabhaengig; nur die Position zwischen Duplikaten nicht.
+        soll = SOLL["rerank"]
+        self.assertEqual(sorted(ist), sorted(soll))
+        for key in soll:
+            self.assertEqual([e[1:3] for e in ist[key]], [e[1:3] for e in soll[key]], f"{wo}: {key}")
+            for a, b in zip(ist[key], soll[key]):
+                self.assertLess(abs(a[3] - b[3]), TOL, f"{wo}: {key}")
 
 
 class TestGegenEd36f99(RegressionsTest):
     def test_alter_weg_gleich_ed36f99(self):
         ist = ref.berechne(self.alter_weg, self.eval_alt)
-        self.vergleiche_mit_soll(ist["topk"], SOLL["topk"], "alter Weg, Top-k")
-        self.vergleiche_mit_soll(ist["rerank"], SOLL["rerank"], "alter Weg, Reranker")
+        self.vergleiche_topk(ist["topk"], "alter Weg")
+        self.vergleiche_rerank(ist["rerank"], "alter Weg")
         self.assertEqual(ist["eval"], SOLL["eval"])
 
     def test_neuer_weg_gleich_ed36f99(self):
         self.migriere()
         ist = ref.berechne(self.neuer_weg, self.eval_neu)
-        self.vergleiche_mit_soll(ist["topk"], SOLL["topk"], "Index-Weg, Top-k")
-        self.vergleiche_mit_soll(ist["rerank"], SOLL["rerank"], "Index-Weg, Reranker")
+        self.vergleiche_topk(ist["topk"], "Index-Weg")
+        self.vergleiche_rerank(ist["rerank"], "Index-Weg")
         self.assertEqual(ist["eval"], SOLL["eval"])
+
+    def test_hash_gleichstaende_nur_duplikate(self):
+        # Voraussetzung fuer den exakten Reranker-/eval-Vergleich: bei der Hash-Attrappe
+        # haben alle Chunks gleichen Scores denselben Text auf derselben Seite.
+        for key, liste in SOLL["topk"].items():
+            if not key.startswith("fake-hash|") or "|k=alle|" not in key:
+                continue
+            for e in liste:
+                gruppe = {(x[1], x[2]) for x in liste if abs(x[3] - e[3]) < TOL}
+                self.assertEqual(len(gruppe), 1, f"{key}: verschiedene Chunks gleichen Scores {gruppe}")
+
+    def test_vergleich_ist_ein_detektor(self):
+        # Gegenprobe zum gleichstandsbewussten Vergleich: echte Abweichungen fallen auf.
+        key = next(k for k, v in SOLL["topk"].items() if "|k=4|" in k and len(v) == 4
+                   and len({round(e[3], 6) for e in v}) == 4)          # vier verschiedene Scores
+        soll, voll = SOLL["topk"][key], SOLL["topk"][voller_schluessel(key)]
+        self.assertTrue(gleichstandsbewusst_gleich(soll, soll, voll)[0])
+        self.assertFalse(gleichstandsbewusst_gleich(soll[::-1], soll, voll)[0])      # Reihenfolge
+        anders = [list(e) for e in soll]
+        anders[0][2] = "0000000000000000"
+        self.assertFalse(gleichstandsbewusst_gleich(anders, soll, voll)[0])          # anderer Treffer
+        # Gleichstand an der Grenze: Tausch innerhalb der Gruppe ok, fremder Chunk nicht
+        key = next(k for k, v in SOLL["topk"].items() if "|k=4|" in k and len(v) == 4 and
+                   sum(1 for e in SOLL["topk"][voller_schluessel(k)] if abs(e[3] - v[-1][3]) < TOL)
+                   > sum(1 for e in v if abs(e[3] - v[-1][3]) < TOL))
+        soll, voll = SOLL["topk"][key], SOLL["topk"][voller_schluessel(key)]
+        draussen = next(e for e in voll if abs(e[3] - soll[-1][3]) < TOL and e not in soll)
+        self.assertTrue(gleichstandsbewusst_gleich(soll[:-1] + [draussen], soll, voll)[0])
+        fremd = next(e for e in voll if abs(e[3] - soll[-1][3]) >= TOL and e not in soll)
+        self.assertFalse(gleichstandsbewusst_gleich(soll[:-1] + [fremd[:3] + [soll[-1][3]]], soll, voll)[0])
 
     def test_referenz_ist_vollstaendig(self):
         self.assertEqual(len(SOLL["topk"]), len(ref.EMBEDS) * len(RASTER) * len(ref.KS) * len(FRAGEN))
@@ -180,6 +260,66 @@ class TestGegenEd36f99(RegressionsTest):
                 a = rag.retrieve(frage, chunks, embs, k=4, spiel_id="food-chain-magnate", index=con)
                 b = rag.retrieve(frage, k=4, spiel_id="food-chain-magnate", index=con)
                 self.assertEqual([(h["chunk_id"], s) for h, s in a], [(h["chunk_id"], s) for h, s in b])
+
+
+class TestVergleiche(RegressionsTest):
+    """`rag.py vergleiche` im Aufbau von Drachenhort: Symlinks im Clone, data/ migriert."""
+
+    def setUp(self):
+        super().setUp()
+        lab = os.path.join(self.tmp.name, "rag-lab")
+        os.mkdir(lab)
+        for name in ("knowledge.jsonl", "golden_set.json"):
+            os.replace(os.path.join(self.basis, name), os.path.join(lab, name))
+            os.symlink(os.path.join(lab, name), os.path.join(self.basis, name))
+        self.lab = lab
+        self.migriere()
+
+    def lauf(self, *args):
+        puffer = io.StringIO()
+        with self.mit("fake-hash", 400, 150, "flavor,meta"), contextlib.redirect_stdout(puffer):
+            rag.aktualisiere_index(None, ausgabe=lambda *_: None)
+            rag.cmd_vergleiche(list(args))
+        return puffer.getvalue()
+
+    def test_mit_name_und_mit_id(self):
+        for angabe in ("Food Chain Magnate", "food-chain-magnate", "FCM"):
+            with self.subTest(angabe=angabe):
+                text = self.lauf(angabe)
+                self.assertIn(f"{len(GOLDEN['fragen'])}/{len(GOLDEN['fragen'])} Fragen mit identischer", text)
+                self.assertIn(os.path.join(self.lab, "knowledge.jsonl"), text)   # aufgeloester Symlink
+
+    def test_leere_quelle_bricht_laut_ab(self):
+        open(os.path.join(self.lab, "knowledge.jsonl"), "w").close()
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            self.lauf("Food Chain Magnate")
+        self.assertIn("Alter Weg ohne Chunks", str(ctx.exception))
+        self.assertIn("0 Eintraege", str(ctx.exception))
+
+    def test_nach_drop_types_leere_quelle_bricht_laut_ab(self):
+        rag.schreibe_jsonl(os.path.join(self.lab, "knowledge.jsonl"), [e for e in WISSEN if e.get("typ") == "meta"])
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            self.lauf("food-chain-magnate")
+        self.assertIn("nach DROP_TYPES=flavor,meta bleibt keiner", str(ctx.exception))
+
+    def test_kaputter_symlink(self):
+        os.remove(os.path.join(self.lab, "knowledge.jsonl"))
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            self.lauf("food-chain-magnate")
+        self.assertIn("Symlink kaputt", str(ctx.exception))
+
+    def test_ollama_liefert_keine_embeddings(self):
+        antwort = mock.Mock(**{"json.return_value": {"embeddings": []}})
+        with mock.patch("requests.post", return_value=antwort), self.assertRaises(RuntimeError) as ctx:
+            rag.embed(["a", "b"])
+        self.assertIn("fuer 2 Texte", str(ctx.exception))
+
+    def test_retrieve_ohne_embeddings_ist_kein_matmul_traceback(self):
+        chunks = [{"doc": "knowledge", "seite": 1, "text": "x"}]
+        for embs in (np.zeros((0,), dtype=np.float32), np.zeros((1, 0), dtype=np.float32), None):
+            with self.subTest(embs=None if embs is None else embs.shape), self.mit("fake-hash", 400, 150, ""):
+                with self.assertRaises(rag.KonfigFehler):
+                    rag.retrieve("Geld", chunks if embs is not None and len(embs) else [], embs, k=1)
 
 
 class TestMigration(RegressionsTest):

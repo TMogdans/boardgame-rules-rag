@@ -588,7 +588,13 @@ def load_chunks():
 def embed(texts):
     r = requests.post(f"{OLLAMA}/api/embed", json={"model": EMBED_MODEL, "input": texts}, timeout=300)
     r.raise_for_status()
-    return np.array(r.json()["embeddings"], dtype=np.float32)
+    embs = np.array(r.json()["embeddings"], dtype=np.float32)
+    # Liefert Ollama weniger (oder keine) Vektoren als Texte, liefe das sonst erst
+    # spaeter als unverstaendlicher matmul-Fehler auf.
+    if len(texts) and (embs.ndim != 2 or len(embs) != len(texts)):
+        raise RuntimeError(f"Ollama ({EMBED_MODEL}) lieferte Embeddings der Form {embs.shape} "
+                           f"fuer {len(texts)} Texte.")
+    return embs
 
 
 def l2norm(v):
@@ -959,6 +965,18 @@ def drop_fuer_index(env=None):
     return lies_drop_types(env)
 
 
+def rangfolge(sims):
+    """Positionen nach absteigendem Score; bei exaktem Gleichstand die niedrigere zuerst.
+
+    Die eine Stelle, an der beide Wege (Einzeldatei, Index) ranken. Frueher
+    np.argsort(-sims) -- quicksort, nicht stabil: bei Gleichstand (Duplikat-Chunks)
+    hing die Reihenfolge und an der top_k-Grenze die Menge von der Plattform ab
+    (gemessen: numpy 2.5.3 auf macOS/arm64 weicht ab n=17 in 200/200 Faellen von
+    stabil ab; Linux/x86_64 mit anderem SIMD-Sort lieferte andere Top-k als macOS).
+    """
+    return np.argsort(-sims, kind="stable")
+
+
 def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
     """Top-k (chunk, score) zur Frage.
 
@@ -979,10 +997,16 @@ def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
             raise KonfigFehler(f"retrieve(spiel_id={spiel_id!r}) mit Chunks von {sorted(fremd)}.")
     elif HYBRID:
         raise KonfigFehler("HYBRID=1 braucht den Index (spiel_id); der Einzeldatei-Weg hat kein BM25.")
+    if embs is None or getattr(embs, "ndim", 0) != 2 or len(embs) == 0 or len(embs) != len(chunks):
+        raise KonfigFehler(f"Keine durchsuchbaren Chunks: {len(chunks or [])} Chunks, Embeddings "
+                           f"{getattr(embs, 'shape', None)}. Quelle leer oder nach DROP_TYPES leer?")
     q = l2norm(embed([query]))[0]
+    if embs.shape[1] != q.shape[0]:
+        raise KonfigFehler(f"Embedding-Dimension passt nicht: Chunks {embs.shape[1]}, Frage {q.shape[0]} "
+                           f"({EMBED_MODEL}). Index mit anderem Modell gebaut?")
     sims = embs @ q
     if HYBRID:
-        vektor = [int(i) for i in np.argsort(-sims)[:CANDIDATES]]
+        vektor = [int(i) for i in rangfolge(sims)[:CANDIDATES]]
         fusion = rrf([vektor, bm25_rangfolge(con, query, chunks, CANDIDATES)])
         if not RERANK:
             return [(chunks[i], float(s)) for i, s in fusion[:k]]
@@ -992,12 +1016,12 @@ def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
         return [(chunks[i], float(s)) for i, s in ranked]
     if RERANK:
         # 1. Stufe: grob CANDIDATES per Embedding holen
-        cand = [int(i) for i in np.argsort(-sims)[:CANDIDATES]]
+        cand = [int(i) for i in rangfolge(sims)[:CANDIDATES]]
         # 2. Stufe: Cross-Encoder bewertet jedes Frage-Chunk-Paar einzeln
         scores = get_reranker().predict([[query, chunks[i]["text"]] for i in cand])
         ranked = sorted(zip(cand, scores), key=lambda x: -x[1])[:k]
         return [(chunks[i], float(s)) for i, s in ranked]
-    order = np.argsort(-sims)[:k]
+    order = rangfolge(sims)[:k]
     return [(chunks[i], float(sims[i])) for i in order]
 
 
@@ -1242,14 +1266,21 @@ def cmd_vergleiche(args):
         quelle = args[args.index("--quelle") + 1]
     drop = drop_fuer_index()
     gs = lade_golden_set(sid)
-    alt_chunks = baue_knowledge_chunks(lies_jsonl(quelle), drop)
+    if not os.path.exists(quelle):
+        raise KonfigFehler(f"Quelle des alten Wegs {quelle} fehlt (Symlink kaputt?). --quelle angeben.")
+    roh = lies_jsonl(quelle)
+    alt_chunks = baue_knowledge_chunks(roh, drop) if roh else []
+    if not alt_chunks:
+        raise KonfigFehler(f"Alter Weg ohne Chunks: {quelle} (-> {os.path.realpath(quelle)}) hat {len(roh)} "
+                           f"Eintraege, nach DROP_TYPES={','.join(sorted(drop)) or '-'} bleibt keiner.")
     alt_embs = l2norm(embed([c["text"] for c in alt_chunks]))
     aktualisiere_index([sid], ausgabe=lambda *_: None)
     con = oeffne_index()
     try:
         neu_chunks, neu_embs = lade_spiel(con, sid, drop)
         print(f"{_konfig_zeile('vergleich')}  hybrid={HYBRID}")
-        print(f"alt: {len(alt_chunks)} Chunks aus {quelle}   neu: {len(neu_chunks)} Chunks aus dem Index\n")
+        print(f"alt: {len(alt_chunks)} Chunks aus {quelle} (-> {os.path.realpath(quelle)})   "
+              f"neu: {len(neu_chunks)} Chunks aus dem Index\n")
         abweichend, max_diff = [], 0.0
         for f in gs["fragen"]:
             alt = retrieve(f["frage"], alt_chunks, alt_embs)

@@ -246,5 +246,54 @@ class TestHybrid(SucheTest):
         self.assertEqual([i for i, _ in rag.rrf([[7, 5], [5, 7]])], [7, 5])
 
 
+class TestGleichstandsregel(SucheTest):
+    """Definierte Regel: bei exakt gleichem Score die niedrigere Chunk-Position zuerst.
+
+    30 identische Chunks (Seiten 101..130): mehr als 16, weil numpy fuer bis zu 16
+    Elemente ohnehin stabil sortiert -- ein kleinerer Test saehe eine instabile
+    Sortierung nicht (gemessen: ab n=17 weicht der Default in 200/200 Faellen ab).
+    """
+    N = 30
+
+    def setUp(self):
+        super().setUp()
+        self.G = "gleich"
+        meta = rag.lege_spiel_an("Gleich")
+        self.roh = [c(self.G, "Gleich", i, 100 + i, "Geld Geld.") for i in range(1, self.N + 1)]
+        rag.schreibe_jsonl(rag.knowledge_pfad(self.G), self.roh)
+        self.assertEqual(meta["spiel_id"], self.G)
+        rag.aktualisiere_index([self.G], ausgabe=lambda *_: None)
+
+    def seiten(self, hits):
+        return [h["seite"] for h, _ in hits]
+
+    def test_rangfolge(self):
+        sims = np.array([0.5] * 20 + [0.9] + [0.5] * 20 + [0.9], dtype=np.float32)
+        self.assertEqual(list(rag.rangfolge(sims)[:5]), [20, 41, 0, 1, 2])
+
+    def test_alter_und_index_weg(self):
+        chunks = rag.baue_knowledge_chunks(self.roh, set())
+        embs = rag.l2norm(fake_embed([x["text"] for x in chunks]))
+        for k in (1, 5, 17, self.N):
+            with self.subTest(k=k):
+                soll = list(range(101, 101 + k))
+                self.assertEqual(self.seiten(rag.retrieve("Geld", chunks, embs, k=k)), soll)
+                self.assertEqual(self.seiten(rag.retrieve("Geld", k=k, spiel_id=self.G, index=self.con)), soll)
+
+    def test_reranker_kandidaten(self):
+        class Konstant:                      # alle Kandidaten gleich gut -> Kandidatenfolge zaehlt
+            @staticmethod
+            def predict(paare):
+                return np.zeros(len(paare))
+        with mock.patch.multiple(rag, RERANK=True, CANDIDATES=20, get_reranker=lambda: Konstant):
+            self.assertEqual(self.seiten(rag.retrieve("Geld", k=5, spiel_id=self.G, index=self.con)),
+                             [101, 102, 103, 104, 105])
+
+    def test_hybrid_vektorliste(self):
+        with mock.patch.multiple(rag, HYBRID=True, CANDIDATES=20):
+            self.assertEqual(self.seiten(rag.retrieve("Geld", k=5, spiel_id=self.G, index=self.con)),
+                             [101, 102, 103, 104, 105])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

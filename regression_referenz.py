@@ -5,6 +5,7 @@ Eingefrorene Soll-Ausgaben des Retrievals, erzeugt mit dem rag.py von ed36f99
 (dem Stand VOR dem Mehr-Spiele-Umbau).
 
     python regression_referenz.py --erzeuge    # braucht git, schreibt regression_referenz.json
+    python regression_referenz.py --erzeuge --ziel /tmp/ref.json [--gleichstand-umgekehrt]
 
 test_regression.py vergleicht den heutigen alten Weg UND den neuen Index-Weg
 gegen diese Datei. Vorher verglich der Test HEAD gegen HEAD: eine Aenderung an
@@ -13,6 +14,18 @@ K2 aus dem Review). Die Referenz haengt an keinem Code dieses Branches -- nur an
 den Daten und Attrappen hier, und die sind mit eingefroren.
 
 Zur Testzeit wird weder git noch ed36f99 gebraucht; nur diese Datei und die JSON.
+
+Gleichstaende: ed36f99 rankte mit np.argsort(-sims) (quicksort, nicht stabil). Bei
+exakt gleichem Score ist die Reihenfolge -- und an der k-Grenze die Auswahl --
+dort plattformabhaengig (Linux/x86_64 lieferte in 487 von 1008 Faellen andere
+Chunks gleichen Scores als macOS). test_regression vergleicht deshalb
+gleichstandsbewusst: Scores je Platz, ausserhalb von Gleichstandsgruppen exakt
+dieselben Treffer, in einer Gruppe, die die k-Grenze schneidet, nur die
+Zugehoerigkeit zur Gruppe. Reranker- und eval-Faelle laufen mit der Hash-
+Attrappe, bei der Gleichstaende nur zwischen identischen Duplikaten vorkommen --
+ihre Ausgabe ist damit plattformunabhaengig (test_regression prueft das).
+--gleichstand-umgekehrt erzeugt die Referenz mit einem ed36f99, dessen argsort
+Gleichstaende umgekehrt aufloest: eine zweite "Plattform" zum Gegenmessen.
 """
 import contextlib
 import hashlib
@@ -130,10 +143,10 @@ def berechne(suche, eval_lauf):
                 for frage in FRAGEN:
                     topk[schluessel(embed_name, size, overlap, drop, k, frage)] = \
                         signatur(finde(frage, k or len(chunks)), chunks)
-    chunks, finde = suche("fake-achsen", 400, 150, "flavor,meta", True)
+    chunks, finde = suche("fake-hash", 400, 150, "flavor,meta", True)
     for frage in FRAGEN:
         rerank[frage] = signatur(finde(frage, 4), chunks)
-    for embed_name in EMBEDS:
+    for embed_name in ("fake-hash",):
         for size, overlap, drop in (RASTER[1], RASTER[5], RASTER[6]):
             text = eval_lauf(embed_name, size, overlap, drop)
             evals[f"{embed_name}|{size}/{overlap}|{drop or '-'}"] = [
@@ -142,6 +155,17 @@ def berechne(suche, eval_lauf):
 
 
 # ---------- Erzeugen mit ed36f99 ----------
+class _NumpyGleichstandUmgekehrt:
+    """numpy, aber argsort loest Gleichstaende absteigend nach Position auf."""
+
+    def __getattr__(self, name):
+        return getattr(np, name)
+
+    @staticmethod
+    def argsort(a, *args, **kw):
+        return np.lexsort((-np.arange(len(a)), a))
+
+
 def _lade_ed36f99(ziel):
     quelle = subprocess.run(["git", "-C", BASE, "show", f"{REFERENZ_COMMIT}:rag.py"],
                             check=True, capture_output=True, text=True).stdout
@@ -154,10 +178,12 @@ def _lade_ed36f99(ziel):
     return modul
 
 
-def erzeuge():
+def erzeuge(ziel=JSON_PFAD, umgekehrt=False):
     tmp = tempfile.mkdtemp()
     try:
         alt = _lade_ed36f99(tmp)
+        if umgekehrt:
+            alt.np = _NumpyGleichstandUmgekehrt()
         with open(os.path.join(tmp, "knowledge.jsonl"), "w", encoding="utf-8") as f:
             for e in WISSEN:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")
@@ -193,10 +219,13 @@ def erzeuge():
             return puffer.getvalue()
 
         daten = berechne(suche, eval_lauf)
-        daten["_erzeugt_mit"] = (f"rag.py aus {REFERENZ_COMMIT}, numpy {np.__version__}, "
-                                 f"Python {sys.version.split()[0]} -- python regression_referenz.py --erzeuge")
+        import platform
+        daten["_erzeugt_mit"] = (f"rag.py aus {REFERENZ_COMMIT}, numpy {np.__version__}, Python "
+                                 f"{sys.version.split()[0]}, {platform.system()}/{platform.machine()}"
+                                 f"{', Gleichstand umgekehrt' if umgekehrt else ''}"
+                                 " -- python regression_referenz.py --erzeuge")
         # Eine Zeile je Fall: lesbare Diffs, falls die Referenz je neu erzeugt wird.
-        with open(JSON_PFAD, "w", encoding="utf-8") as f:
+        with open(ziel, "w", encoding="utf-8") as f:
             f.write("{\n")
             bloecke = sorted(daten)
             for bi, block in enumerate(bloecke):
@@ -211,7 +240,7 @@ def erzeuge():
                 f.write(",\n" if bi < len(bloecke) - 1 else "\n")
             f.write("}\n")
         print(f"{len(daten['topk'])} Top-k-Faelle, {len(daten['rerank'])} Reranker-Faelle, "
-              f"{len(daten['eval'])} eval-Laeufe -> {JSON_PFAD}")
+              f"{len(daten['eval'])} eval-Laeufe -> {ziel}")
     finally:
         shutil.rmtree(tmp)
 
@@ -219,4 +248,5 @@ def erzeuge():
 if __name__ == "__main__":
     if "--erzeuge" not in sys.argv:
         sys.exit(__doc__)
-    erzeuge()
+    ziel = sys.argv[sys.argv.index("--ziel") + 1] if "--ziel" in sys.argv else JSON_PFAD
+    erzeuge(ziel, "--gleichstand-umgekehrt" in sys.argv)

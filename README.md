@@ -198,6 +198,16 @@ und ueber den Index -- mit echten Embeddings, ohne LLM -- und endet mit Exit-Cod
 jeder Abweichung. Das ist der Test, den `test_regression.py` modellfrei nicht leisten kann:
 ob Ollama batch-unabhaengig einbettet (der Index bettet in Stuecken von `EMBED_BATCH`,
 Default 64, und inklusive `flavor`/`meta` ein, der alte Weg alles in einem Aufruf).
+Eine leere oder nach `DROP_TYPES` leere Quelle, ein kaputter Symlink oder zu wenige
+Embeddings von Ollama brechen mit Klartext ab (Pfad samt aufgeloestem Symlink und Zaehlern).
+
+**Gleichstand:** Beide Wege ranken in `rag.rangfolge` stabil -- bei exakt gleichem Score
+kommt die niedrigere Chunk-Position zuerst, auch fuer Reranker-Kandidaten und die
+Hybrid-Vektorliste. ed36f99 sortierte mit `np.argsort` (quicksort, nicht stabil); dort
+hing die Reihenfolge gleichauf liegender Chunks und an der top_k-Grenze die Auswahl von
+der Plattform ab (Linux/x86_64 und macOS/arm64 lieferten in 487 von 1008 Testfaellen
+andere, gleich bewertete Chunks). "Zahlengleich zu ed36f99" heisst deshalb: gleich bis auf
+die Reihenfolge innerhalb exakter Gleichstaende, die dort nicht definiert war.
 
 **Suche pro Spiel:** `retrieve(frage, spiel_id=...)` laedt nur die Zeilen dieses Spiels
 und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine Treffer
@@ -284,9 +294,11 @@ python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBR
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
 python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
-python test_regression.py    # alter UND neuer Weg == eingefrorene Ausgabe von ed36f99 (regression_referenz.json)
-# Referenz neu erzeugen (braucht git, nur bei gewollter Aenderung der Testdaten):
-# python regression_referenz.py --erzeuge
+python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
+                             # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
+# Referenz neu erzeugen (braucht git), oder eine plattformeigene gegenpruefen:
+# python regression_referenz.py --erzeuge [--ziel /tmp/ref.json] [--gleichstand-umgekehrt]
+# REGRESSION_REFERENZ=/tmp/ref.json python test_regression.py
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
