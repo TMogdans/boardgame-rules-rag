@@ -390,17 +390,28 @@ MEHRDEUTIG_ABSTAND = 0.05
 MIN_LAENGENVERHAELTNIS = 0.8
 
 
-def _treffer_wert(n, f, schwelle):
-    """difflib-Ratio fuer einen TREFFER; 0, wenn Laenge oder Schnelltest ausschliessen."""
+def _treffer_wert(n, f, schwelle, matcher=None):
+    """difflib-Ratio fuer einen TREFFER; 0, wenn Laenge oder Schnelltest ausschliessen.
+
+    matcher: {Schreibweise: SequenceMatcher} -- difflib bereitet die ZWEITE Sequenz
+    vor und cached das; bei vielen Wortfolgen gegen dieselben Namen der Hauptkosten-
+    punkt (nenne_spiele).
+    """
     if min(len(n), len(f)) < MIN_LAENGENVERHAELTNIS * max(len(n), len(f)):
         return 0.0
-    m = difflib.SequenceMatcher(None, n, f)
+    if matcher is None:
+        m = difflib.SequenceMatcher(None, n, f)
+    else:
+        m = matcher.get(f)
+        if m is None:
+            m = matcher[f] = difflib.SequenceMatcher(None, "", f)
+        m.set_seq1(n)
     if m.real_quick_ratio() < schwelle or m.quick_ratio() < schwelle:
         return 0.0
     return m.ratio()
 
 
-def ordne_spiel(anfrage, katalog, schwelle=0.8):
+def ordne_spiel(anfrage, katalog, schwelle=0.8, vorschlaege=True, _matcher=None):
     """("treffer", Name) oder ("unbekannt", [Vorschlaege]).
 
     Exakt nach Normalisierung, sonst unscharf (difflib) gegen jede Schreibweise --
@@ -421,16 +432,69 @@ def ordne_spiel(anfrage, katalog, schwelle=0.8):
         return "unbekannt", exakt
     bewertet = []
     for kanon, formen in katalog.items():
-        bewertet.append((max(_treffer_wert(n, f, schwelle) for f in formen), kanon))
+        bewertet.append((max(_treffer_wert(n, f, schwelle, _matcher) for f in formen), kanon))
     bewertet.sort(reverse=True)
     if bewertet and bewertet[0][0] >= schwelle:
         knapp = [k for r, k in bewertet if r >= schwelle and bewertet[0][0] - r < MEHRDEUTIG_ABSTAND]
         if len(knapp) > 1:
             return "unbekannt", knapp
         return "treffer", bewertet[0][1]
+    if not vorschlaege:          # nenne_spiele fragt hunderte Wortfolgen ab
+        return "unbekannt", []
     roh = sorted(((max(difflib.SequenceMatcher(None, n, f).ratio() for f in formen), kanon)
                   for kanon, formen in katalog.items()), reverse=True)
     return "unbekannt", [k for r, k in roh if r >= 0.5]
+
+
+def nenne_spiele(text, katalog, max_woerter=6):
+    """Welche Spiele nennt ein Nutzertext? -> sortierte Liste kanonischer Namen.
+
+    Fuer den Chat, in dem es kein Feld regelfrage.spiel gibt. Genannt ist ein Spiel,
+    wenn der ganze Text ein Spielname ist oder eine Wortfolge (1..max_woerter
+    Woerter) nach derselben strengen Zuordnung wie ordne_spiel trifft. Eine
+    Wortfolge, die in einer laengeren getroffenen liegt, zaehlt nicht ("Brass" in
+    "Brass Birmingham"). Mehrdeutige Wortfolgen bringen alle Kandidaten mit --
+    mehr als ein Name heisst fuer den Aufrufer: nachfragen.
+    """
+    matcher = {}
+    status, erg = ordne_spiel(text, katalog, vorschlaege=False, _matcher=matcher)
+    if status == "treffer":
+        return [erg]
+    woerter = re.findall(r"\w+", text or "")
+    # Nach Laenge vorsortiert: fuer eine Wortfolge kommen nur Schreibweisen in Frage,
+    # die die Laengenbedingung erfuellen koennen -- alle anderen liefern ohnehin 0.
+    # Zusammen mit den wiederverwendeten Matchern: gemessen bei 250 Spielen und
+    # 29 Woertern 101 ms -> siehe README.
+    nach_laenge = {}
+    for kanon, formen in katalog.items():
+        for f in formen:
+            nach_laenge.setdefault(len(f), []).append((kanon, f))
+
+    def teilkatalog(n):
+        tk = {}
+        for laenge in range(int(len(n) * MIN_LAENGENVERHAELTNIS), int(len(n) / MIN_LAENGENVERHAELTNIS) + 2):
+            for kanon, f in nach_laenge.get(laenge, ()):
+                tk.setdefault(kanon, []).append(f)
+        return tk
+
+    spannen = []
+    for i in range(len(woerter)):
+        for j in range(i + 1, min(len(woerter), i + max_woerter) + 1):
+            folge = " ".join(woerter[i:j])
+            status, erg = ordne_spiel(folge, teilkatalog(normalisiere(folge)), vorschlaege=False, _matcher=matcher)
+            if status == "treffer":
+                spannen.append((i, j, {erg}))
+            elif erg:                                    # exakt mehrdeutig (gemeinsamer Alias)
+                spannen.append((i, j, set(erg)))
+    offen = [s for s in spannen
+             if not any(o[0] <= s[0] and s[1] <= o[1] and (o[0], o[1]) != (s[0], s[1]) for o in spannen)]
+    return sorted(set().union(*(s[2] for s in offen))) if offen else []
+
+
+def nur_spielname(text, katalog):
+    """Kanonischer Name, wenn der ganze Text nur ein Spielname ist (Antwort auf die Rueckfrage)."""
+    status, erg = ordne_spiel(text, katalog, vorschlaege=False)
+    return erg if status == "treffer" else None
 
 
 def katalog_aus_index(spiele):

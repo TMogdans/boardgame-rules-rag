@@ -435,8 +435,14 @@ noch die Frage ein. Dann gilt:
   Unscharf trifft nur, was ungefaehr gleich lang ist (Laengenverhaeltnis >= 0,8): sonst
   wird ein kurzer Name zum Auffangbecken ("Fujian" traf "Fuji" genau auf der Schwelle).
   Dieselbe Zuordnung (`rag.ordne_spiel`) gilt fuer `--spiel` auf der Kommandozeile.
-- Ohne `regelfrage.spiel` (Chat): Valve `STANDARD_SPIEL`, sonst das einzige Spiel im
-  Index, sonst die Rueckfrage "Zu welchem Spiel ist die Frage?".
+- Ohne `regelfrage.spiel` (Chat) kommt das Spiel aus den Nutzer-Nachrichten, neueste
+  zuerst: die erste, die genau ein Spiel nennt (ganz oder als Wortfolge im Satz, mit
+  derselben strengen Zuordnung), setzt es -- ein Spielwechsel mitten im Chat gilt ab
+  dort. Antwortet man auf die Rueckfrage nur mit dem Spielnamen, wird die Frage davor
+  beantwortet (gesucht wird mit ihr, nicht mit dem Namen). Nennt keine Nachricht ein
+  Spiel: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index, sonst die Rueckfrage
+  "Zu welchem Spiel ist die Frage?"; mehrdeutig -> Rueckfrage mit Vorschlaegen. Kosten:
+  typisch 36 ms je durchsuchter Nachricht bei 250 Spielen (29 Woerter).
 - Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`
   seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
   passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.

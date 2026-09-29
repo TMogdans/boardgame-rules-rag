@@ -342,9 +342,47 @@ class Pipe:
         if not rf.get("sprache"):
             yield fundstellen(hits)
 
+    def _spiel_aus_verlauf(self, messages, v):
+        """(spiel_id, Nachrichten bis zur eigentlichen Frage, Meldung) fuer den Chat.
+
+        Im Chat gibt es kein regelfrage.spiel -- ohne diesen Weg waere die
+        Rueckfrage "Zu welchem Spiel?" nie beantwortbar. Das Spiel kommt aus den
+        Nutzer-Nachrichten, neueste zuerst: die erste, die genau ein Spiel nennt,
+        setzt es (Spielwechsel mitten im Chat inklusive). Ist die letzte Nachricht
+        nur ein Spielname -- die Antwort auf die Rueckfrage --, gilt die Frage
+        davor als die Frage; gesucht wird mit ihr, nicht mit dem Namen.
+        """
+        with self._lock:
+            rag = self._lade_rag(v)
+            spiele, katalog, ids = self._lade_katalog(rag, v)
+        nutzer = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+        if not nutzer or not spiele:
+            spiel_id, meldung = self._waehle_spiel(None, v)
+            return spiel_id, messages, meldung
+        texte = {i: text_von(messages[i].get("content")) for i in nutzer}
+        frage_idx = nutzer[-1]
+        name = rag.nur_spielname(texte[frage_idx], katalog)
+        if name is not None:
+            davor = [i for i in nutzer[:-1] if rag.nur_spielname(texte[i], katalog) is None]
+            if not davor:
+                return None, messages, f"Was moechtest du zu „{name}“ wissen?"
+            return ids[name], messages[:davor[-1] + 1], None
+        for i in reversed(nutzer):
+            genannt = rag.nenne_spiele(texte[i], katalog)
+            if len(genannt) == 1:
+                return ids[genannt[0]], messages[:frage_idx + 1], None
+            if genannt:
+                return None, messages, (f"Zu welchem Spiel ist die Frage? Meintest du "
+                                        f"{' oder '.join(genannt[:3])}?")
+        spiel_id, meldung = self._waehle_spiel(None, v)
+        return spiel_id, messages[:frage_idx + 1], meldung
+
     async def _antworte_index(self, messages, rf):
         v = self.valves
-        spiel_id, meldung = await asyncio.to_thread(self._waehle_spiel, rf.get("spiel"), v)
+        if rf.get("spiel") is not None:
+            spiel_id, meldung = await asyncio.to_thread(self._waehle_spiel, rf["spiel"], v)
+        else:
+            spiel_id, messages, meldung = await asyncio.to_thread(self._spiel_aus_verlauf, messages, v)
         if meldung:
             yield meldung
             return

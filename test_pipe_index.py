@@ -272,6 +272,75 @@ class TestAktualitaet(PipeIndexBasis):
         self.assertIn("Fehler in der RAG-Pipe", text)
 
 
+class TestChatVerlauf(PipeIndexBasis):
+    """Chat ohne regelfrage.spiel: das Spiel kommt aus den Nutzer-Nachrichten."""
+
+    def chat(self, *wechsel, **rf):
+        """wechsel: abwechselnd Nutzer-/Assistent-Texte, der letzte ist die neue Nutzernachricht."""
+        rollen = ("user", "assistant")
+        msgs = [{"role": rollen[i % 2], "content": t} for i, t in enumerate(wechsel)]
+        body = {"messages": msgs}
+        if rf:
+            body["regelfrage"] = rf
+        return "".join(sammle(self.pipe.pipe(body)))
+
+    def frage_embeds(self):
+        return [x.kwargs["json"]["input"] for x in self.embed_aufrufe()]
+
+    def test_frage_rueckfrage_name_antwort_auf_die_frage(self):
+        rueckfrage = self.chat("Wie verdiene ich Geld?")
+        self.assertIn("Zu welchem Spiel ist die Frage?", rueckfrage)
+        self.assertEqual(self.llm_bekam, [])
+        text = self.chat("Wie verdiene ich Geld?", rueckfrage, "Brass")
+        self.assertIn("S. 41 ", text)
+        # gesucht wurde mit der eigentlichen Frage, nicht mit dem Namen
+        self.assertEqual(self.frage_embeds(), [["Wie verdiene ich Geld?"]])
+        n = self.llm_bekam[-1]["messages"]
+        self.assertTrue(n[-1]["content"].endswith("Frage: Wie verdiene ich Geld?"))
+        self.assertEqual(len(n), 2)                     # Rueckfrage-Runde geht nicht in den Verlauf
+        # Hoerfehler in der Antwort auf die Rueckfrage
+        text = self.chat("Wie verdiene ich Geld?", rueckfrage, "Food Chain Magnet")
+        self.assertIn("S. 11 ", text)
+
+    def test_spielname_in_der_frage(self):
+        self.assertIn("S. 11 ", self.chat("Wie verdiene ich Geld in Food Chain Magnate?"))
+        self.assertIn("S. 41 ", self.chat("Wie viel Geld gibt es bei Brass Birmingham?"))
+        self.assertIn("S. 11 ", self.chat("Geld bei FCM?"))
+        self.assertEqual(self.frage_embeds()[0], ["Wie verdiene ich Geld in Food Chain Magnate?"])
+
+    def test_spielwechsel_im_verlauf(self):
+        a1 = "Geld gibt es in Phase 5."
+        self.assertIn("S. 11 ", self.chat("Wie verdiene ich Geld bei Food Chain Magnate?"))
+        self.assertIn("S. 41 ", self.chat("Wie verdiene ich Geld bei Food Chain Magnate?", a1, "Und bei Brass?"))
+        # die neueste Nennung gilt weiter, auch wenn die Folgefrage kein Spiel nennt
+        self.assertIn("S. 41 ", self.chat("Wie verdiene ich Geld bei Food Chain Magnate?", a1,
+                                          "Und bei Brass?", "Bei Brass so.", "Und wieviel Geld genau?"))
+        self.assertIn("S. 11 ", self.chat("Geld bei Brass?", "x", "Und bei Food Chain Magnate?", "y", "Und Geld?"))
+
+    def test_mehrdeutig_fragt_nach(self):
+        self.lege_an("Brass: Lancashire", [c("brass-lancashire", "Brass: Lancashire", 1, 7, "Geld.")], ["Brass"])
+        self.baue()
+        text = self.chat("Wie viel Geld bei Brass?")
+        self.assertIn("Meintest du Brass: Birmingham oder Brass: Lancashire?", text)
+        self.assertEqual(self.llm_bekam, [])
+        self.assertIn("S. 7 ", self.chat("Wie viel Geld bei Brass Lancashire?"))
+
+    def test_nur_ein_name_ohne_frage(self):
+        text = self.chat("Brass")
+        self.assertIn("Was moechtest du zu „Brass: Birmingham“ wissen?", text)
+        self.assertEqual(self.llm_bekam, [])
+
+    def test_regelfrage_feld_hat_vorrang(self):
+        self.assertIn("S. 41 ", self.chat("Wie verdiene ich Geld bei Food Chain Magnate?", spiel="Brass"))
+
+    def test_kurzer_name_im_satz_kein_auffangbecken(self):
+        self.lege_an("Fuji", [c("fuji", "Fuji", 1, 3, "Geld am Vulkan.")])
+        self.baue()
+        text = self.chat("Wie spielt man Fujian?")
+        self.assertIn("Zu welchem Spiel ist die Frage?", text)
+        self.assertIn("S. 3 ", self.chat("Wie spielt man Fuji?"))
+
+
 class TestKatalog(unittest.TestCase):
     def test_gleicher_name_zweimal_ist_fehler(self):
         with self.assertRaises(ValueError):
