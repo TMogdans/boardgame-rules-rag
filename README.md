@@ -181,6 +181,24 @@ CHUNK_SIZE=400 python rag.py index --alle            # alle Spiele unter data/, 
 CHUNK_SIZE=400 python rag.py index brass-birmingham  # nur dieses Spiel
 ```
 
+**Umstieg von der Einzeldatei** (einmalig, die alte Datei bleibt liegen und der alte Weg
+funktioniert weiter):
+
+```bash
+python rag.py migriere --spiel "Food Chain Magnate" --aliase "Food Chain,FCM" --sprache de \
+    --pdf FCM_Rules_DE_v3.pdf            # knowledge.jsonl + golden_set.json -> data/food-chain-magnate/
+CHUNK_SIZE=400 python rag.py index food-chain-magnate
+SOURCE=knowledge DROP_TYPES=flavor,meta CHUNK_SIZE=400 python rag.py vergleiche food-chain-magnate
+```
+
+`migriere` uebernimmt jeden Eintrag unveraendert und in derselben Reihenfolge, ergaenzt nur
+`spiel`/`spiel_id` und ueberschreibt nie eine abweichende Datei im Spielverzeichnis.
+`vergleiche` rechnet fuer jede Frage des Golden Sets die Top-k ueber den alten In-Memory-Weg
+und ueber den Index -- mit echten Embeddings, ohne LLM -- und endet mit Exit-Code 1 bei
+jeder Abweichung. Das ist der Test, den `test_regression.py` modellfrei nicht leisten kann:
+ob Ollama batch-unabhaengig einbettet (der Index bettet in Stuecken von `EMBED_BATCH`,
+Default 64, und inklusive `flavor`/`meta` ein, der alte Weg alles in einem Aufruf).
+
 **Suche pro Spiel:** `retrieve(frage, spiel_id=...)` laedt nur die Zeilen dieses Spiels
 und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine Treffer
 verdraengen. `python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"`
@@ -253,6 +271,7 @@ python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nu
 python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
+python test_regression.py    # alter Weg == neuer Weg (gleiche Top-k inkl. Gleichstaende), Migration
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)

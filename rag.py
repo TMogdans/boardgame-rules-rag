@@ -13,6 +13,9 @@ Nutzung:
     python rag.py eval                            # Golden Set durchlaufen (Einzeldatei-Weg)
     python rag.py eval food-chain-magnate         # Golden Set eines Spiels gegen den Index
     python rag.py eval --alle                     # alle Spiele mit golden_set.json
+    python rag.py index --alle                    # persistenten Index auf Stand bringen
+    python rag.py migriere --spiel "Food Chain Magnate" --aliase "Food Chain,FCM"
+    python rag.py vergleiche food-chain-magnate   # alter gegen neuen Weg, echte Embeddings, ohne LLM
     RERANK=1 CHUNK_SIZE=400 python rag.py eval    # mit Reranker + kleineren Chunks
 
 Mehrere Spiele liegen je in einem eigenen Verzeichnis data/<spiel_id>/ (knowledge.jsonl,
@@ -907,6 +910,129 @@ def formatiere_zusammenfassung(z):
     ]
 
 
+# ---------- Migration: alte Einzeldatei -> data/<spiel_id>/ ----------
+def _schreibe_oder_pruefe(pfad, inhalt):
+    """Neu schreiben oder -- falls schon da -- nur bestaetigen, dass es dasselbe ist.
+
+    Nie ueberschreiben: eine abweichende Datei im Spielverzeichnis ist ein
+    neuerer Stand (z.B. nach classify.py) und kein Migrationsrest.
+    """
+    if os.path.exists(pfad):
+        with open(pfad, encoding="utf-8") as f:
+            if f.read() == inhalt:
+                return "unveraendert"
+        raise KonfigFehler(f"{pfad} existiert schon mit anderem Inhalt -- nicht ueberschrieben. "
+                           "Zum erneuten Migrieren die Datei vorher selbst entfernen.")
+    with open(pfad, "w", encoding="utf-8") as f:
+        f.write(inhalt)
+    return "geschrieben"
+
+
+def migriere(quelle, name, spiel_id=None, sprache="de", aliase=None, quelle_pdf=None,
+             golden=None, data_dir=None):
+    """Einzeldatei knowledge.jsonl (+ golden_set.json) in data/<spiel_id>/ ueberfuehren.
+
+    Kopiert, verschiebt nicht: die alte Datei bleibt liegen, der alte Weg (und eine
+    Pipe, die sie noch gemountet hat) funktioniert weiter. Inhalt und Reihenfolge
+    jedes Eintrags bleiben, dazu kommen nur 'spiel' und 'spiel_id' -- deshalb
+    liefert der Index danach dieselben Chunks in derselben Folge.
+    """
+    roh = lies_jsonl(quelle)
+    if not roh:
+        raise KonfigFehler(f"{quelle} ist leer.")
+    for c in roh:
+        chunk_seite(c)   # ohne 'seite' keine zitierfaehige Fundstelle -> erst neu einlesen
+    spiel_id = pruefe_spiel_id(spiel_id or spiel_slug(name))
+    fremd = sorted({c["spiel_id"] for c in roh if c.get("spiel_id") not in (None, spiel_id)})
+    if fremd:
+        raise KonfigFehler(f"{quelle} enthaelt Chunks anderer Spiele: {fremd}.")
+    meta = lege_spiel_an(name, spiel_id, sprache, aliase, quelle_pdf, data_dir)
+    felder = spiel_felder(meta)
+    zeilen = "".join(json.dumps({**c, **felder}, ensure_ascii=False) + "\n" for c in roh)
+    ergebnis = {"knowledge.jsonl": _schreibe_oder_pruefe(knowledge_pfad(spiel_id, data_dir), zeilen)}
+    if golden:
+        with open(golden, encoding="utf-8") as f:
+            gs = json.load(f)
+        if gs.get("spiel_id") not in (None, spiel_id):
+            raise KonfigFehler(f"{golden} gehoert zu {gs['spiel_id']!r}, nicht zu {spiel_id!r}.")
+        gs = {"spiel_id": spiel_id, **{k: v for k, v in gs.items() if k != "spiel_id"}}
+        ergebnis["golden_set.json"] = _schreibe_oder_pruefe(
+            os.path.join(spiel_verzeichnis(spiel_id, data_dir), "golden_set.json"),
+            json.dumps(gs, ensure_ascii=False, indent=2) + "\n")
+    return spiel_id, len(roh), ergebnis
+
+
+def cmd_migriere(args):
+    """python rag.py migriere --spiel NAME [--spiel-id ID] [--sprache de] [--aliase "a,b"]
+                             [--quelle knowledge.jsonl] [--golden golden_set.json] [--pdf heft.pdf]"""
+    basis = os.path.dirname(os.path.abspath(__file__))
+    rest, opt = spiel_argumente(args)
+    extra = {"--quelle": os.path.join(basis, "knowledge.jsonl"), "--pdf": None,
+             "--golden": os.path.join(basis, "golden_set.json")}
+    i = 0
+    while i < len(rest):
+        if rest[i] in extra and i + 1 < len(rest):
+            extra[rest[i]] = rest[i + 1]
+            i += 2
+        else:
+            raise KonfigFehler(f"Unbekanntes Argument {rest[i]!r}. {cmd_migriere.__doc__}")
+    if not opt or not opt.get("name"):
+        raise KonfigFehler(f"--spiel NAME fehlt. {cmd_migriere.__doc__}")
+    golden = extra["--golden"] if os.path.exists(extra["--golden"]) else None
+    sid, n, erg = migriere(extra["--quelle"], opt["name"], opt.get("spiel_id"), opt.get("sprache") or "de",
+                           opt.get("aliase"), extra["--pdf"], golden)
+    print(f"{n} Eintraege aus {extra['--quelle']} -> data/{sid}/  ({erg})")
+    if golden is None:
+        print(f"Kein Golden Set unter {extra['--golden']} -- data/{sid}/golden_set.json von Hand anlegen.")
+    print(f"Die alte Datei bleibt liegen. Weiter mit:\n  python rag.py index {sid}\n"
+          f"  python rag.py vergleiche {sid}     # alter gegen neuen Weg, ohne LLM")
+
+
+def cmd_vergleiche(args):
+    """python rag.py vergleiche <spiel_id> [--quelle knowledge.jsonl]
+
+    Regressionspruefung mit ECHTEN Embeddings, ohne LLM: fuer jede Frage des
+    Golden Sets Top-k ueber den alten In-Memory-Weg (Einzeldatei) und ueber den
+    Index. Misst mit, ob Ollama batch-unabhaengig einbettet -- der Index bettet in
+    Stuecken von EMBED_BATCH und inklusive gefilterter Typen ein, der alte Weg in
+    einem Aufruf ohne sie. Exit-Code 1 bei jeder Abweichung in der Rangfolge.
+    """
+    if not args:
+        raise KonfigFehler(cmd_vergleiche.__doc__)
+    sid = pruefe_spiel_id(args[0])
+    quelle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge.jsonl")
+    if "--quelle" in args[1:-1]:
+        quelle = args[args.index("--quelle") + 1]
+    drop = drop_fuer_index()
+    gs = lade_golden_set(sid)
+    alt_chunks = baue_knowledge_chunks(lies_jsonl(quelle), drop)
+    alt_embs = l2norm(embed([c["text"] for c in alt_chunks]))
+    aktualisiere_index([sid], ausgabe=lambda *_: None)
+    con = oeffne_index()
+    try:
+        neu_chunks, neu_embs = lade_spiel(con, sid, drop)
+        print(f"{_konfig_zeile('vergleich')}  hybrid={HYBRID}")
+        print(f"alt: {len(alt_chunks)} Chunks aus {quelle}   neu: {len(neu_chunks)} Chunks aus dem Index\n")
+        abweichend, max_diff = [], 0.0
+        for f in gs["fragen"]:
+            alt = retrieve(f["frage"], alt_chunks, alt_embs)
+            neu = retrieve(f["frage"], neu_chunks, neu_embs, spiel_id=sid, index=con)
+            gleich = [(h["seite"], h["text"]) for h, _ in alt] == [(h["seite"], h["text"]) for h, _ in neu]
+            diff = max((abs(a - b) for (_, a), (_, b) in zip(alt, neu)), default=0.0)
+            max_diff = max(max_diff, diff)
+            if not gleich:
+                abweichend.append(f["id"])
+            print(f"[{f['id']}] {'gleich    ' if gleich else 'ABWEICHEND'} max|dScore|={diff:.2e}  "
+                  f"alt={[h['seite'] for h, _ in alt]} neu={[h['seite'] for h, _ in neu]}")
+    finally:
+        con.close()
+    print(f"\n{len(gs['fragen']) - len(abweichend)}/{len(gs['fragen'])} Fragen mit identischer Top-{TOP_K}-Folge, "
+          f"max|dScore| ueber alle {max_diff:.2e}")
+    if abweichend:
+        print(f"ABWEICHEND: Fragen {abweichend}")
+        sys.exit(1)
+
+
 # ---------- Modi ----------
 def cmd_index(args):
     """python rag.py index [spiel_id ...|--alle] -- nur Geaendertes wird neu eingebettet."""
@@ -1049,6 +1175,10 @@ if __name__ == "__main__":
             cmd_index(sys.argv[2:])
         elif mode == "eval" and len(sys.argv) > 2:
             cmd_eval_spiele(sys.argv[2:])
+        elif mode == "migriere":
+            cmd_migriere(sys.argv[2:])
+        elif mode == "vergleiche":
+            cmd_vergleiche(sys.argv[2:])
         else:
             cmd_eval()
     except KonfigFehler as e:

@@ -19,7 +19,7 @@ import sys
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
-         "test_pipe_index.py")
+         "test_pipe_index.py", "test_regression.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -303,6 +303,23 @@ MUTATIONEN = [
      "openwebui_pipe.py", "        if self.valves.INDEX_PATH:", "        if False:"),
     ("P38 Spiel-Cache waechst unbegrenzt",
      "openwebui_pipe.py", "        while len(self._spiel_cache) > v.CACHE_SPIELE:", "        while False:"),
+
+    # ---- Regression alter -> neuer Weg (test_regression.py) ----
+    ("R1 Index liefert Chunks in umgekehrter Folge (Gleichstaende kippen, wie bei sqlite-vec)",
+     "rag.py", '"WHERE spiel_id=? AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()',
+     '"WHERE spiel_id=? AND konfig=? ORDER BY pos DESC", (spiel_id, konfig)).fetchall()'),
+    ("R2 Vektoren als float16 gespeichert",
+     "rag.py", "(spiel_id, konfig, pos, json.dumps(seite), typ, text, e.tobytes())",
+     "(spiel_id, konfig, pos, json.dumps(seite), typ, text, e.astype('<f2').astype('<f4').tobytes())"),
+    ("R3 Migration verliert das typ-Feld",
+     "rag.py", "    zeilen = \"\".join(json.dumps({**c, **felder}, ensure_ascii=False)",
+     "    zeilen = \"\".join(json.dumps({**{k: v for k, v in c.items() if k != 'typ'}, **felder}, ensure_ascii=False)"),
+    ("R4 Migration sortiert nach Seite",
+     "rag.py", '+ "\\n" for c in roh)', '+ "\\n" for c in sorted(roh, key=lambda c: c["seite"]))'),
+    ("R5 Index zerteilt anders als der alte Weg",
+     "rag.py", '        for stueck in zerteile(c["text"], size, overlap):', '        for stueck in zerteile(c["text"].strip(), size, overlap):'),
+    ("R6 Migration ueberschreibt eine abweichende Datei",
+     "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]
 
 
