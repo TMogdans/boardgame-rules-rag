@@ -152,6 +152,71 @@ class TestJudgeKey(unittest.TestCase):
         self.assertIn("KOEDER-KEY", p.stdout)
 
 
+J1 = ("def lies_anthropic_key(pfad=None):\n    pfad = pfad or ANTHROPIC_KEY_DATEI",
+      "def lies_anthropic_key(pfad=ANTHROPIC_KEY_DATEI):\n    pfad = pfad")
+# Zaehlt jeden Dateizugriff (Audit-Hook "open") unter dem "echten" HOME des Prozesses.
+AUDIT = ("import os, sys\n"
+         "ECHT = os.path.realpath(os.environ['HOME'])\n"
+         "zugriffe = []\n"
+         "def hook(ereignis, args):\n"
+         "    if ereignis == 'open' and isinstance(args[0], str) and os.path.realpath(args[0]).startswith(ECHT + os.sep):\n"
+         "        zugriffe.append(args[0])\n"
+         "sys.addaudithook(hook)\n")
+
+
+class TestJudgeKeyUnterMutation(Kopie):
+    """Runde 7 SOLLTE-1: testumgebung und Treiber lenken HOME um -- selbst unter der
+    Kritiker-Mutation J1 (Key-Pfad beim Import als Default-Argument gebunden) liest kein
+    Test den echten Key. Beleg per Audit-Hook (Zugriffszaehler) und Kanarien-Key."""
+
+    def echtes_home(self):
+        home = os.path.join(self.tmp, "echtes-home")
+        os.makedirs(os.path.join(home, ".config", "anthropic"))
+        with open(os.path.join(home, ".config", "anthropic", "api_key"), "w") as f:
+            f.write("KANARIE-ECHTER-KEY")
+        return home
+
+    def skript(self, mit_testumgebung):
+        return (AUDIT + ("import testumgebung\n" if mit_testumgebung else "")
+                + "import judge\n"
+                  "try:\n    print('KEY', judge.lies_anthropic_key())\n"
+                  "except judge.ModusNichtVerfuegbar:\n    print('NICHT-VERFUEGBAR')\n"
+                  "print('ZUGRIFFE', len(zugriffe))\n")
+
+    def test_j1_liest_keinen_echten_key(self):
+        home = self.echtes_home()
+        ersetze(os.path.join(self.repo, "judge.py"), *J1)
+        p = self.lauf("-c", self.skript(True), env={"HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("KANARIE", p.stdout)
+        self.assertIn("NICHT-VERFUEGBAR", p.stdout)
+        self.assertIn("ZUGRIFFE 0\n", p.stdout)
+        # Gegenprobe: ohne testumgebung liest die J1-Mutante den Kanarien-Key -- der Zaehler sieht es
+        p = self.lauf("-c", self.skript(False), env={"HOME": home})
+        self.assertIn("KEY KANARIE-ECHTER-KEY", p.stdout)
+        self.assertNotIn("ZUGRIFFE 0\n", p.stdout)
+
+    def test_treiber_lenkt_home_um(self):
+        # Die Testdateien, die der Mutationstreiber startet, sehen nie den echten HOME --
+        # auch eine Testdatei ohne testumgebung nicht.
+        home = self.echtes_home()
+        lauf = os.path.join(self.tmp, "lauf")
+        os.makedirs(lauf)
+        with open(os.path.join(lauf, "test_home.py"), "w") as f:
+            f.write("import judge_frei\n")
+        with open(os.path.join(lauf, "judge_frei.py"), "w") as f:
+            f.write("import os, sys\n"
+                    "pfad = os.path.expanduser('~/.config/anthropic/api_key')\n"
+                    "x = os.path.join(os.environ.get('XDG_CONFIG_HOME', ''), 'anthropic', 'api_key')\n"
+                    "sys.exit(1 if any(os.path.exists(q) for q in (pfad, x)) else 0)\n")
+        import test_mutationen
+        with mock.patch.dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config")):
+            self.assertEqual(test_mutationen.rote_tests(lauf, ["test_home.py"]), [])
+            # Gegenprobe: mit dem echten HOME wird die Testdatei rot
+            p = subprocess.run([sys.executable, "test_home.py"], cwd=lauf, capture_output=True)
+            self.assertEqual(p.returncode, 1)
+
+
 class TestSchichtSymlinkschutz(Kopie):
     """(3) allein: testumgebung aus, Waechter als Symlink nach draussen."""
 

@@ -446,6 +446,9 @@ KNOWLEDGE_JSONL=~/rag-lab/knowledge.jsonl GOLDEN_SET=~/rag-lab/golden_set.json \
 > Chunks. Seitdem schreibt kein Skript mehr durch einen Symlink (Abbruch mit Hinweis),
 > alle Tests biegen ihre Pfade ueber `testumgebung.py` in ein Temp-Verzeichnis, und
 > `test_mutationen.py` mutiert nur in einer Temp-Kopie. `test_schutz.py` prueft das.
+> Beide setzen ausserdem `HOME` und `XDG_CONFIG_HOME` auf ein Temp-Verzeichnis: kein
+> Test kann den echten Anthropic-Key (`~/.config/anthropic/api_key`) lesen, auch nicht
+> unter einer Mutation, die den Pfad schon beim Import festhaelt.
 
 **Viele Spiele (Index-Weg):** Valve `INDEX_PATH` setzen (z.B. `/rag/data/index.sqlite`)
 und statt der Einzeldatei das ganze `data/` read-only mounten:
@@ -475,21 +478,35 @@ noch die Frage ein. Dann gilt:
     dahinter (`Spiel: Azul: Wer beginnt?`, `Spiel: Azul:wer beginnt?`). `Spiel X` ohne
     Doppelpunkt ist keine Wahl ("Spiel solo", "Spiel nochmal"). X ist ein Name oder Alias,
     exakt bis auf Gross/Klein, ae/ä, ss/ß, Satzzeichen. Ohne Frage: "Ok, ab jetzt X.".
+    "bitte"/"danke" hinter dem Namen stoeren nicht, auch vor dem Doppelpunkt
+    (`Spiel: FCM bitte: Wer beginnt?`).
   - Gibt es X nicht ("Spiel: Azull"), antwortet die Pipe "Kein Regelheft zu „X“ im
     Index." mit Vorschlaegen und dem Hinweis auf `Spiel: …` -- nie still im alten Spiel;
     das bisherige Spiel bleibt gewaehlt, die Frage bleibt unbeantwortet.
-  - Oder nur der Name (ggf. "bitte"/"danke") direkt als Antwort auf unsere Rueckfrage.
-    Nach der Rueckfrage beantwortet jede Wahl ohne eigene Frage die urspruengliche Frage,
-    auch ueber mehrere Rueckfrage-Runden; Namens-/Wahl-Nachrichten gelten nie als Frage.
-    Als Rueckfrage zaehlt nur eine Assistant-Nachricht, die mit
-    "Zu welchem Spiel ist die Frage?" beginnt.
+  - Die Nachricht direkt nach unserer Rueckfrage ("Zu welchem Spiel ist die Frage?" oder
+    "Kein Regelheft zu „…") ist ein Wahl-Versuch:
+    (a) dort gelten zusaetzlich `X`, `fuer X`, `bei X`, `Spiel X`, `Das Spiel heisst X`,
+    jeweils ggf. mit "bitte"/"danke", X exakt; (b) ein ungenauer Name mit Vorschlag
+    ("Fod Chain", "Azull", "Wechsle zu Azul", "Food Chain") ergibt "Kein Regelheft zu „…“
+    im Index. Meintest du X? …" -- gewaehlt wird dabei nie, die Frage bleibt gemerkt;
+    (c) ohne Vorschlag ist die Nachricht eine neue Frage (auch eine Frage mit "?" oder
+    mehr als 3 Woertern neben einem Namen: "Wer beginnt bei Azul?").
+    (d) Beantwortet wird immer die letzte Nutzer-Nachricht vor der ersten Rueckfrage der
+    Kette, ueber beliebig viele Runden -- nie eine Antwort auf eine Rueckfrage
+    ("Wann verdient man Geld?" -> Rueckfrage -> "Fod Chain" -> Vorschlag -> "FCM":
+    gesucht wird mit "Wann verdient man Geld?"). Nach (c) beginnt eine neue Kette; eine
+    Wahl mit eigener Frage (`Spiel: X: <Frage>`) beantwortet ihre Frage.
+    Als Rueckfrage zaehlt nur eine Assistant-Nachricht, die mit einem der beiden Texte
+    beginnt.
   - Die Wahl gilt fuer den ganzen Chat bis zur naechsten, ohne Fenster. Ein Name in einer
     Frage ("Und bei Azul?") oder eine Namensnachricht ohne Rueckfrage wechselt nicht --
     die Fusszeile zeigt, welches Heft geantwortet hat.
   - Ohne Wahl: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index, sonst die
     Rueckfrage "Zu welchem Spiel ist die Frage? Schreib zum Beispiel „Spiel: …“".
-  - Laufzeit: gemessen bei 250 Spielen x 500 Nutzer-Nachrichten typisch 0,15 ms
-    (max 0,16), wenn jede Nachricht eine Wahl mit Frage ist typisch 6,0 ms (max 6,1).
+  - Laufzeit: gemessen bei 250 Spielen x 500 Nutzer-Nachrichten typisch 0,1 ms
+    (max 0,1), wenn jede Nachricht eine Wahl mit Frage ist typisch 3,5 ms (max 3,6),
+    wenn jede Nachricht eine Antwort auf eine Rueckfrage ist (Vorschlagssuche) typisch
+    133 ms (max 137).
 - Die Fusszeile nennt auf dem Index-Weg das Spiel:
   `Quelle: Food Chain Magnate, Seite 11 -- Abgerufen: S. 11 (0.912)`. Nicht im Sprachmodus;
   der alte Weg (ohne `INDEX_PATH`) behaelt seine Fusszeile und ist fuer `regelfrage.spiel`
@@ -497,7 +514,9 @@ noch die Frage ein. Dann gilt:
   (`test_pipe_alt.py`: 806 Werte von `regelfrage.spiel` und 600 Verlaeufe mit Fusszeilen,
   Fehlerzeilen, Listen, System-Nachrichten, task, sprache -- Soll aus ed36f99 mit stabiler
   Sortierung, `pipe_referenz.py --erzeuge`). Bricht die Antwort mitten im Stream ab, nennt
-  die Fusszeile trotzdem das Spiel: `Quelle: Azul -- Antwort unvollstaendig: <Fehler>`.
+  die Fusszeile trotzdem das Spiel: `Quelle: Azul -- Antwort unvollstaendig: <Fehler>`;
+  faellt schon die Suche aus (Embedding-Server), steht unter der Fehlermeldung
+  `Quelle: Azul -- keine Antwort`.
 - Passt das `rag.py` im Mount nicht zur Pipe (zu alte `SCHNITTSTELLE`, fehlende Funktion)
   oder fehlt `RAG_DIR`, erscheint eine klare Meldung statt eines AttributeError; der alte
   Weg sagt "kein Regelheft" auch ohne `rag.py`. Liegt neben dem read-only Index ein

@@ -17,11 +17,16 @@ Skript schreiben oder aus dem es lesen kann, in ein eigenes Temp-Verzeichnis:
     rag.DATA_DIR, rag.INDEX_PATH, rag.PDF_DIR
   - classify.KNOW, vision_ingest.KNOW, auto_ingest.KNOW, ingest.OUT
   - judge.ANTHROPIC_KEY_DATEI (nie der echte API-Key)
+  - HOME und XDG_CONFIG_HOME, BEVOR ein Skript importiert wird: auch ein Pfad, der
+    beim Import aus "~" gebildet und festgehalten wird (etwa als Default-Argument,
+    Kritiker-Mutation J1), zeigt damit nie auf den echten Key. PYTHONUSERBASE bleibt
+    auf dem echten Wert, damit Kindprozesse ihre --user-Pakete weiter finden.
 Einzelne Tests duerfen darueber hinaus eigene Temp-Pfade setzen.
 """
 import atexit
 import os
 import shutil
+import site
 import sys
 import tempfile
 import types
@@ -30,8 +35,15 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
 
+if "judge" in sys.modules:
+    raise RuntimeError("testumgebung muss vor judge importiert werden -- sonst gilt der echte HOME")
 TMP = tempfile.mkdtemp(prefix="rag-tests-")
 atexit.register(shutil.rmtree, TMP, True)
+os.environ.setdefault("PYTHONUSERBASE", site.getuserbase())
+HOME = os.path.join(TMP, "home")
+os.makedirs(os.path.join(HOME, ".config"))
+os.environ["HOME"] = HOME
+os.environ["XDG_CONFIG_HOME"] = os.path.join(HOME, ".config")
 DATA = os.path.join(TMP, "data")
 os.environ["DATA_DIR"] = DATA
 os.environ["INDEX_PATH"] = os.path.join(DATA, "index.sqlite")

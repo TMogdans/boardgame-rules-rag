@@ -372,6 +372,28 @@ class TestMigration(RegressionsTest):
             self.migriere()
         self.assertEqual(len(rag.lies_jsonl(ziel)), len(WISSEN) + 1)
 
+    def test_fremde_spiel_id_in_den_chunks_wird_nicht_migriert(self):
+        # Kritiker MG1: Chunks eines anderen Spiels duerfen nicht unter FCM landen
+        fremd = dict(WISSEN[0], spiel_id="brass-birmingham", spiel="Brass: Birmingham")
+        rag.schreibe_jsonl(os.path.join(self.basis, "knowledge.jsonl"), [fremd] + WISSEN[1:])
+        with self.assertRaises(rag.KonfigFehler) as cm:
+            self.migriere()
+        self.assertIn("brass-birmingham", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "food-chain-magnate", "knowledge.jsonl")))
+        # Gegenprobe: die eigene spiel_id ist erlaubt
+        eigen = dict(WISSEN[0], spiel_id="food-chain-magnate")
+        rag.schreibe_jsonl(os.path.join(self.basis, "knowledge.jsonl"), [eigen] + WISSEN[1:])
+        self.migriere()
+
+    def test_fremdes_golden_set_wird_nicht_migriert(self):
+        # Kritiker MG3: ein Golden Set mit anderer spiel_id gehoert nicht zu FCM
+        with open(os.path.join(self.basis, "golden_set.json"), "w", encoding="utf-8") as f:
+            json.dump(dict(GOLDEN, spiel_id="brass-birmingham"), f)
+        with self.assertRaises(rag.KonfigFehler) as cm:
+            self.migriere()
+        self.assertIn("brass-birmingham", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "food-chain-magnate", "golden_set.json")))
+
     def test_datei_ohne_seite_wird_nicht_migriert(self):
         rag.schreibe_jsonl(os.path.join(self.basis, "knowledge.jsonl"), [{"id": 1, "text": "x"}])
         with self.assertRaises(rag.KonfigFehler):

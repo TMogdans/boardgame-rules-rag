@@ -137,6 +137,30 @@ class TestFingerprint(IndexTest):
         chunks, _ = rag.lade_spiel(con, "food-chain-magnate")
         self.assertIn("Der Truck Driver hat Reichweite 4.", [c["text"] for c in chunks])
 
+    def test_aenderung_hinter_dem_ersten_kibibyte(self):
+        # Kritiker I1: der Hash muss die GANZE Datei sehen, nicht nur den Anfang
+        pfad = os.path.join(self.tmp.name, "gross.jsonl")
+        anfang = b"x" * 5000
+        with open(pfad, "wb") as f:
+            f.write(anfang + b"A")
+        vorher = rag.fingerprint(pfad, "k")
+        with open(pfad, "wb") as f:
+            f.write(anfang + b"B")
+        self.assertNotEqual(rag.fingerprint(pfad, "k"), vorher)
+        # Kritiker I2: die Konfiguration gehoert zum Fingerprint
+        self.assertNotEqual(rag.fingerprint(pfad, "k"), rag.fingerprint(pfad, "k2"))
+        # und im Index: eine Aenderung am Ende einer grossen knowledge.jsonl wird neu eingebettet
+        viele = FCM + [chunk("food-chain-magnate", "Food Chain Magnate", 100 + i, 20, f"Fuellregel {i} " * 5)
+                       for i in range(30)]
+        wissen = rag.knowledge_pfad("food-chain-magnate")
+        rag.schreibe_jsonl(wissen, viele)
+        self.assertGreater(os.path.getsize(wissen), 4096)
+        self.baue()
+        rag.schreibe_jsonl(wissen, viele[:-1] + [dict(viele[-1], text="Letzte Regel geaendert.")])
+        erg, n = self.baue(["food-chain-magnate"])
+        self.assertEqual(erg["food-chain-magnate"][0], "neu")
+        self.assertGreater(n, 0)
+
     def test_anderes_embed_modell_ist_ein_eigener_stand(self):
         self.baue()
         with mock.patch.object(rag, "EMBED_MODEL", "anderes-modell"):

@@ -329,9 +329,39 @@ class TestChatVerlauf(PipeIndexBasis):
         self.assertTrue(n[-1]["content"].endswith("Frage: Wie verdiene ich Geld?"))
         self.assertEqual(len(n), 2)                     # Rueckfrage-Runde geht nicht in den Verlauf
         self.assertIn("S. 11 ", self.chat("Wie verdiene ich Geld?", rueckfrage, "Food Chain Magnate bitte"))
-        # keine Unschaerfe: ein Hoerfehler fuehrt erneut zur Rueckfrage
+        # keine Unschaerfe bei der Wahl: ein Hoerfehler ergibt einen Vorschlag (Runde 7, (b)),
+        # eine Nachricht ohne Vorschlag ist eine neue Frage (c) -- ohne Spiel wieder die Rueckfrage
+        self.llm_bekam.clear()
         self.assertTrue(self.chat("Wie verdiene ich Geld?", rueckfrage, "Fudschein Magnat").startswith(
+            "Kein Regelheft zu „Fudschein Magnat“ im Index. Meintest du Food Chain Magnate?"))
+        self.assertTrue(self.chat("Wie verdiene ich Geld?", rueckfrage, "Und wie baue ich die Kette?").startswith(
             "Zu welchem Spiel ist die Frage?"))
+        self.assertEqual(self.llm_bekam, [])
+
+    def test_vorschlag_nach_rueckfrage_behaelt_die_frage(self):
+        # Runde 7 (b)+(d), E2E des fuenften Kritikers: "Fod Chain" -> Vorschlag, die
+        # urspruengliche Frage bleibt gemerkt und wird nach der Wahl beantwortet.
+        q = "Wann verdient man Geld?"
+        rueckfrage = self.chat(q)
+        vorschlag = self.chat(q, rueckfrage, "Fod Chain")
+        self.assertTrue(vorschlag.startswith("Kein Regelheft zu „Fod Chain“ im Index. Meintest du "
+                                             "Food Chain Magnate?"), vorschlag)
+        self.assertIn("„Spiel: Food Chain Magnate“", vorschlag)
+        self.assertEqual(self.llm_bekam, [])
+        for wahl in ("FCM", "Spiel: Food Chain Magnate", "für FCM", "Spiel FCM"):
+            with self.subTest(wahl=wahl):
+                self.post_mock.reset_mock()
+                text = self.chat(q, rueckfrage, "Fod Chain", vorschlag, wahl)
+                self.assertIn("S. 11 ", text)
+                self.assertIn("*Quelle: Food Chain Magnate, Seite", text)
+                self.assertEqual(self.frage_embeds(), [[q]])
+                self.assertTrue(self.llm_bekam[-1]["messages"][-1]["content"].endswith(f"Frage: {q}"))
+        # zwei Vorschlagsrunden, dann die Wahl: immer noch die Frage vor der ERSTEN Rueckfrage
+        self.post_mock.reset_mock()
+        v2 = self.chat(q, rueckfrage, "Fod Chain", vorschlag, "Food Chan")
+        self.assertTrue(v2.startswith("Kein Regelheft zu „Food Chan“"), v2)
+        self.assertIn("S. 11 ", self.chat(q, rueckfrage, "Fod Chain", vorschlag, "Food Chan", v2, "FCM"))
+        self.assertEqual(self.frage_embeds(), [[q]])
 
     def test_spielname_im_freitext_legt_nichts_fest(self):
         text = self.chat("Wie verdiene ich Geld in Food Chain Magnate?")
@@ -442,6 +472,24 @@ class TestChatVerlauf(PipeIndexBasis):
         self.chat("Spiel: Brass: Wie viel Geld?", text, "Und dann?")
         self.assertEqual(self.llm_bekam[-1]["messages"][2], {"role": "assistant", "content": "Teil 1 "})
 
+    def test_embedding_ausfall_nennt_das_spiel(self):
+        # Runde 7 SOLLTE-4: faellt schon die Suche aus (Embedding-Server weg), nennt die
+        # Fehlermeldung das Spiel wie die Fusszeile -- und kein LLM-Aufruf
+        def post(url, *a, **kw):
+            if url.endswith("/api/embed"):
+                raise ConnectionError("embed-server weg")
+            return fake_post(url, *a, **kw)
+        self.post_mock.side_effect = post
+        text = self.chat("Spiel: Brass: Wie viel Geld?")
+        self.assertIn("**Fehler in der RAG-Pipe:** ", text)
+        self.assertIn("embed-server weg", text)
+        self.assertTrue(text.endswith("*Quelle: Brass: Birmingham -- keine Antwort*"), text)
+        self.assertEqual(self.llm_bekam, [])
+        # und die Meldung geht nicht in den Verlauf
+        self.post_mock.side_effect = fake_post
+        self.chat("Spiel: Brass: Wie viel Geld?", text, "Und dann?")
+        self.assertEqual([m["content"] for m in self.llm_bekam[-1]["messages"][1:3]], ["Spiel: Brass: Wie viel Geld?", ""])
+
     def test_nur_ein_name_ohne_rueckfrage(self):
         # keine Wahl, keine Erkennung -> ohne Spiel die Rueckfrage
         self.assertTrue(self.chat("Brass").startswith("Zu welchem Spiel ist die Frage?"))
@@ -471,10 +519,10 @@ class TestDeployment(PipeIndexBasis):
         self.pipe.valves.RAG_DIR = verz
 
     def test_zu_alte_schnittstelle(self):
-        self.clone_mit("SCHNITTSTELLE = 6", "SCHNITTSTELLE = 5")
+        self.clone_mit("SCHNITTSTELLE = 7", "SCHNITTSTELLE = 6")
         text = self.frage("Geld", spiel="FCM")
         self.assertIn("passt nicht zu dieser Pipe", text)
-        self.assertIn("Schnittstelle 5", text)
+        self.assertIn("Schnittstelle 6", text)
         self.assertNotIn("AttributeError", text)
 
     def test_fehlende_funktion(self):

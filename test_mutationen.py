@@ -20,6 +20,7 @@ import glob
 import io
 import os
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -395,17 +396,17 @@ MUTATIONEN = [
      "rag.py", '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]\n    if not nutzer:\n        return "frage", None, None, None',
      '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"][-20:]\n    if not nutzer:\n        return "frage", None, None, None'),
     ("DW3 Namensnachricht ohne Rueckfrage wechselt (letzte Nachricht)",
-     "rag.py", "        if nach_rueckfrage(i):\n            namen = namens_nachricht(text(i), wb)",
-     "        if True:\n            namen = namens_nachricht(text(i), wb)"),
+     "rag.py", "        if nach_rueckfrage(i):\n            namen = antwort_namen(text(i), wb)",
+     "        if True:\n            namen = antwort_namen(text(i), wb)"),
     ("KR25 Namensnachricht im Verlauf ohne Rueckfrage setzt das Spiel",
-     "rag.py", "    for i in nutzer[:-1]:\n        w = wahl_von(i)",
-     "    for i in nutzer[:-1]:\n        w = wahl_von(i) or ((namens_nachricht(text(i), wb) or [None]), '', '')\n"
-     "        w = w if w[0] != [None] else None"),
+     "rag.py", "    for i in nutzer[:-1]:\n        e = einordnen(i)\n",
+     "    for i in nutzer[:-1]:\n        e = einordnen(i) or ((\"wahl\", namens_nachricht(text(i), wb), \"\", \"\")\n"
+     "                             if namens_nachricht(text(i), wb) else None)\n"),
     ("KR1 Rueckfrage-Erkennung ohne Rollenpruefung",
-     "rag.py", '        return vorher.get("role") == "assistant" and isinstance(c, str) and c.startswith(RUECKFRAGE)',
-     '        return isinstance(c, str) and c.startswith(RUECKFRAGE)'),
+     "rag.py", '        c = vorher.get("content") if vorher.get("role") == "assistant" else None',
+     '        c = vorher.get("content")'),
     ("KR2 Rueckfrage irgendwo im Text statt am Anfang",
-     "rag.py", "isinstance(c, str) and c.startswith(RUECKFRAGE)", "isinstance(c, str) and RUECKFRAGE in c"),
+     "rag.py", "isinstance(c, str) and (c.startswith(RUECKFRAGE) or", "isinstance(c, str) and (RUECKFRAGE in c or"),
     ("KR9 STANDARD_SPIEL ungeprueft",
      "openwebui_pipe.py", "                if v.STANDARD_SPIEL not in ids.values():", "                if False:"),
     ("KR12 alter Weg entfernt auch die Quelle-Fusszeile (C)",
@@ -417,7 +418,8 @@ MUTATIONEN = [
      "rag.py", '    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue")):\n        s = s.replace(alt, neu)\n    return "".join(',
      '    for alt, neu in ():\n        s = s.replace(alt, neu)\n    return "".join('),
     ("W1 unbekannte Wahl antwortet still im alten Spiel (MUSS-1)",
-     "rag.py", '    if not namen:\n        return "unbekannt", genannt, None, None', '    if not namen:\n        return "frage", spiel, letzte, None'),
+     "rag.py", '    if e[0] == "vorschlag":\n        return "unbekannt", e[1], None, e[2]',
+     '    if e[0] == "vorschlag":\n        return "frage", spiel, letzte, None'),
     ("W2 unbekannte Wahl ohne Vorschlaege",
      "openwebui_pipe.py", '            meintest = f" Meintest du {\' oder \'.join(vorschlaege[:3])}?" if vorschlaege else ""',
      '            meintest = ""'),
@@ -426,8 +428,8 @@ MUTATIONEN = [
      "            raise"),
     ("W4 Wahl nach der Rueckfrage beantwortet die Frage nicht (SOLLTE-4)",
      "rag.py", "    j = letzte\n    while nach_rueckfrage(j):", "    j = letzte\n    while False:"),
-    ("W5 Rueckfrage-Kette: Namensnachricht gilt als Frage (SOLLTE-5)",
-     "rag.py", "        j = k                            # Namens-/Wahl-Nachricht: weiter zurueck",
+    ("W5 Rueckfrage-Kette: Antwort auf eine Rueckfrage gilt als Frage (SOLLTE-5, Runde 7 (d))",
+     "rag.py", "        j = k                                   # Antwort/Wahl-Versuch: weiter zurueck",
      "        return \"frage\", namen[0], k, None"),
     ("W6 'Spiel X' ohne Doppelpunkt wieder eine Wahl",
      "rag.py", '_WAHL = re.compile(r"^\\s*(?:spiel\\s*:|wechsel\\s+zu\\s)\\s*(?P<rest>.*)\\Z", re.I | re.S)',
@@ -453,7 +455,7 @@ MUTATIONEN = [
     ("D4 zweite Rueckfrage beantwortet die aelteste statt die juengste Frage",
      "rag.py", "        k = davor[-1]", "        k = davor[0]"),
     ("D5 mehrdeutige Wahl im Verlauf nimmt das erste Spiel",
-     "rag.py", "        if w and len(w[0]) == 1:        # unbekannt/mehrdeutig", "        if w and w[0]:        # unbekannt/mehrdeutig"),
+     "rag.py", '        if e and e[0] == "wahl" and len(e[1]) == 1:', '        if e and e[0] == "wahl" and e[1]:'),
     ("D6 Name endet auch an einem Leerzeichen (nicht nur am Doppelpunkt)",
      "rag.py", '[i for i in range(len(rest) - 1, -1, -1) if rest[i] == ":"]', '[i for i in range(len(rest) - 1, -1, -1) if rest[i] in ": "]'),
     ("D8 'danke' hinter dem Namen nicht erlaubt",
@@ -545,13 +547,76 @@ MUTATIONEN = [
      '    quelle = None or os.path.join('),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
+    # ---- Runde 7: Antwort auf die Rueckfrage (D-Rueckfrage), HOME, judge, Migration, Fingerprint ----
+    ("DR1 Formen (a) nach der Rueckfrage aus ('fuer X', 'bei X', 'Spiel X', 'Das Spiel heisst X')",
+     "rag.py", '    m = _ANTWORT.match(text or "")\n', "    m = None\n"),
+    ("DR2 (b) aus: ungenauer Name nach der Rueckfrage gilt als neue Frage",
+     "rag.py", "            if vorschlaege:                     # (b)", "            if False:                           # (b)"),
+    ("DR3 (c) aus: jede Antwort auf die Rueckfrage ist ein Wahl-Versuch",
+     "rag.py", "            if vorschlaege:                     # (b)", "            if True:                            # (b)"),
+    ("DR4 KEIN_REGELHEFT-Meldung zaehlt nicht als Rueckfrage",
+     "rag.py", "(c.startswith(RUECKFRAGE) or c.startswith(KEIN_REGELHEFT))", "(c.startswith(RUECKFRAGE))"),
+    ("DR5 Pipe-Meldung beginnt nicht mit KEIN_REGELHEFT",
+     "openwebui_pipe.py", '(f"{rag.KEIN_REGELHEFT}{erg}“ im Index.', '(f"Zu „{erg}“ kein Regelheft im Index.'),
+    ("DR6 Vorschlag: Name als ganze Woerter im Text nicht erkannt",
+     "rag.py", '                    gefunden |= wb.get("".join(woerter[i:j]), set())', "                    pass"),
+    ("DR7 Vorschlag: Stueck eines Namens nicht erkannt ('Food Chain')",
+     "rag.py", "            if s in form:", "            if s == form:"),
+    ("DR8 Vorschlag auch bei Fragen ('Wer beginnt bei Azul?' wuerde die neue Frage verlieren)",
+     "rag.py", '    if "?" not in ohne:', "    if True:"),
+    ("DR9 Vorschlag: beliebig viele Woerter neben dem Namen",
+     "rag.py", "                if len(woerter) - (j - i) <= _VORSCHLAG_EXTRA_WOERTER:", "                if True:"),
+    ("DR10 Hoeflichkeit vor dem Doppelpunkt nicht abgetrennt (SOLLTE-5)",
+     "rag.py", "        kandidat = _ohne_hoeflichkeit(rest[:pos])\n",
+     "        kandidat = _ohne_hoeflichkeit(rest[:pos]) if pos == len(rest) else rest[:pos]\n"),
+    ("DR11 Embedding-Ausfall: Meldung ohne Spiel (SOLLTE-4)",
+     "openwebui_pipe.py", '            yield f"**Fehler in der RAG-Pipe:** {grund}\\n\\n---\\n*Quelle: {name} -- keine Antwort*"\n            return\n',
+     "            raise\n"),
+    ("DR12 Kette: reine Namensnachricht ohne Rueckfrage gilt als Frage",
+     "rag.py", '            ek = ("name",)', "            ek = None"),
+    ("U4 testumgebung lenkt HOME nicht um",
+     "testumgebung.py", 'os.environ["HOME"] = HOME\nos.environ["XDG_CONFIG_HOME"] = os.path.join(HOME, ".config")\n', "",
+     ("test_schutz.py",)),
+    ("U5 Mutationstreiber lenkt HOME nicht um",
+     "test_mutationen.py", "                    HOME=home, XDG_CONFIG_HOME=os.path.join(home, \".config\"))\n", "                    )\n",
+     ("test_schutz.py",)),
+    ("J1 judge: Key-Pfad als Default-Argument (Kritiker)", "judge.py",
+     "def lies_anthropic_key(pfad=None):\n    pfad = pfad or ANTHROPIC_KEY_DATEI",
+     "def lies_anthropic_key(pfad=ANTHROPIC_KEY_DATEI):\n    pfad = pfad", ("test_judge.py", "test_schutz.py")),
+    ("J2 judge: Netzfehler-Meldung enthaelt die Header (Key-Leak)", "judge.py",
+     'raise JudgeAbbruch(f"Netzfehler bei {url}: {type(e).__name__}") from None',
+     'raise JudgeAbbruch(f"Netzfehler bei {url}: {type(e).__name__} {kw}") from None', ("test_judge.py",)),
+    ("J3 judge: HTTP-Fehler-Meldung enthaelt die Header", "judge.py",
+     'raise JudgeAbbruch(f"{url} antwortet {r.status_code}: {r.text[:300]}")',
+     'raise JudgeAbbruch(f"{url} antwortet {r.status_code}: {r.text[:300]} {kw.get(\'headers\')}")', ("test_judge.py",)),
+    ("J4 judge: Key aus der Umgebung statt aus der Datei", "judge.py",
+     "    pfad = pfad or ANTHROPIC_KEY_DATEI\n",
+     "    if os.environ.get('ANTHROPIC_API_KEY'): return os.environ['ANTHROPIC_API_KEY']\n    pfad = pfad or ANTHROPIC_KEY_DATEI\n",
+     ("test_judge.py",)),
+    ("KI1 Fingerprint nur erste 1 KiB (Kritiker I1)", "rag.py",
+     '        for block in iter(lambda: f.read(1 << 20), b""):\n            h.update(block)', '        h.update(f.read(1024))',
+     ("test_index.py",)),
+    ("KI2 Fingerprint ohne Konfiguration (Kritiker I2)", "rag.py", '    h.update(b"\\0" + konfig.encode())', '    pass',
+     ("test_index.py",)),
+    ("MG1 Migration: fremde spiel_id erlaubt (Kritiker)", "rag.py",
+     "    if fremd:\n        raise KonfigFehler(f\"{quelle} enthaelt Chunks anderer Spiele",
+     "    if False:\n        raise KonfigFehler(f\"{quelle} enthaelt Chunks anderer Spiele", ("test_regression.py",)),
+    ("MG3 Migration: fremdes Golden Set akzeptiert (Kritiker)", "rag.py",
+     '        if gs.get("spiel_id") not in (None, spiel_id):\n            raise', '        if False:\n            raise',
+     ("test_regression.py",)),
 ]
 
 
 def rote_tests(lauf, tests=TESTS):
     rot = []
+    # HOME/XDG_CONFIG_HOME in die Laufkopie: auch unter einer Mutation, die testumgebung
+    # umgeht, gibt es dort keinen echten Key (~/.config/anthropic/api_key) zu lesen
+    home = os.path.join(lauf, "home")
+    os.makedirs(os.path.join(home, ".config"), exist_ok=True)
     umgebung = dict(os.environ, DATA_DIR=os.path.join(lauf, "data"),
-                    INDEX_PATH=os.path.join(lauf, "data", "index.sqlite"))
+                    INDEX_PATH=os.path.join(lauf, "data", "index.sqlite"),
+                    HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config"))
+    umgebung.setdefault("PYTHONUSERBASE", site.getuserbase())
     for k in ("KNOWLEDGE_JSONL", "GOLDEN_SET", "REGRESSION_REFERENZ"):
         umgebung.pop(k, None)
     for datei in tests:

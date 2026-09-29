@@ -43,10 +43,10 @@ _FEHLERZEILE = re.compile(r"(?:\n\n)?\*\*Fehler in der RAG-Pipe:\*\*.*\Z", re.S)
 _FUSSZEILE_INDEX = re.compile(r"(?:\n\n)?---\n\*Quelle: [^\n]*\*\s*\Z")
 # Mindest-Schnittstelle des geladenen rag.py fuer den Index-Weg (rag.SCHNITTSTELLE).
 # Ein aelterer Clone im Mount ergaebe sonst AttributeError mitten in der Antwort.
-MIN_SCHNITTSTELLE = 6
+MIN_SCHNITTSTELLE = 7
 _RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten")
 _RAG_INDEX_WEG = _RAG_ALTER_WEG + ("oeffne_index", "spiele_im_index", "katalog_aus_index", "ordne_spiel",
-                                   "chat_woerterbuch", "spiel_im_chat", "RUECKFRAGE", "index_konfig",
+                                   "chat_woerterbuch", "spiel_im_chat", "RUECKFRAGE", "KEIN_REGELHEFT", "index_konfig",
                                    "stand_im_index", "fingerprint", "lade_spiel", "knowledge_pfad", "KonfigFehler")
 
 
@@ -411,8 +411,8 @@ class Pipe:
         """(spiel_id, Nachrichten bis zur eigentlichen Frage, Meldung) fuer den Chat.
 
         Regeln in rag.spiel_im_chat (Spec D'): das Spiel wird NUR explizit gewaehlt
-        ("Spiel: X", "Spiel X", "Wechsel zu X", optional ": <Frage>"; oder nur der
-        Name als Antwort auf unsere Rueckfrage). Keine Erkennung im Freitext.
+        ("Spiel: X", "Wechsel zu X", optional ": <Frage>"; direkt nach unserer
+        Rueckfrage auch "X", "fuer X", "bei X", "Spiel X" ...). Keine Erkennung im Freitext.
         """
         with self._lock:
             rag = self._lade_rag(v)
@@ -425,13 +425,13 @@ class Pipe:
         if art == "gewechselt":
             return None, messages, f"Ok, ab jetzt {erg}."
         if art == "unbekannt":
-            # Explizite Wahl eines Spiels, das es nicht gibt: nie still im alten Spiel
-            # antworten. Das bisherige Spiel bleibt gewaehlt, die Frage bleibt unbeantwortet.
-            status, vorschlaege = rag.ordne_spiel(erg, katalog) if erg else ("unbekannt", [])
-            vorschlaege = [vorschlaege] if status == "treffer" else vorschlaege
+            # Wahl(-Versuch) eines Spiels, das es so nicht gibt: nie still im alten Spiel
+            # antworten. Das bisherige Spiel bleibt gewaehlt, die Frage bleibt gemerkt --
+            # die Meldung beginnt mit rag.KEIN_REGELHEFT und zaehlt damit als Rueckfrage.
+            vorschlaege = frage or []
             meintest = f" Meintest du {' oder '.join(vorschlaege[:3])}?" if vorschlaege else ""
             beispiel = vorschlaege[0] if vorschlaege else spiele[0]["name"]
-            return None, messages, (f"Kein Regelheft zu „{erg}“ im Index.{meintest} "
+            return None, messages, (f"{rag.KEIN_REGELHEFT}{erg}“ im Index.{meintest} "
                                     f"Schreib zum Beispiel „Spiel: {beispiel}“.")
         if art == "mehrdeutig":
             return None, messages, (f"{rag.RUECKFRAGE} Meintest du {' oder '.join(erg[:3])}? "
@@ -457,8 +457,14 @@ class Pipe:
         if not frage:
             yield "Keine Frage gefunden."
             return
-        nachrichten, hits = await asyncio.to_thread(self._suche_spiel, frage, v, spiel_id)
         name = next((s["name"] for s in self._katalog[0] if s["spiel_id"] == spiel_id), spiel_id)
+        try:
+            nachrichten, hits = await asyncio.to_thread(self._suche_spiel, frage, v, spiel_id)
+        except Exception as e:
+            # Embedding/Index-Ausfall: wie die Fusszeile sichtbar, welches Heft gefragt war
+            grund = " ".join(f"{type(e).__name__}: {e}".split())
+            yield f"**Fehler in der RAG-Pipe:** {grund}\n\n---\n*Quelle: {name} -- keine Antwort*"
+            return
         try:
             async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
                 yield stueck
