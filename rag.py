@@ -8,6 +8,8 @@ Konfiguration und sind der eigentliche Gegenstand des Experiments. Alle per env 
 
 Nutzung:
     python rag.py ask "Wie verdiene ich Geld?"   # eine Frage
+    python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"
+    HYBRID=1 python rag.py ask --spiel ...        # Vektor + BM25 (nur mit Index)
     python rag.py eval                            # Golden Set durchlaufen
     RERANK=1 CHUNK_SIZE=400 python rag.py eval    # mit Reranker + kleineren Chunks
 
@@ -37,6 +39,8 @@ CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", 150)) # Zeichen Ueberlappung
 TOP_K         = int(os.environ.get("TOP_K", 4))           # wie viele Chunks in den Kontext wandern
 THINK         = os.environ.get("THINK", "0") == "1"       # Qwen3-Reasoning an/aus (langsamer, gruendlicher)
 RERANK        = os.environ.get("RERANK", "0") == "1"      # zweite Stufe: Cross-Encoder-Reranking
+HYBRID        = os.environ.get("HYBRID", "0") == "1"      # Vektor + BM25 (FTS5) per Reciprocal Rank Fusion; nur mit Index
+RRF_K         = int(os.environ.get("RRF_K", 60))          # Daempfung der Rangfusion (Cormack et al.: 60)
 RERANK_MODEL  = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 CANDIDATES    = int(os.environ.get("CANDIDATES", 20))     # so viele grob abrufen, bevor der Reranker auf TOP_K eindampft
 PDF_DIR       = os.path.join(os.path.dirname(__file__), "pdfs")
@@ -631,13 +635,15 @@ def lade_spiel(con, spiel_id, drop=frozenset(), konfig=None):
         raise KonfigFehler(
             f"{spiel_id!r} ist fuer diese Konfiguration nicht im Index ({konfig}). "
             f"`python rag.py index {spiel_id}` mit denselben EMBED_MODEL/CHUNK_SIZE/CHUNK_OVERLAP laufen lassen.")
-    zeilen = con.execute("SELECT id, seite, typ, text, emb FROM chunks "
+    # spiel_id kommt aus der ZEILE, nicht aus dem Aufruf: sonst truege ein Chunk
+    # eines fremden Spiels, der durch einen kaputten Filter rutscht, das richtige Etikett.
+    zeilen = con.execute("SELECT id, spiel_id, seite, typ, text, emb FROM chunks "
                          "WHERE spiel_id=? AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()
-    pruefe_typ_feld([{"typ": z[2]} for z in zeilen if z[2] is not None], drop)
-    zeilen = [z for z in zeilen if z[2] not in drop]
-    chunks = [{"doc": "knowledge", "seite": json.loads(z[1]), "text": z[3],
-               "spiel_id": spiel_id, "chunk_id": z[0]} for z in zeilen]
-    embs = np.frombuffer(b"".join(z[4] for z in zeilen), dtype="<f4").reshape(len(zeilen), stand[0])
+    pruefe_typ_feld([{"typ": z[3]} for z in zeilen if z[3] is not None], drop)
+    zeilen = [z for z in zeilen if z[3] not in drop]
+    chunks = [{"doc": "knowledge", "seite": json.loads(z[2]), "text": z[4],
+               "spiel_id": z[1], "chunk_id": z[0]} for z in zeilen]
+    embs = np.frombuffer(b"".join(z[5] for z in zeilen), dtype="<f4").reshape(len(zeilen), stand[0])
     return chunks, embs.astype(np.float32, copy=False)
 
 
@@ -657,9 +663,91 @@ def get_reranker():
     return _reranker
 
 
-def retrieve(query, chunks, embs, k=TOP_K):
+def fts_abfrage(query):
+    """Frage -> FTS5-Ausdruck: jedes Wort als Phrase, ODER-verknuepft.
+
+    Die Frage direkt als MATCH-Ausdruck zu geben, bricht an Anfuehrungszeichen,
+    Klammern, AND/OR/NOT und '*' -- Nutzertext ist keine Abfragesprache.
+    """
+    woerter = re.findall(r"\w+", query.casefold())
+    return " OR ".join('"' + w.replace('"', '""') + '"' for w in dict.fromkeys(woerter))
+
+
+def bm25_rangfolge(con, query, chunks, n):
+    """Positionen in `chunks` nach BM25, beste zuerst -- nur unter DIESEN Chunks.
+
+    Die Einschraenkung auf die rowids des geladenen Spiels steht in der Abfrage
+    selbst (vor ORDER BY/LIMIT), nicht als Nachfilter: sonst verdraengten Treffer
+    anderer Spiele die eigenen aus den ersten n. Die IDF-Statistik von FTS5 ist
+    allerdings tabellenweit (alle Spiele, alle Staende) -- sie gewichtet Woerter,
+    waehlt aber keine fremden Chunks aus.
+    """
+    ausdruck = fts_abfrage(query)
+    if not ausdruck or not chunks:
+        return []
+    if not _hat_fts(con):
+        raise KonfigFehler("HYBRID=1, aber der Index hat keine FTS5-Tabelle (SQLite ohne FTS5?).")
+    pos = {c["chunk_id"]: i for i, c in enumerate(chunks)}
+    zeilen = con.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
+        "AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",
+        (ausdruck, json.dumps(list(pos)), n)).fetchall()
+    return [pos[r[0]] for r in zeilen]
+
+
+def rrf(rangfolgen, k=None):
+    """Reciprocal Rank Fusion: [(position, score)], beste zuerst.
+
+    Gleichstand faellt auf die Reihenfolge der ersten Rangfolge (Vektor) zurueck,
+    damit das Ergebnis deterministisch ist.
+    """
+    k = RRF_K if k is None else k
+    score, erster = {}, {}
+    for folge in rangfolgen:
+        for rang, i in enumerate(folge, 1):
+            score[i] = score.get(i, 0.0) + 1.0 / (k + rang)
+            erster.setdefault(i, (len(erster), rang))
+    return sorted(score.items(), key=lambda x: (-x[1], erster[x[0]]))
+
+
+def drop_fuer_index(env=None):
+    """DROP_TYPES fuer den Index-Weg: dort ist die Quelle immer die Wissensbasis."""
+    env = dict(os.environ if env is None else env)
+    env["SOURCE"] = "knowledge"
+    return lies_drop_types(env)
+
+
+def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
+    """Top-k (chunk, score) zur Frage.
+
+    Ohne spiel_id der alte In-Memory-Weg ueber (chunks, embs). Mit spiel_id kommen
+    Kandidaten ausschliesslich aus diesem Spiel -- der Filter wirkt VOR dem
+    Ranking, weil lade_spiel nur dessen Zeilen liefert. chunks/embs duerfen dann
+    vorab mit lade_spiel geladen sein (eval: einmal pro Spiel statt pro Frage).
+    Die Rangfolge-Rechnung ist fuer beide Wege dieselbe Zeile Code.
+    """
+    con = None
+    if spiel_id is not None:
+        pruefe_spiel_id(spiel_id)
+        con = index if index is not None else oeffne_index()
+        if chunks is None:
+            chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())
+        fremd = {c.get("spiel_id") for c in chunks} - {spiel_id}
+        if fremd:
+            raise KonfigFehler(f"retrieve(spiel_id={spiel_id!r}) mit Chunks von {sorted(fremd)}.")
+    elif HYBRID:
+        raise KonfigFehler("HYBRID=1 braucht den Index (spiel_id); der Einzeldatei-Weg hat kein BM25.")
     q = l2norm(embed([query]))[0]
     sims = embs @ q
+    if HYBRID:
+        vektor = [int(i) for i in np.argsort(-sims)[:CANDIDATES]]
+        fusion = rrf([vektor, bm25_rangfolge(con, query, chunks, CANDIDATES)])
+        if not RERANK:
+            return [(chunks[i], float(s)) for i, s in fusion[:k]]
+        cand = [i for i, _ in fusion[:CANDIDATES]]
+        scores = get_reranker().predict([[query, chunks[i]["text"]] for i in cand])
+        ranked = sorted(zip(cand, scores), key=lambda x: -x[1])[:k]
+        return [(chunks[i], float(s)) for i, s in ranked]
     if RERANK:
         # 1. Stufe: grob CANDIDATES per Embedding holen
         cand = [int(i) for i in np.argsort(-sims)[:CANDIDATES]]
@@ -825,9 +913,17 @@ def cmd_index(args):
     aktualisiere_index(ids or None)
 
 
-def cmd_ask(query):
-    chunks, embs = build_index()
-    hits = retrieve(query, chunks, embs)
+def cmd_ask(query, spiel_id=None):
+    if spiel_id is None:
+        chunks, embs = build_index()
+        hits = retrieve(query, chunks, embs)
+    else:
+        aktualisiere_index([spiel_id], ausgabe=lambda *_: None)   # nur Geaendertes wird eingebettet
+        con = oeffne_index()
+        try:
+            hits = retrieve(query, spiel_id=spiel_id, index=con)
+        finally:
+            con.close()
     print(answer(query, hits))
     print("\nAbgerufen:", [(h["doc"], f"S.{h['seite']}", round(s, 3)) for h, s in hits])
 
@@ -868,7 +964,11 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "eval"
     try:
         if mode == "ask" and len(sys.argv) > 2:
-            cmd_ask(" ".join(sys.argv[2:]))
+            rest = sys.argv[2:]
+            spiel = None
+            if rest[0] == "--spiel" and len(rest) > 2:
+                spiel, rest = rest[1], rest[2:]
+            cmd_ask(" ".join(rest), spiel)
         elif mode == "index":
             cmd_index(sys.argv[2:])
         else:

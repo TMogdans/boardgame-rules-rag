@@ -18,7 +18,7 @@ import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
-         "test_spiele.py", "test_index.py")
+         "test_spiele.py", "test_index.py", "test_suche.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -226,7 +226,40 @@ MUTATIONEN = [
      "    con.execute(\"DELETE FROM chunks WHERE spiel_id=? AND konfig=?\", (spiel_id, konfig)); con.commit()\n"
      "    embs = l2norm(embed_gebatcht([s for _, _, s in stuecke])).astype(\"<f4\")\n"),
     ("F9 Seite verliert beim Speichern ihren Typ",
-     "rag.py", '"seite": json.loads(z[1]), "text": z[3],', '"seite": z[1], "text": z[3],'),
+     "rag.py", '"seite": json.loads(z[2]), "text": z[4],', '"seite": z[2], "text": z[4],'),
+
+    # ---- Suche pro Spiel: Spielfilter und Hybrid (test_suche.py, test_index.py) ----
+    ("SF1 lade_spiel filtert nicht nach Spiel",
+     "rag.py", '"WHERE spiel_id=? AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()',
+     '"WHERE ? IS NOT NULL AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()'),
+    ("SF2 vorab geladene fremde Chunks werden durchgewunken",
+     "rag.py", "        if fremd:\n            raise KonfigFehler", "        if False:\n            raise KonfigFehler"),
+    ("SF3 BM25 filtert erst nach dem LIMIT",
+     "rag.py",
+     '"AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
+     '        (ausdruck, json.dumps(list(pos)), n)).fetchall()\n'
+     '    return [pos[r[0]] for r in zeilen]',
+     '"ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
+     '        (ausdruck, n)).fetchall()\n'
+     '    return [pos[r[0]] for r in zeilen if r[0] in pos]'),
+    ("SF4 BM25 ganz ohne Spielfilter",
+     "rag.py",
+     '"AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
+     '        (ausdruck, json.dumps(list(pos)), n)).fetchall()\n'
+     '    return [pos[r[0]] for r in zeilen]',
+     '"ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
+     '        (ausdruck, n)).fetchall()\n'
+     '    return [pos.get(r[0], 0) for r in zeilen]'),
+    ("H1 HYBRID per Default an",
+     "rag.py", 'HYBRID        = os.environ.get("HYBRID", "0") == "1"', 'HYBRID        = os.environ.get("HYBRID", "1") == "1"'),
+    ("H2 Fusion ignoriert BM25",
+     "rag.py", "        fusion = rrf([vektor, bm25_rangfolge(con, query, chunks, CANDIDATES)])",
+     "        fusion = rrf([vektor])"),
+    ("H3 Nutzertext geht ungeschuetzt in MATCH",
+     "rag.py", """    return " OR ".join('"' + w.replace('"', '""') + '"' for w in dict.fromkeys(woerter))""",
+     "    return query"),
+    ("H4 RRF ohne Daempfung (1/rang statt 1/(k+rang))",
+     "rag.py", "            score[i] = score.get(i, 0.0) + 1.0 / (k + rang)", "            score[i] = score.get(i, 0.0) + 1.0 / rang"),
 ]
 
 

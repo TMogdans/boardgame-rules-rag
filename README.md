@@ -112,6 +112,8 @@ CANDIDATES=40 RERANK=1 python rag.py eval # Kandidatenfeld vor dem Reranking, De
 SOURCE=knowledge python rag.py eval       # knowledge.jsonl statt roher PDF-Extraktion
 DROP_TYPES=flavor,meta python rag.py eval # Ballast aus dem Index werfen (nur mit SOURCE=knowledge)
 THINK=1 python rag.py eval                # Reasoning des LLM anschalten
+HYBRID=1 python rag.py eval food-chain-magnate  # Vektor + BM25 (FTS5) per Reciprocal Rank Fusion, nur mit Index
+RRF_K=60                                  # Daempfung der Rangfusion, Default 60
 ```
 
 `FRAGMENT_THRESHOLD=50` (in `auto_ingest.py`) entscheidet, ab wie vielen Text-Fragmenten
@@ -168,6 +170,14 @@ Stand -- ein Lauf mit `CHUNK_SIZE=800` ersetzt nicht den 400er-Stand der Pipe.
 CHUNK_SIZE=400 python rag.py index --alle            # alle Spiele unter data/, entfernt verschwundene
 CHUNK_SIZE=400 python rag.py index brass-birmingham  # nur dieses Spiel
 ```
+
+**Suche pro Spiel:** `retrieve(frage, spiel_id=...)` laedt nur die Zeilen dieses Spiels
+und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine Treffer
+verdraengen. `python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"`
+bringt den Index vorher auf Stand. `HYBRID=1` fusioniert die Vektor-Rangfolge mit BM25
+(beide auf `CANDIDATES` begrenzt, mit `RERANK=1` danach Cross-Encoder); Default ist aus,
+damit der Standardweg unveraendert bleibt. Die IDF-Gewichte von FTS5 sind tabellenweit
+(alle Spiele und Staende) -- sie gewichten Woerter, waehlen aber keine fremden Chunks aus.
 
 **Warum kein sqlite-vec**, obwohl es auf der Zielmaschine laedt (Wheel 0.1.9 fuer
 Python 3.14/manylinux, `enable_load_extension` vorhanden): Gesucht wird immer innerhalb
@@ -230,6 +240,7 @@ python test_classify.py      # Klassifikator-Auswertung, 17 Antwortvarianten
 python test_ingest_seite.py  # 'seite'-Feld in ingest.py und vision_ingest.py
 python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins eigene Spielverzeichnis
 python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nur bei Aenderung
+python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
