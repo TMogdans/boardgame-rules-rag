@@ -27,7 +27,7 @@ Konfiguration des Laufs. Keine Stellschraube (DROP_TYPES, SOURCE, CHUNK_SIZE) da
 einen Nenner verschieben -- sonst zieht dieselbe Einstellung, die das Retrieval
 veraendert, auch den Beobachtungspunkt mit.
 """
-import sys, json, glob, re, os, sqlite3, difflib
+import sys, json, glob, re, os, sqlite3, difflib, unicodedata
 import numpy as np
 import requests
 # pypdf wird erst im PDF-Zweig von load_chunks importiert. Die Wissensbasis-Route
@@ -179,16 +179,25 @@ SPIEL_ID_MUSTER = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 SPRACHEN = {"de": ("deutsche", "Deutsch"), "en": ("englische", "Englisch")}
 
 
+# Buchstaben, die NFKD nicht in Grundbuchstabe + Akzent zerlegt (oder die deutsch
+# ausgeschrieben werden sollen). Alles andere erledigt NFKD: é->e, â->a, ó->o, Ｆ->f, ﬁ->fi.
+_TRANSLIT = (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss"), ("ł", "l"), ("ø", "o"), ("æ", "ae"),
+             ("œ", "oe"), ("đ", "d"), ("ð", "d"), ("þ", "th"), ("ı", "i"))
+
+
 def spiel_slug(name):
     """Anzeigename -> stabile spiel_id ("Brass: Birmingham" -> "brass-birmingham").
 
     Umlaute werden ausgeschrieben statt zu Bindestrichen ("Kämpfer" -> "kaempfer",
-    nicht "k-mpfer"); ß wird zu ss (APFS faltet ohnehin so).
+    nicht "k-mpfer"); ß wird zu ss (APFS faltet ohnehin so); sonstige Akzente
+    fallen per NFKD weg ("Café Łódź" -> "cafe-lodz"). Was dann noch kein ASCII
+    ist (etwa CJK), faellt weg -- bleibt nichts, ist das ein Fehler.
     """
     s = (name or "").casefold()
-    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+    for alt, neu in _TRANSLIT:
         s = s.replace(alt, neu)
-    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    s = "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
+    s = re.sub(r"[^a-z0-9]+", "-", s.casefold()).strip("-")
     if not s:
         raise KonfigFehler(f"Aus dem Spielnamen {name!r} laesst sich keine spiel_id bilden.")
     return s
@@ -248,6 +257,14 @@ def lege_spiel_an(name, spiel_id=None, sprache=None, aliase=None, quelle_pdf=Non
     if os.path.exists(pfad):
         with open(pfad, encoding="utf-8") as f:
             meta.update(json.load(f))
+        # Zwei verschiedene Spiele, eine spiel_id ("Die Crew" / "Die Crew?" waeren
+        # dasselbe, "Café" / "Cafe!" auch -- aber "Brass" und "Brass!!" eines anderen
+        # Verlags nicht unterscheidbar): laut statt still zusammenzulegen.
+        if name and normalisiere(name) != normalisiere(meta["name"]):
+            raise KonfigFehler(
+                f"spiel_id {spiel_id!r} gehoert schon zu {meta['name']!r}, nicht zu {name!r}. "
+                "Fuer ein anderes Spiel eine eigene --spiel-id waehlen; fuer eine Umbenennung "
+                f"{pfad} von Hand aendern.")
         meta["name"] = name or meta["name"]
     if aliase is not None:
         meta["aliase"] = [a.strip() for a in aliase if a and a.strip()]

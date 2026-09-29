@@ -126,6 +126,8 @@ def ziel(argv):
     Ohne: der alte Weg ueber OUT, aber nie ueber eine vorhandene Datei hinweg.
     """
     rest, opt = rag.spiel_argumente(argv)
+    ueberschreiben = "--ueberschreiben" in rest
+    rest = [a for a in rest if a != "--ueberschreiben"]
     if not rest:
         print("Nutzung: python ingest.py <pfad/zum/regelheft.pdf> [--spiel NAME] [--sprache de|en]")
         sys.exit(1)
@@ -136,6 +138,9 @@ def ziel(argv):
                 f"{OUT} existiert schon und wuerde ueberschrieben. Mit --spiel NAME einlesen "
                 "(eigenes Verzeichnis je Spiel) oder die Datei vorher selbst entfernen.")
         return pdf, OUT, {}, "de"
+    ziel_pfad = rag.knowledge_pfad(opt.get("spiel_id") or rag.spiel_slug(opt["name"]))
+    if os.path.exists(ziel_pfad) and not ueberschreiben:
+        raise rag.KonfigFehler(f"{ziel_pfad} existiert schon -- mit --ueberschreiben bestaetigen.")
     meta, pfad = rag.bereite_spiel_vor(opt, quelle_pdf=pdf)
     return pdf, pfad, rag.spiel_felder(meta), meta["sprache"]
 

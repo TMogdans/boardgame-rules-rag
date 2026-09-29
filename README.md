@@ -315,6 +315,10 @@ Ohne `--spiel` bleibt es beim alten Ein-Spiel-Weg (`knowledge.jsonl` neben den S
 `auto_ingest.py` und `ingest.py` verweigern dort aber das Ueberschreiben einer vorhandenen
 Datei -- frueher hat genau das ein Heft durch das naechste ersetzt. `vision_ingest.py`
 ersetzt nur noch die Chunks desselben Bildes (vorher fiel jede fruehere Grafikseite weg).
+Auch mit `--spiel` ersetzen `auto_ingest.py`/`ingest.py` eine vorhandene
+`data/<spiel_id>/knowledge.jsonl` nur mit `--ueberschreiben` (dort stecken ggf. Vision-Chunks
+und Typ-Tags). Die `spiel_id` transliteriert ("Café Łódź" -> `cafe-lodz`); ergeben zwei
+verschiedene Namen dieselbe id, bricht das Anlegen ab -- dann `--spiel-id` selbst waehlen.
 
 Beispiele unten zeigen den Ein-Spiel-Weg; mit `--spiel`/`--spiel-id` gilt dasselbe pro Spiel.
 

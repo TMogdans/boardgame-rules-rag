@@ -99,6 +99,14 @@ class TestSpielId(unittest.TestCase):
                            ("  7 Wonders  ", "7-wonders")):
             self.assertEqual(rag.spiel_slug(name), slug, name)
 
+    def test_slug_transliteriert(self):
+        for name, slug in (("Café Łódź", "cafe-lodz"), ("Château Roquefort", "chateau-roquefort"),
+                           ("Ørsted & Æbleskiver", "orsted-aebleskiver"), ("Große Straße", "grosse-strasse"),
+                           ("Ｆｕｌｌｗｉｄｔｈ ﬁ", "fullwidth-fi"), ("Dvořák", "dvorak"), ("Ölsardinen", "oelsardinen")):
+            self.assertEqual(rag.spiel_slug(name), slug, name)
+        with self.assertRaises(rag.KonfigFehler):
+            rag.spiel_slug("囲碁")
+
     def test_slug_aus_nichts_ist_fehler(self):
         for name in ("", "  ", "!!!", None):
             with self.assertRaises(rag.KonfigFehler):
@@ -125,6 +133,17 @@ class TestSpielJson(DataDirTest):
         gespeichert = rag.lies_spiel("food-chain-magnate")
         self.assertEqual(gespeichert["aliase"], ["Food Chain", "FCM"])
         self.assertEqual(gespeichert["quelle_pdf"], "neu.pdf")
+
+    def test_kollision_verschiedener_namen_wird_gemeldet(self):
+        rag.lege_spiel_an("Brass: Birmingham")
+        rag.lege_spiel_an("Brass Birmingham")          # dasselbe Spiel, andere Schreibweise -> ok
+        rag.lege_spiel_an("Café")
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            rag.lege_spiel_an("Cafe")                    # anderer Name, gleiche id "cafe"
+        self.assertIn("gehoert schon zu 'Café'", str(ctx.exception))
+        self.assertEqual(rag.lies_spiel("cafe")["name"], "Café")
+        # eigene id loest es
+        self.assertEqual(rag.lege_spiel_an("Cafe", "cafe-2")["spiel_id"], "cafe-2")
 
     def test_unbekannte_sprache_ist_fehler(self):
         with self.assertRaises(rag.KonfigFehler):
@@ -200,6 +219,19 @@ class TestAutoIngest(DataDirTest):
             self.assertEqual(f.read(), vorher)
         brass = lies(os.path.join(self.data, "brass-birmingham", "knowledge.jsonl"))
         self.assertEqual([c["spiel_id"] for c in brass], ["brass-birmingham"] * 2)
+
+    def test_mit_spiel_ueberschreibt_nur_auf_ausdruecklichen_wunsch(self):
+        self.lauf(["fcm.pdf", "--spiel", "Food Chain Magnate"], Doc([Text("Alt.", 1)]))
+        fcm = os.path.join(self.data, "food-chain-magnate", "knowledge.jsonl")
+        with open(fcm, "rb") as f:
+            vorher = f.read()
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            self.lauf(["fcm.pdf", "--spiel-id", "food-chain-magnate"], Doc([Text("Neu.", 1)]))
+        self.assertIn("--ueberschreiben", str(ctx.exception))
+        with open(fcm, "rb") as f:
+            self.assertEqual(f.read(), vorher)
+        self.lauf(["fcm.pdf", "--spiel-id", "food-chain-magnate", "--ueberschreiben"], Doc([Text("Neu.", 1)]))
+        self.assertEqual([c["text"] for c in lies(fcm)], ["Neu."])
 
     def test_ohne_spiel_ueberschreibt_keine_vorhandene_datei(self):
         alt = os.path.join(self.tmp.name, "knowledge.jsonl")
@@ -277,6 +309,13 @@ class TestIngest(DataDirTest):
                          [(4, "brass-birmingham", "Brass: Birmingham")])
         self.assertIn("englische Saetze", gesendet[0])
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "knowledge.jsonl")))
+
+    def test_mit_spiel_ueberschreibt_nicht_ungefragt(self):
+        self.lauf(["brass.pdf", "--spiel", "Brass: Birmingham"], Doc([Text("Alt.", 4)]))
+        with self.assertRaises(rag.KonfigFehler):
+            self.lauf(["brass.pdf", "--spiel", "Brass: Birmingham"], Doc([Text("Neu.", 4)]))
+        self.lauf(["brass.pdf", "--spiel", "Brass: Birmingham", "--ueberschreiben"], Doc([Text("Neu.", 4)]))
+        self.assertEqual(len(lies(os.path.join(self.data, "brass-birmingham", "knowledge.jsonl"))), 1)
 
     def test_ohne_spiel_ueberschreibt_nicht(self):
         alt = os.path.join(self.tmp.name, "knowledge.jsonl")

@@ -13,7 +13,7 @@ Ergebnis -> data/<spiel_id>/knowledge.jsonl (jeder Chunk traegt 'spiel' und
 Laeuft in der Ingest-venv (docling + pymupdf + requests).
 
     python auto_ingest.py pdfs/brass.pdf --spiel "Brass: Birmingham" --sprache en --aliase "Brass"
-    python auto_ingest.py pdfs/fcm.pdf --spiel-id food-chain-magnate      # Spiel existiert schon
+    python auto_ingest.py pdfs/fcm.pdf --spiel-id food-chain-magnate --ueberschreiben   # neu einlesen
 
 Ohne --spiel gilt der alte Ein-Spiel-Weg (knowledge.jsonl neben dem Skript) --
 dann aber nur, wenn die Datei noch nicht existiert: frueher hat ein zweites
@@ -75,6 +75,8 @@ def vision(pdf, pageno, prompt=None):
 def ziel(argv):
     """(pdf, Zieldatei, Zusatzfelder je Chunk, meta) -- ein Spiel, ein Verzeichnis."""
     rest, opt = rag.spiel_argumente(argv)
+    ueberschreiben = "--ueberschreiben" in rest
+    rest = [a for a in rest if a != "--ueberschreiben"]
     pdf = rest[0] if rest else next(
         iter(sorted(__import__("glob").glob(os.path.join(BASE, "pdfs", "*.pdf")))), None)
     if not pdf:
@@ -87,6 +89,12 @@ def ziel(argv):
                 "--spiel NAME (oder --spiel-id) einlesen; fuer die alte Einzeldatei "
                 "`python rag.py migriere` benutzen.")
         return pdf, KNOW, {}, {"name": None, "sprache": "de"}
+    ziel_pfad = rag.knowledge_pfad(opt.get("spiel_id") or rag.spiel_slug(opt["name"]))
+    if os.path.exists(ziel_pfad) and not ueberschreiben:
+        # Gleicher Schutz wie auf dem Einzeldatei-Weg: dort stecken ggf. Vision-Chunks
+        # und classify-Tags, die ein neuer Lauf verwerfen wuerde.
+        raise rag.KonfigFehler(f"{ziel_pfad} existiert schon. Neu einlesen verwirft Vision-Chunks und "
+                               "Typ-Tags -- mit --ueberschreiben bestaetigen.")
     meta, pfad = rag.bereite_spiel_vor(opt, quelle_pdf=pdf)
     return pdf, pfad, rag.spiel_felder(meta), meta
 
