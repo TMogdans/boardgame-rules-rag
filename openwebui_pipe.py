@@ -206,14 +206,15 @@ class Pipe:
                 spiele = rag.spiele_im_index(con)
             finally:
                 con.close()
-            self._katalog, self._katalog_key = (spiele,) + rag.katalog_aus_index(spiele), key
+            katalog, ids = rag.katalog_aus_index(spiele)
+            self._katalog, self._katalog_key = (spiele, katalog, ids, rag.chat_woerterbuch(katalog)), key
         return self._katalog
 
     def _waehle_spiel(self, anfrage, v):
         """(spiel_id, None) oder (None, Meldung) -- ohne Suche und ohne LLM."""
         with self._lock:
             rag = self._lade_rag(v)
-            spiele, katalog, ids = self._lade_katalog(rag, v)
+            spiele, katalog, ids, _ = self._lade_katalog(rag, v)
         if not spiele:
             return None, "Im Index ist noch kein Spiel. Erst `python rag.py index --alle` laufen lassen."
         namen = [s["name"] for s in spiele]
@@ -225,7 +226,7 @@ class Pipe:
                 return v.STANDARD_SPIEL, None
             if len(spiele) == 1:
                 return spiele[0]["spiel_id"], None
-            return None, f"Zu welchem Spiel ist die Frage? Im Index: {verfuegbar}."
+            return None, f"{rag.RUECKFRAGE} Im Index: {verfuegbar}."
         status, ergebnis = rag.ordne_spiel(anfrage, katalog)
         if status == "treffer":
             return ids[ergebnis], None
@@ -345,37 +346,27 @@ class Pipe:
     def _spiel_aus_verlauf(self, messages, v):
         """(spiel_id, Nachrichten bis zur eigentlichen Frage, Meldung) fuer den Chat.
 
-        Im Chat gibt es kein regelfrage.spiel -- ohne diesen Weg waere die
-        Rueckfrage "Zu welchem Spiel?" nie beantwortbar. Das Spiel kommt aus den
-        Nutzer-Nachrichten, neueste zuerst: die erste, die genau ein Spiel nennt,
-        setzt es (Spielwechsel mitten im Chat inklusive). Ist die letzte Nachricht
-        nur ein Spielname -- die Antwort auf die Rueckfrage --, gilt die Frage
-        davor als die Frage; gesucht wird mit ihr, nicht mit dem Namen.
+        Regeln in rag.spiel_im_chat: nur exakte Namen, das erste genannte Spiel gilt,
+        gewechselt wird nur explizit (Namensnachricht, "Spiel: X", "Zu X: ...").
+        Hoechstens die letzten rag.CHAT_FENSTER Nutzer-Nachrichten.
         """
         with self._lock:
             rag = self._lade_rag(v)
-            spiele, katalog, ids = self._lade_katalog(rag, v)
-        nutzer = [i for i, m in enumerate(messages) if m.get("role") == "user"]
-        if not nutzer or not spiele:
+            spiele, katalog, ids, wb = self._lade_katalog(rag, v)
+        if not spiele:
             spiel_id, meldung = self._waehle_spiel(None, v)
             return spiel_id, messages, meldung
-        texte = {i: text_von(messages[i].get("content")) for i in nutzer}
-        frage_idx = nutzer[-1]
-        name = rag.nur_spielname(texte[frage_idx], katalog)
-        if name is not None:
-            davor = [i for i in nutzer[:-1] if rag.nur_spielname(texte[i], katalog) is None]
-            if not davor:
-                return None, messages, f"Was moechtest du zu „{name}“ wissen?"
-            return ids[name], messages[:davor[-1] + 1], None
-        for i in reversed(nutzer):
-            genannt = rag.nenne_spiele(texte[i], katalog)
-            if len(genannt) == 1:
-                return ids[genannt[0]], messages[:frage_idx + 1], None
-            if genannt:
-                return None, messages, (f"Zu welchem Spiel ist die Frage? Meintest du "
-                                        f"{' oder '.join(genannt[:3])}?")
-        spiel_id, meldung = self._waehle_spiel(None, v)
-        return spiel_id, messages[:frage_idx + 1], meldung
+        als_text = [{"role": m.get("role"), "content": text_von(m.get("content"))} for m in messages]
+        art, erg, bis = rag.spiel_im_chat(als_text, wb)
+        if art == "gewechselt":
+            return None, messages, f"Ok, ab jetzt {erg}."
+        if art == "mehrdeutig":
+            return None, messages, f"{rag.RUECKFRAGE} Meintest du {' oder '.join(erg[:3])}?"
+        teil = messages if bis is None else messages[:bis + 1]
+        if erg is None:
+            spiel_id, meldung = self._waehle_spiel(None, v)
+            return spiel_id, teil, meldung
+        return ids[erg], teil, None
 
     async def _antworte_index(self, messages, rf):
         v = self.valves

@@ -31,7 +31,32 @@ class TestStrengeZuordnung(unittest.TestCase):
     K = rag.katalog_aus_index([FCM, FUJI])[0]
 
     def test_kurzer_name_ist_kein_auffangbecken(self):
-        self.assertEqual(rag.ordne_spiel("Fujian", self.K), ("unbekannt", ["Fuji"]))
+        # SOLLTE-3: auch kein Vorschlag Fuji (Laenge 0,667 < VORSCHLAG_LAENGE 0,7)
+        self.assertEqual(rag.ordne_spiel("Fujian", self.K), ("unbekannt", []))
+
+    def test_laengengrenze(self):
+        # 0,8 ist die Grenze: "Carcassonne Big" hat Ratio 0,88, aber Laenge 11/14 = 0,786
+        k = rag.katalog_aus_index([{"spiel_id": "carcassonne", "name": "Carcassonne", "aliase": []}, FUJI])[0]
+        self.assertEqual(rag.ordne_spiel("Carcassonne Big", k)[0], "unbekannt")
+        self.assertEqual(rag.ordne_spiel("Fujix", k), ("treffer", "Fuji"))            # 4/5 = 0,8: noch drin
+        self.assertEqual(rag.ordne_spiel("Fujixy", k)[0], "unbekannt")               # 4/6 = 0,67
+
+    def test_ein_spiel_verhaelt_sich_wie_ed36f99(self):
+        # Entscheidung: Laengenregel nur bei mehr als einem Spiel
+        k1 = rag.katalog_aus("Food Chain Magnate", "Food Chain, FCM")
+        for q in ("Food Chain Magnate Regeln", "Food Chain Magnate Spiel", "Food chain magnate bitte",
+                  "Food Chain Magnate Ketchup"):
+            with self.subTest(q=q):
+                self.assertEqual(rag.ordne_spiel(q, k1), ("treffer", "Food Chain Magnate"))
+                self.assertEqual(rag.ordne_spiel(q, self.K)[0], "unbekannt")         # mit zwei Spielen streng
+        self.assertEqual(rag.ordne_spiel("Fujian", rag.katalog_aus("Fuji", "")), ("treffer", "Fuji"))
+        self.assertEqual(rag.ordne_spiel("Fudschein Magnat", k1), ("unbekannt", ["Food Chain Magnate"]))
+
+    def test_vorschlaege_bei_mehreren_spielen(self):
+        tm = {"spiel_id": "terraforming-mars", "name": "Terraforming Mars", "aliase": []}
+        k = rag.katalog_aus_index([FCM, FUJI, tm])[0]
+        self.assertEqual(rag.ordne_spiel("Foodsharing Magnet", k), ("unbekannt", ["Food Chain Magnate"]))
+        self.assertEqual(rag.ordne_spiel("Terraforming", k), ("unbekannt", ["Terraforming Mars"]))
 
     def test_hoerfehler_treffen_weiter(self):
         for q in ("Food Chain Magnet", "Foodchain Magnet", "food-chain magnate", "FCM", "Fudji"):
@@ -80,7 +105,10 @@ class TestKommandozeile(unittest.TestCase):
     def test_loese_spiel_unbekannt(self):
         with self.assertRaises(rag.KonfigFehler) as ctx:
             rag.loese_spiel("Fujian")
-        self.assertIn("Meintest du Fuji?", str(ctx.exception))
+        self.assertNotIn("Meintest du", str(ctx.exception))
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            rag.loese_spiel("Foodsharing Magnet")
+        self.assertIn("Meintest du Food Chain Magnate?", str(ctx.exception))
 
     def test_ask_argumente(self):
         for args, soll in ((["--spiel", "FCM", "Wie", "geht", "das?"], ("FCM", "Wie geht das?")),

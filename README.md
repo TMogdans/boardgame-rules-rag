@@ -294,6 +294,7 @@ python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBR
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
 python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
+python test_chat.py          # Spiel im Chat: exakte Nennung, Wechsel nur explizit
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
@@ -459,17 +460,30 @@ noch die Frage ein. Dann gilt:
   Spiele im Index zugeordnet; `SPIEL`/`SPIEL_ALIASE` gelten nicht mehr. Unbekannt ->
   "kein Regelheft" wie bisher, ohne Suche und ohne LLM. Mehrdeutig (gemeinsamer Alias,
   zwei unscharfe Treffer fast gleichauf) -> ebenfalls kein Treffer, mit Vorschlaegen.
-  Unscharf trifft nur, was ungefaehr gleich lang ist (Laengenverhaeltnis >= 0,8): sonst
-  wird ein kurzer Name zum Auffangbecken ("Fujian" traf "Fuji" genau auf der Schwelle).
+  Bei mehr als einem Spiel trifft unscharf nur, was ungefaehr gleich lang ist
+  (Laengenverhaeltnis >= 0,8): sonst wird ein kurzer Name zum Auffangbecken ("Fujian" traf
+  "Fuji" genau auf der Schwelle). Vorgeschlagen wird dann nur ab Ratio 0,6 und Laenge 0,7
+  (Fujian/Fuji: 0,67 -> kein Vorschlag; Foodsharing Magnet -> Food Chain Magnate bleibt).
+  Mit genau einem Spiel gilt das Verhalten von ed36f99 ("Food Chain Magnate Regeln" trifft).
   Dieselbe Zuordnung (`rag.ordne_spiel`) gilt fuer `--spiel` auf der Kommandozeile.
-- Ohne `regelfrage.spiel` (Chat) kommt das Spiel aus den Nutzer-Nachrichten, neueste
-  zuerst: die erste, die genau ein Spiel nennt (ganz oder als Wortfolge im Satz, mit
-  derselben strengen Zuordnung), setzt es -- ein Spielwechsel mitten im Chat gilt ab
-  dort. Antwortet man auf die Rueckfrage nur mit dem Spielnamen, wird die Frage davor
-  beantwortet (gesucht wird mit ihr, nicht mit dem Namen). Nennt keine Nachricht ein
-  Spiel: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index, sonst die Rueckfrage
-  "Zu welchem Spiel ist die Frage?"; mehrdeutig -> Rueckfrage mit Vorschlaegen. Kosten:
-  typisch 36 ms je durchsuchter Nachricht bei 250 Spielen (29 Woerter).
+- Ohne `regelfrage.spiel` (Chat) gilt `rag.spiel_im_chat`:
+  - Das Spiel des Chats ist das erste, das in einer Nutzer-Nachricht **exakt** genannt wird
+    (Name oder Alias als ganze Wortfolge; Gross/Klein, ae/ä, ss/ß, Satzzeichen, Bindestriche
+    egal; "Go-Phase" ist ein Wort). Keine Unschaerfe im Chat. Enthaelt ein Treffer einen
+    anderen, gilt der laengere ("7 Wonders Duel" vor "7 Wonders"); zwei unabhaengige ->
+    Rueckfrage mit Vorschlaegen.
+  - Gewechselt wird **nur explizit**: mit einer Nachricht, die nur aus dem Namen besteht
+    (davor erlaubt "Spiel:", "Spiel", "Wechsel zu", "Wechsle zu", "zu", "bei", "fuer",
+    danach "bitte"/"danke") -- Antwort "Ok, ab jetzt X." --, oder mit "Spiel: X: <Frage>",
+    "Zu X: <Frage>", "Wechsel zu X: <Frage>". Ein Name irgendwo in einer spaeteren Frage
+    ("Und bei zwei Spielern?", "Go-Phase") wechselt nicht.
+  - Ist die Namensnachricht die Antwort auf unsere Rueckfrage, wird die Frage davor
+    beantwortet (gesucht wird mit ihr); sonst nur bestaetigt, die alte Frage wird nicht
+    im neuen Spiel wiederholt.
+  - Ohne festgelegtes Spiel: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index,
+    sonst die Rueckfrage "Zu welchem Spiel ist die Frage?".
+  - Betrachtet werden hoechstens die letzten 20 Nutzer-Nachrichten; exakte Suche per
+    Woerterbuch: 250 Spiele, 201 Nachrichten -> typisch 1,5 ms, max 1,6 ms.
 - Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`
   seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
   passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.
