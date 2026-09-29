@@ -129,26 +129,28 @@ class TestSchichtTestumgebung(Kopie):
         self.assertEqual(summe(w), hashlib.sha256(INHALT.encode()).hexdigest(), "Skript schrieb in echte Daten")
 
 
-class TestJudgeKey(unittest.TestCase):
-    """testumgebung laesst keinen Test den echten Anthropic-Key lesen (judge.py)."""
+class TestJudgeKey(Kopie):
+    """testumgebung laesst keinen Test den echten Anthropic-Key lesen (judge.py).
+
+    Diese Schicht (judge.ANTHROPIC_KEY_DATEI umbiegen) allein: in der Kopie ist die
+    zweite Schicht -- HOME umlenken, TestJudgeKeyUnterMutation -- abgeschaltet."""
 
     def test_echter_key_bleibt_unberuehrt(self):
-        home = tempfile.mkdtemp(prefix="rag-home-")
-        self.addCleanup(shutil.rmtree, home, True)
+        ersetze(os.path.join(self.repo, "testumgebung.py"),
+                'os.environ["HOME"] = HOME\nos.environ["XDG_CONFIG_HOME"] = os.path.join(HOME, ".config")\n', "")
+        home = os.path.join(self.tmp, "rag-home")
         os.makedirs(os.path.join(home, ".config", "anthropic"))
         with open(os.path.join(home, ".config", "anthropic", "api_key"), "w") as f:
             f.write("KOEDER-KEY")
         skript = ("import testumgebung, judge\n"
                   "try:\n    print(judge.lies_anthropic_key())\n"
                   "except Exception as e:\n    print(type(e).__name__)\n")
-        p = subprocess.run([sys.executable, "-c", skript], cwd=BASE, capture_output=True, text=True,
-                           env=dict(os.environ, HOME=home))
+        p = self.lauf("-c", skript, env={"HOME": home})
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn("KOEDER-KEY", p.stdout)
         self.assertIn("ModusNichtVerfuegbar", p.stdout)
         # Gegenprobe: ohne testumgebung wuerde judge den Key finden
-        p = subprocess.run([sys.executable, "-c", "import judge; print(judge.lies_anthropic_key())"],
-                           cwd=BASE, capture_output=True, text=True, env=dict(os.environ, HOME=home))
+        p = self.lauf("-c", "import judge; print(judge.lies_anthropic_key())", env={"HOME": home})
         self.assertIn("KOEDER-KEY", p.stdout)
 
 
