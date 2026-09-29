@@ -26,7 +26,8 @@ import tempfile
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 # Was in die Laufkopie gehoert: Code und die eingecheckten Testdaten -- nie echte Daten.
-KOPIEREN = ("*.py", "golden_set.example.json", "regression_referenz.json", "pipe_referenz.json")
+KOPIEREN = ("*.py", "golden_set.example.json", "regression_referenz.json", "pipe_referenz.json",
+            "pipe_verlauf_referenz.json")
 
 
 def laufkopie():
@@ -42,7 +43,7 @@ def laufkopie():
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
          "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py",
-         "test_pipe_alt.py")
+         "test_pipe_alt.py", "test_judge.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -393,15 +394,56 @@ MUTATIONEN = [
     ("DW2 Fenster wieder da (nur die letzten 20 Nutzer-Nachrichten)",
      "rag.py", '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]\n    if not nutzer:\n        return "frage", None, None, None',
      '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"][-20:]\n    if not nutzer:\n        return "frage", None, None, None'),
-    ("DW3 Namensnachricht ohne Rueckfrage wechselt",
-     "rag.py", "    if antwortet_auf_rueckfrage(letzte):", "    if True:"),
+    ("DW3 Namensnachricht ohne Rueckfrage wechselt (letzte Nachricht)",
+     "rag.py", "        if nach_rueckfrage(i):\n            namen = namens_nachricht(text(i), wb)",
+     "        if True:\n            namen = namens_nachricht(text(i), wb)"),
+    ("KR25 Namensnachricht im Verlauf ohne Rueckfrage setzt das Spiel",
+     "rag.py", "    for i in nutzer[:-1]:\n        w = wahl_von(i)",
+     "    for i in nutzer[:-1]:\n        w = wahl_von(i) or ((namens_nachricht(text(i), wb) or [None]), '', '')\n"
+     "        w = w if w[0] != [None] else None"),
+    ("KR1 Rueckfrage-Erkennung ohne Rollenpruefung",
+     "rag.py", '        return vorher.get("role") == "assistant" and isinstance(c, str) and c.startswith(RUECKFRAGE)',
+     '        return isinstance(c, str) and c.startswith(RUECKFRAGE)'),
+    ("KR2 Rueckfrage irgendwo im Text statt am Anfang",
+     "rag.py", "isinstance(c, str) and c.startswith(RUECKFRAGE)", "isinstance(c, str) and RUECKFRAGE in c"),
+    ("KR9 STANDARD_SPIEL ungeprueft",
+     "openwebui_pipe.py", "                if v.STANDARD_SPIEL not in ids.values():", "                if False:"),
+    ("KR12 alter Weg entfernt auch die Quelle-Fusszeile (C)",
+     "openwebui_pipe.py", "def zerlege_verlauf(messages, index_weg=False):", "def zerlege_verlauf(messages, index_weg=True):"),
+    ("KR13 Listen-Inhalte nicht in Text gewandelt",
+     "openwebui_pipe.py", 'als_text = [{"role": m.get("role"), "content": text_von(m.get("content"))} for m in messages]',
+     "als_text = messages"),
+    ("KR15 Umlaut-Transliteration im Chat weg (auch Aliase)",
+     "rag.py", '    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue")):\n        s = s.replace(alt, neu)\n    return "".join(',
+     '    for alt, neu in ():\n        s = s.replace(alt, neu)\n    return "".join('),
+    ("W1 unbekannte Wahl antwortet still im alten Spiel (MUSS-1)",
+     "rag.py", '    if not namen:\n        return "unbekannt", genannt, None, None', '    if not namen:\n        return "frage", spiel, letzte, None'),
+    ("W2 unbekannte Wahl ohne Vorschlaege",
+     "openwebui_pipe.py", '            meintest = f" Meintest du {\' oder \'.join(vorschlaege[:3])}?" if vorschlaege else ""',
+     '            meintest = ""'),
+    ("W3 Stream-Abbruch nennt das Spiel nicht (MUSS-3)",
+     "openwebui_pipe.py", '            yield f"\\n\\n---\\n*Quelle: {name} -- Antwort unvollstaendig: {grund}*"\n            return',
+     "            raise"),
+    ("W4 Wahl nach der Rueckfrage beantwortet die Frage nicht (SOLLTE-4)",
+     "rag.py", "    j = letzte\n    while nach_rueckfrage(j):", "    j = letzte\n    while False:"),
+    ("W5 Rueckfrage-Kette: Namensnachricht gilt als Frage (SOLLTE-5)",
+     "rag.py", "        j = k                            # Namens-/Wahl-Nachricht: weiter zurueck",
+     "        return \"frage\", namen[0], k, None"),
+    ("W6 'Spiel X' ohne Doppelpunkt wieder eine Wahl",
+     "rag.py", '_WAHL = re.compile(r"^\\s*(?:spiel\\s*:|wechsel\\s+zu\\s)\\s*(?P<rest>.*)\\Z", re.I | re.S)',
+     '_WAHL = re.compile(r"^\\s*(?:spiel\\s*:?|wechsel\\s+zu\\s)\\s*(?P<rest>.*)\\Z", re.I | re.S)'),
+    ("W7 heisses Journal ohne klare Meldung",
+     "rag.py", '        if "readonly" in str(e) and os.path.exists(pfad + "-journal"):', "        if False:"),
+    ("U3 testumgebung biegt judge.ANTHROPIC_KEY_DATEI nicht um",
+     "testumgebung.py", 'judge.ANTHROPIC_KEY_DATEI = os.path.join(TMP, "anthropic_api_key")\n', "", ("test_schutz.py",)),
     ("DW4 Fusszeile des Index-Wegs nennt das Spiel nicht",
      "openwebui_pipe.py", "            yield fundstellen_spiel(hits, name)", "            yield fundstellen(hits)"),
     ("DW5 Spiel-Fusszeile auch auf dem alten Weg",
      "openwebui_pipe.py", '        if not rf.get("sprache"):\n            yield fundstellen(hits)',
      '        if not rf.get("sprache"):\n            yield fundstellen_spiel(hits, self.valves.SPIEL)'),
     ("DW6 Fusszeile auch im Sprachmodus (Index-Weg)",
-     "openwebui_pipe.py", '        if not rf.get("sprache"):\n            name = next(', '        if True:\n            name = next('),
+     "openwebui_pipe.py", '        if not rf.get("sprache"):\n            yield fundstellen_spiel(hits, name)',
+     '        if True:\n            yield fundstellen_spiel(hits, name)'),
     ("DW7 Rueckfrage ohne Beispiel 'Spiel: X'",
      "openwebui_pipe.py", 'Schreib zum Beispiel „Spiel: {namen[0]}“. Im Index', 'Im Index'),
     ("DW8 'Spiel: X: <Frage>' sucht mit der ganzen Nachricht",
@@ -409,11 +451,11 @@ MUTATIONEN = [
     ("DW9 Index-Fusszeile geht in den Verlauf",
      "openwebui_pipe.py", '        text = _FUSSZEILE_INDEX.sub("", text)', "        pass"),
     ("D4 zweite Rueckfrage beantwortet die aelteste statt die juengste Frage",
-     "rag.py", "                q = davor[-1]", "                q = davor[0]"),
+     "rag.py", "        k = davor[-1]", "        k = davor[0]"),
     ("D5 mehrdeutige Wahl im Verlauf nimmt das erste Spiel",
-     "rag.py", "            if len(wahl[0]) == 1:            # mehrdeutig", "            if wahl[0]:            # mehrdeutig"),
-    ("D6 Wahl ohne Doppelpunkt nach dem Namen",
-     "rag.py", '        if folge in wb and (j == len(woerter) or woerter[j - 1].endswith(":")):', "        if folge in wb:"),
+     "rag.py", "        if w and len(w[0]) == 1:        # unbekannt/mehrdeutig", "        if w and w[0]:        # unbekannt/mehrdeutig"),
+    ("D6 Name endet auch an einem Leerzeichen (nicht nur am Doppelpunkt)",
+     "rag.py", '[i for i in range(len(rest) - 1, -1, -1) if rest[i] == ":"]', '[i for i in range(len(rest) - 1, -1, -1) if rest[i] in ": "]'),
     ("D8 'danke' hinter dem Namen nicht erlaubt",
      "rag.py", '_HINTEN = ("bitte", "danke")', '_HINTEN = ("bitte",)'),
     # ---- Deployment-Schutz, URI (test_pipe_index.py, test_pipe_alt.py, test_index.py) ----

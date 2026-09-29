@@ -12,6 +12,7 @@ dieselbe Aenderung mitverschieben koennte.
 """
 import hashlib
 import json
+import shutil
 import os
 import sqlite3
 import sys
@@ -303,6 +304,39 @@ class TestSpieleImIndex(IndexTest):
                     with self.assertRaises(sqlite3.OperationalError):
                         con.execute("DELETE FROM chunks")       # wirklich read-only
                     self.assertEqual(sorted(os.listdir(verz)), ["index.sqlite"])   # keine Nebendatei
+
+    def test_heisses_journal_klare_meldung(self):
+        # Nachgebaut: Schreibtransaktion offen, Datei + -journal mitten darin kopiert,
+        # Kopie in einem read-only Verzeichnis (wie der Pipe-Mount)
+        self.baue()
+        kopie = os.path.join(self.tmp.name, "kopie")
+        os.mkdir(kopie)
+        con = sqlite3.connect(self.index)
+        con.execute("CREATE TABLE ballast (x TEXT)")         # genug Seiten, damit SQLite sie
+        con.executemany("INSERT INTO ballast VALUES (?)", [("a" * 1000,)] * 2000)   # vor dem Commit schreibt
+        con.commit()
+        # synchronous=OFF: der Journal-Kopf traegt dann "Eintraege aus der Dateigroesse" --
+        # mit NORMAL/FULL ist er unter SQLite 3.51 zum Kopierzeitpunkt noch leer (gemessen)
+        con.execute("PRAGMA synchronous=OFF")
+        con.execute("PRAGMA cache_size=1")
+        con.execute("BEGIN")
+        con.execute("UPDATE ballast SET x = 'b'")
+        self.assertTrue(os.path.exists(self.index + "-journal"))
+        shutil.copy(self.index, kopie)
+        shutil.copy(self.index + "-journal", kopie)
+        con.rollback()
+        con.close()
+        os.chmod(kopie, 0o555)
+        try:
+            with self.assertRaises(rag.KonfigFehler) as ctx:
+                rag.oeffne_index(os.path.join(kopie, "index.sqlite"))
+        finally:
+            os.chmod(kopie, 0o755)
+        self.assertIn("unvollstaendiges Journal", str(ctx.exception))
+        self.assertIn("rag.py index --alle", str(ctx.exception))
+        # auf dem Host (schreibend) rollt SQLite es zurueck, danach geht lesen wieder
+        rag.oeffne_index(os.path.join(kopie, "index.sqlite"), schreibend=True).close()
+        rag.oeffne_index(os.path.join(kopie, "index.sqlite")).close()
 
     def test_fehlender_index(self):
         with self.assertRaises(rag.KonfigFehler):

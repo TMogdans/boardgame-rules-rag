@@ -34,6 +34,25 @@ class TestAlterWegWieEd36f99(unittest.TestCase):
         self.assertTrue(50 < treffer < 800, treffer)     # beide Ausgaenge kommen vor
         self.assertIn(ref.REFERENZ_COMMIT, SOLL["_erzeugt_mit"])
 
+    def test_600_verlaeufe_wie_ed36f99(self):
+        # Kritiker 4 (c_diff.py): Verlaeufe mit Fusszeilen/Fehlerzeilen, Listen, System,
+        # task, sprache -- Ausgabe und LLM-Nutzlast wie ed36f99 (stabil sortiert)
+        with open(ref.VERLAUF_PFAD, encoding="utf-8") as f:
+            soll = json.load(f)["faelle"]
+        wissen = os.path.join(testumgebung.TMP, "knowledge_verlauf.jsonl")
+        with open(wissen, "w", encoding="utf-8") as f:
+            for z in ref.wissen_zeilen():
+                f.write(json.dumps(z, ensure_ascii=False) + "\n")
+        faelle = ref.verlauf_faelle()
+        ist = ref.lauf_verlaeufe(op, BASE, wissen, faelle)
+        self.assertEqual(len(ist), 600)
+        abweichend = [(i, faelle[i][0], a[0][:120], s[0][:120]) for i, (a, s) in enumerate(zip(ist, soll)) if a != s]
+        self.assertEqual(abweichend[:2], [], f"{len(abweichend)}/600 Verlaeufe weichen von ed36f99 ab")
+        # die Faelle decken, was sie decken sollen
+        texte = json.dumps([b for b, _ in faelle], ensure_ascii=False)
+        for stueck in ("*Quelle: Food Chain Magnate", "Fehler in der RAG-Pipe", '"image_url"', '"system"', '"sprache"'):
+            self.assertIn(stueck, texte)
+
     def test_ohne_rag_dir_bleibt_kein_regelheft(self):
         # Deployment: fehlt der Clone im Mount, antwortet der alte Weg auf ein unbekanntes
         # Spiel weiter mit "kein Regelheft" -- wie ed36f99, ohne rag.py zu laden.

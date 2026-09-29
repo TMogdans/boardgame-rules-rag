@@ -162,7 +162,7 @@ class TestOhneSpielangabe(PipeIndexBasis):
         self.pipe.valves.STANDARD_SPIEL = B
         self.assertIn("S. 41 ", self.frage("Geld"))
         self.pipe.valves.STANDARD_SPIEL = "gibts-nicht"
-        self.assertIn("nicht im Index", self.frage("Geld"))
+        self.assertEqual(self.frage("Geld"), "STANDARD_SPIEL 'gibts-nicht' ist nicht im Index.")   # K9
 
     def test_einziges_spiel_braucht_keine_angabe(self):
         shutil.rmtree(os.path.join(self.data, B))
@@ -362,7 +362,9 @@ class TestChatVerlauf(PipeIndexBasis):
         self.assertEqual(self.chat(*start, "Wie verdiene ich Geld?", a1, "Wechsel zu Brass"),
                          "Ok, ab jetzt Brass: Birmingham.")
         self.assertEqual(len(self.llm_bekam), n_llm)
-        text = self.chat(*start, "Wie verdiene ich Geld?", a1, "Spiel Brass", "Ok, ab jetzt Brass: Birmingham.",
+        # "Spiel X" ohne Doppelpunkt ist keine Wahl
+        self.assertIn("*Quelle: Food Chain Magnate,", self.chat(*start, "Wie verdiene ich Geld?", a1, "Spiel Brass"))
+        text = self.chat(*start, "Wie verdiene ich Geld?", a1, "Spiel: Brass", "Ok, ab jetzt Brass: Birmingham.",
                          "Und wieviel Geld?")
         self.assertIn("S. 41 ", text)
         self.assertIn("*Quelle: Brass: Birmingham,", text)
@@ -394,6 +396,52 @@ class TestChatVerlauf(PipeIndexBasis):
         self.assertIn("S. 7 ", text)
         self.assertTrue(self.llm_bekam[-1]["messages"][-1]["content"].endswith("Frage: Wie viel Geld?"))
 
+    def test_unbekannte_wahl_antwortet_nie_im_alten_spiel(self):
+        start = ("Spiel: Food Chain Magnate", "Ok, ab jetzt Food Chain Magnate.")
+        self.pipe.valves.STANDARD_SPIEL = B
+        for wahl, genannt in (("Spiel: Azull", "Azull"), ("Spiel: Nichtda: Wie viel Geld?", "Nichtda"),
+                              ("Wechsel zu Muhle", "Muhle")):
+            with self.subTest(wahl=wahl):
+                n_llm = len(self.llm_bekam)
+                text = self.chat(*start, wahl)
+                self.assertTrue(text.startswith(f"Kein Regelheft zu „{genannt}“ im Index."), text)
+                self.assertIn("„Spiel: ", text)
+                self.assertEqual(len(self.llm_bekam), n_llm)                 # nichts beantwortet
+        self.assertIn("Meintest du Food Chain Magnate?", self.chat("Spiel: Food Chain Magnat"))
+        # danach gilt weiter das alte Spiel
+        self.assertIn("*Quelle: Food Chain Magnate,", self.chat(*start, "Spiel: Azull", "Kein Regelheft ...", "Geld?"))
+
+    def test_rueckfrage_mit_spiel_x_beantwortet_die_frage(self):
+        r = self.chat("Wie verdiene ich Geld?")
+        for antwort in ("Spiel: Brass", "Wechsel zu Brass", "Spiel: Brass bitte"):
+            with self.subTest(antwort=antwort):
+                text = self.chat("Wie verdiene ich Geld?", r, antwort)
+                self.assertIn("S. 41 ", text)
+                self.assertTrue(self.llm_bekam[-1]["messages"][-1]["content"].endswith("Frage: Wie verdiene ich Geld?"))
+
+    def test_listen_inhalt(self):
+        # K13: Open WebUI schickt Nachrichten mit Anhang als Liste von Teilen
+        teile = lambda t: [{"type": "text", "text": t}, {"type": "image_url", "image_url": {"url": "x"}}]
+        r = self.chat("Wie verdiene ich Geld?")
+        body = {"messages": [{"role": "user", "content": teile("Wie verdiene ich Geld?")},
+                             {"role": "assistant", "content": [{"type": "text", "text": r}]},
+                             {"role": "user", "content": teile("Brass")}]}
+        self.assertIn("S. 41 ", "".join(sammle(self.pipe.pipe(body))))
+        body = {"messages": [{"role": "user", "content": teile("Spiel: Brass: Wie viel Geld?")}]}
+        self.assertIn("S. 41 ", "".join(sammle(self.pipe.pipe(body))))
+
+    def test_stream_abbruch_nennt_das_spiel(self):
+        self.llm_antwort = lambda req: httpx.Response(
+            200, text=json.dumps({"message": {"content": "Teil 1 "}}) + "\n" + json.dumps({"error": "runner terminated"}) + "\n")
+        text = self.chat("Spiel: Brass: Wie viel Geld?")
+        self.assertTrue(text.startswith("Teil 1 "), text)
+        self.assertIn("*Quelle: Brass: Birmingham -- Antwort unvollstaendig: RuntimeError: Ollama: runner terminated*", text)
+        self.assertNotIn("Fehler in der RAG-Pipe", text)
+        # und die Fehler-Fusszeile geht nicht in den Verlauf
+        self.llm_antwort = lambda req: httpx.Response(200, text=ollama_ndjson("Ant", "wort"))
+        self.chat("Spiel: Brass: Wie viel Geld?", text, "Und dann?")
+        self.assertEqual(self.llm_bekam[-1]["messages"][2], {"role": "assistant", "content": "Teil 1 "})
+
     def test_nur_ein_name_ohne_rueckfrage(self):
         # keine Wahl, keine Erkennung -> ohne Spiel die Rueckfrage
         self.assertTrue(self.chat("Brass").startswith("Zu welchem Spiel ist die Frage?"))
@@ -405,7 +453,7 @@ class TestChatVerlauf(PipeIndexBasis):
     def test_kurzer_name_kein_auffangbecken(self):
         self.lege_an("Fuji", [c("fuji", "Fuji", 1, 3, "Geld am Vulkan.")])
         self.baue()
-        self.assertTrue(self.chat("Spiel: Fujian").startswith("Zu welchem Spiel ist die Frage?"))
+        self.assertTrue(self.chat("Spiel: Fujian").startswith("Kein Regelheft zu „Fujian“ im Index."))
         self.assertIn("S. 3 ", self.chat("Spiel: Fuji: Wie spielt man?"))
 
 
@@ -423,10 +471,10 @@ class TestDeployment(PipeIndexBasis):
         self.pipe.valves.RAG_DIR = verz
 
     def test_zu_alte_schnittstelle(self):
-        self.clone_mit("SCHNITTSTELLE = 5", "SCHNITTSTELLE = 4")
+        self.clone_mit("SCHNITTSTELLE = 6", "SCHNITTSTELLE = 5")
         text = self.frage("Geld", spiel="FCM")
         self.assertIn("passt nicht zu dieser Pipe", text)
-        self.assertIn("Schnittstelle 4", text)
+        self.assertIn("Schnittstelle 5", text)
         self.assertNotIn("AttributeError", text)
 
     def test_fehlende_funktion(self):

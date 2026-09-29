@@ -16,6 +16,7 @@ Skript schreiben oder aus dem es lesen kann, in ein eigenes Temp-Verzeichnis:
   - rag.__file__ (alter Weg: knowledge.jsonl/golden_set.json/pdfs neben rag.py),
     rag.DATA_DIR, rag.INDEX_PATH, rag.PDF_DIR
   - classify.KNOW, vision_ingest.KNOW, auto_ingest.KNOW, ingest.OUT
+  - judge.ANTHROPIC_KEY_DATEI (nie der echte API-Key)
 Einzelne Tests duerfen darueber hinaus eigene Temp-Pfade setzen.
 """
 import atexit
@@ -55,6 +56,7 @@ import classify       # noqa: E402
 import vision_ingest  # noqa: E402
 import auto_ingest    # noqa: E402
 import ingest         # noqa: E402
+import judge          # noqa: E402
 
 rag.__file__ = os.path.join(TMP, "rag.py")
 rag.DATA_DIR = DATA
@@ -64,3 +66,5 @@ classify.KNOW = os.path.join(TMP, "knowledge.jsonl")
 vision_ingest.KNOW = os.path.join(TMP, "knowledge.jsonl")
 auto_ingest.KNOW = os.path.join(TMP, "knowledge.jsonl")
 ingest.OUT = os.path.join(TMP, "knowledge.jsonl")
+# judge.py liest sonst den echten API-Key aus ~/.config/anthropic/api_key
+judge.ANTHROPIC_KEY_DATEI = os.path.join(TMP, "anthropic_api_key")

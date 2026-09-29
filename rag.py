@@ -487,21 +487,25 @@ def ordne_spiel(anfrage, katalog, schwelle=0.8):
 
 
 # ---------- Spiel im Chat (Index-Weg der Pipe, ohne regelfrage.spiel) ----------
-# Entscheidung Tobias (Spec D'): Im Chat wird das Spiel NUR explizit gewaehlt --
-# keine Erkennung von Spielnamen im Freitext, auch nicht in der ersten Nachricht.
-# Gemessen am vorigen Stand ("erste exakte Nennung"): 59/100 erste Fragen setzten ein
-# Spiel, ~43 davon falsch ("Wie endet das Spiel?" -> "Das Spiel", "wie bei Skat").
-#   (a) Wahl per Nachricht:   Spiel: X    |  Spiel X    |  Wechsel zu X
-#       jeweils optional mit ": <Frage>" dahinter (dann wird <Frage> beantwortet)
+# Entscheidung Tobias (Spec D', praezisiert): Im Chat wird das Spiel NUR explizit
+# gewaehlt -- keine Erkennung von Spielnamen im Freitext, auch nicht in der ersten
+# Nachricht. Gemessen am Stand davor ("erste exakte Nennung"): 59/100 erste Fragen
+# setzten ein Spiel, ~43 davon falsch ("Wie endet das Spiel?" -> "Das Spiel").
+#   (a) Wahl per Nachricht:   Spiel: X    |    Wechsel zu X
+#       ("Spiel:X", "spiel: x" gehen auch), jeweils optional ":<Frage>" dahinter --
+#       dann wird <Frage> beantwortet. "Spiel X" OHNE Doppelpunkt ist KEINE Wahl
+#       (Kollision mit dem Imperativ: "Spiel solo", "Spiel nochmal").
 #   (b) nur der Spielname (ggf. "bitte"/"danke") DIREKT als Antwort auf unsere
-#       Rueckfrage -> Spiel gewaehlt, die urspruengliche Frage wird beantwortet
+#       Rueckfrage. Nach unserer Rueckfrage beantwortet jede Wahl ohne eigene Frage
+#       die urspruengliche Frage -- auch ueber mehrere Rueckfrage-Runden; Namens- und
+#       Wahl-Nachrichten gelten dabei nie selbst als Frage.
 # X ist ein Name oder Alias exakt (chat_norm). Die Wahl gilt fuer den ganzen Chat bis
-# zur naechsten Wahl -- kein Fenster. Eine reine Namensnachricht ohne Rueckfrage ist
-# eine gewoehnliche Frage im aktuellen Spiel (die Fusszeile zeigt das Spiel).
-SCHNITTSTELLE = 5            # Version der Funktionen, die openwebui_pipe.py braucht
+# zur naechsten -- kein Fenster. Eine unbekannte Wahl ("Spiel: Azull") wird gemeldet,
+# nie still im alten Spiel beantwortet; das alte Spiel bleibt gewaehlt. Eine reine
+# Namensnachricht ohne Rueckfrage ist eine gewoehnliche Frage im aktuellen Spiel.
+SCHNITTSTELLE = 6            # Version der Funktionen, die openwebui_pipe.py braucht
 RUECKFRAGE = "Zu welchem Spiel ist die Frage?"
-CHAT_MAX_WOERTER = 8         # laengste Wortfolge eines Namens
-_WAHL_VORN = (("spiel",), ("wechsel", "zu"))
+_WAHL = re.compile(r"^\s*(?:spiel\s*:|wechsel\s+zu\s)\s*(?P<rest>.*)\Z", re.I | re.S)
 _HINTEN = ("bitte", "danke")
 
 
@@ -523,95 +527,108 @@ def chat_woerterbuch(katalog):
     return wb
 
 
-def explizite_wahl(text, wb):
-    """([Namen], Frage) fuer "Spiel: X[: Frage]", "Spiel X[: Frage]", "Wechsel zu X[: Frage]".
+def _ohne_hoeflichkeit(text):
+    woerter = (text or "").split()
+    while len(woerter) > 1 and chat_norm(woerter[-1]) in _HINTEN:
+        woerter = woerter[:-1]
+    return " ".join(woerter)
 
-    Nach dem Namen folgt das Nachrichtenende oder ein Doppelpunkt; sonst ist es keine
-    Wahl (dann bliebe unklar, wo der Name endet). None, wenn keine Wahl.
+
+def explizite_wahl(text, wb):
+    """None, wenn keine Wahl -- sonst (Namen, Frage, genannt).
+
+    Namen: sortierte Treffer (leer = unbekannt, >1 = mehrdeutig); Frage: Text nach dem
+    Doppelpunkt hinter dem Namen ("" ohne); genannt: der Name, wie er geschrieben war.
+    Der Name endet am Nachrichtenende oder an einem Doppelpunkt; probiert wird vom
+    laengsten Kandidaten her ("Spiel: 7 Wonders: Duel: wer?" -> "7 Wonders: Duel").
     """
-    kopf = (text or "").lstrip()[:8].casefold()
-    if not (kopf.startswith("spiel") or kopf.startswith("wechsel")):
-        return None                     # Praefix-Test zuerst: die meisten Nachrichten enden hier
-    text = re.sub(r"^\s*spiel\s*:\s*", "Spiel ", text, flags=re.I)
-    woerter = text.split()
-    tok = [chat_norm(w) for w in woerter[:2 + CHAT_MAX_WOERTER]]   # nur, wo der Name stehen kann
-    for vorn in _WAHL_VORN:
-        if tuple(tok[:len(vorn)]) == vorn:
-            start = len(vorn)
-            break
-    else:
+    m = _WAHL.match(text or "")
+    if not m:
         return None
-    for j in range(min(len(tok), start + CHAT_MAX_WOERTER), start, -1):
-        folge = "".join(tok[start:j])
-        if folge in wb and (j == len(woerter) or woerter[j - 1].endswith(":")):
-            return sorted(wb[folge]), " ".join(woerter[j:]).strip()
-    return None
+    rest = m.group("rest")
+    schnitte = [len(rest)] + [i for i in range(len(rest) - 1, -1, -1) if rest[i] == ":"]
+    for pos in schnitte:
+        teil = rest[:pos]
+        kandidat = _ohne_hoeflichkeit(teil) if pos == len(rest) else teil
+        folge = chat_norm(kandidat)
+        if folge and folge in wb:
+            return sorted(wb[folge]), rest[pos + 1:].strip(), kandidat.strip()
+    genannt = rest.split(":", 1)[0].strip()
+    return [], (rest.split(":", 1)[1].strip() if ":" in rest else ""), _ohne_hoeflichkeit(genannt)
 
 
 def namens_nachricht(text, wb):
     """Namen, wenn der Text NUR ein Spielname ist (ggf. "bitte"/"danke"), sonst None."""
-    tok = [t for t in (chat_norm(w) for w in (text or "").split()) if t]
-    while len(tok) > 1 and tok[-1] in _HINTEN:
-        tok = tok[:-1]
-    folge = "".join(tok)
+    folge = chat_norm(_ohne_hoeflichkeit(text))
     return sorted(wb[folge]) if folge in wb else None
 
 
 def spiel_im_chat(nachrichten, wb):
     """Entscheidung fuer einen Chat ohne regelfrage.spiel. nachrichten: role/content (Text).
 
-    Rueckgabe (art, Name(n), bis, Frage):
+    Rueckgabe (art, wert, bis, Frage):
       ("frage", Name oder None, bis, Frage oder None) -- beantworte nachrichten[:bis+1];
           Frage ersetzt den Text der Nachricht bis (bei "Spiel: X: <Frage>")
-      ("gewechselt", Name, None, None)  -- nur bestaetigen, keine Suche
-      ("mehrdeutig", [Namen], None, None) -- Rueckfrage mit Vorschlaegen
+      ("gewechselt", Name, None, None)     -- nur bestaetigen, keine Suche
+      ("mehrdeutig", [Namen], None, None)  -- Rueckfrage mit Vorschlaegen
+      ("unbekannt", genannt, None, None)   -- Wahl eines Spiels, das es nicht gibt
     """
     def text(i):
         c = nachrichten[i].get("content")
         return c if isinstance(c, str) else ""
 
-    def antwortet_auf_rueckfrage(i):
-        return i > 0 and nachrichten[i - 1].get("role") == "assistant" \
-            and str(nachrichten[i - 1].get("content") or "").startswith(RUECKFRAGE)
+    def nach_rueckfrage(i):
+        vorher = nachrichten[i - 1] if i > 0 else {}
+        c = vorher.get("content")
+        return vorher.get("role") == "assistant" and isinstance(c, str) and c.startswith(RUECKFRAGE)
 
     nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]
     if not nutzer:
         return "frage", None, None, None
+
+    def wahl_von(i):
+        """(Namen, Frage, genannt) fuer eine explizite Wahl oder eine Namens-Antwort auf
+        unsere Rueckfrage -- sonst None."""
+        w = explizite_wahl(text(i), wb)
+        if w is not None:
+            return w
+        if nach_rueckfrage(i):
+            namen = namens_nachricht(text(i), wb)
+            if namen:
+                return namen, "", text(i).strip()
+        return None
+
     spiel = None
     for i in nutzer[:-1]:
-        wahl = explizite_wahl(text(i), wb)
-        if wahl:
-            if len(wahl[0]) == 1:            # mehrdeutig -> keine Wahl, das alte Spiel bleibt
-                spiel = wahl[0][0]
-            continue
-        if antwortet_auf_rueckfrage(i):
-            namen = namens_nachricht(text(i), wb)
-            if namen and len(namen) == 1:
-                spiel = namen[0]
+        w = wahl_von(i)
+        if w and len(w[0]) == 1:        # unbekannt/mehrdeutig -> keine Wahl, das alte Spiel bleibt
+            spiel = w[0][0]
     letzte = nutzer[-1]
-    wahl = explizite_wahl(text(letzte), wb)
-    if wahl:
-        namen, frage = wahl
-        if len(namen) > 1:
-            return "mehrdeutig", namen, None, None
-        return ("frage", namen[0], letzte, frage) if frage else ("gewechselt", namen[0], None, None)
-    if antwortet_auf_rueckfrage(letzte):
-        namen = namens_nachricht(text(letzte), wb)
-        if namen:
-            if len(namen) > 1:
-                return "mehrdeutig", namen, None, None
-            # die Frage, die unsere Rueckfrage ausgeloest hat: die letzte Nutzer-
-            # Nachricht VOR der Rueckfrage (bei F1, R, F2, R, Name also F2)
-            davor = [i for i in nutzer if i < letzte - 1]
-            if davor:
-                q = davor[-1]
-                wahl_q = explizite_wahl(text(q), wb)
-                if wahl_q is None:
-                    return "frage", namen[0], q, None
-                if wahl_q[1]:
-                    return "frage", namen[0], q, wahl_q[1]
-            return "gewechselt", namen[0], None, None
-    return "frage", spiel, letzte, None
+    w = wahl_von(letzte)
+    if w is None:
+        return "frage", spiel, letzte, None
+    namen, frage, genannt = w
+    if not namen:
+        return "unbekannt", genannt, None, None
+    if len(namen) > 1:
+        return "mehrdeutig", namen, None, None
+    if frage:
+        return "frage", namen[0], letzte, frage
+    # Wahl ohne eigene Frage: war sie die Antwort auf unsere Rueckfrage, gilt die Frage,
+    # die die Rueckfrage ausgeloest hat -- ueber beliebig viele Rueckfrage-Runden zurueck.
+    j = letzte
+    while nach_rueckfrage(j):
+        davor = [i for i in nutzer if i < j - 1]
+        if not davor:
+            break
+        k = davor[-1]
+        wk = wahl_von(k) or (None if namens_nachricht(text(k), wb) is None else ([], "", ""))
+        if wk is None:
+            return "frage", namen[0], k, None
+        if wk[1]:                        # "Spiel: X: <Frage>" -> diese Frage
+            return "frage", namen[0], k, wk[1]
+        j = k                            # Namens-/Wahl-Nachricht: weiter zurueck
+    return "gewechselt", namen[0], None, None
 
 
 def katalog_aus_index(spiele):
@@ -831,7 +848,20 @@ def oeffne_index(pfad=None, schreibend=False):
     # Pfad fuer die URI maskieren: "?", "#", "%" oder Leerzeichen im Pfad wuerden sonst als
     # URI-Syntax gelesen (Query, Fragment, Escape) und eine andere Datei oeffnen oder scheitern.
     import pathlib
-    return sqlite3.connect(pathlib.Path(os.path.abspath(pfad)).as_uri() + "?mode=ro", uri=True, timeout=30)
+    con = sqlite3.connect(pathlib.Path(os.path.abspath(pfad)).as_uri() + "?mode=ro", uri=True, timeout=30)
+    try:
+        con.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.OperationalError as e:
+        con.close()
+        # Heisses Journal: ein Schreiblauf wurde abgebrochen. Read-only (Pipe-Mount) kann
+        # SQLite es nicht zurueckrollen und meldet nur "attempt to write a readonly database".
+        if "readonly" in str(e) and os.path.exists(pfad + "-journal"):
+            raise KonfigFehler(
+                f"Neben dem Index liegt ein unvollstaendiges Journal ({pfad}-journal): ein Lauf von "
+                "`rag.py index` wurde abgebrochen. Read-only laesst sich das nicht aufraeumen -- auf dem "
+                "Host `python rag.py index --alle` laufen lassen (rollt es zurueck), dann erneut fragen.") from e
+        raise
+    return con
 
 
 def _hat_fts(con):

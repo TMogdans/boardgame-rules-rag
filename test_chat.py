@@ -4,9 +4,12 @@
 Spiel im Chat (rag.spiel_im_chat) -- abgenommene Spec D' (Tobias):
 
   Das Spiel wird NUR explizit gewaehlt:
-    (a) "Spiel: X", "Spiel X", "Wechsel zu X" -- optional mit ": <Frage>" dahinter
+    (a) "Spiel: X" (auch "Spiel:X") oder "Wechsel zu X" -- optional ":<Frage>" dahinter;
+        "Spiel X" ohne Doppelpunkt ist KEINE Wahl ("Spiel solo", "Spiel nochmal")
     (b) nur der Spielname (ggf. "bitte"/"danke") DIREKT als Antwort auf unsere
-        Rueckfrage -> die urspruengliche Frage wird beantwortet
+        Rueckfrage -> die urspruengliche Frage wird beantwortet; nach der Rueckfrage
+        tut das auch jede Wahl (a) ohne eigene Frage
+  Unbekannte Wahl ("Spiel: Azull") -> Meldung, nie still im alten Spiel.
   X exakt (Name oder Alias, chat_norm). Die Wahl gilt fuer den ganzen Chat bis zur
   naechsten Wahl, ohne Fenster. KEINE Erkennung von Spielnamen im Freitext -- auch
   nicht in der ersten Nachricht. Eine reine Namensnachricht ohne Rueckfrage ist eine
@@ -164,8 +167,13 @@ def wahl(*wechsel):
 
 class TestKeineErkennungImFreitext(unittest.TestCase):
     def test_erste_frage_legt_nie_ein_spiel_fest(self):
-        falsch = [(q, wahl(q)) for q in FRAGEN if wahl(q) != ("frage", None, 0, None)]
+        # Eine der 100 Fragen beginnt mit "Spiel:" ("Spiel: wie viele Karten?") -- das ist
+        # nach Spec eine explizite Wahl eines unbekannten Spiels: Meldung, kein Spiel gesetzt.
+        soll = lambda q: (("unbekannt", q.split(":", 1)[1].strip(), None, None) if q.lower().startswith("spiel:")
+                          else ("frage", None, 0, None))
+        falsch = [(q, wahl(q)) for q in FRAGEN if wahl(q) != soll(q)]
         self.assertEqual(falsch, [])
+        self.assertEqual(sum(1 for q in FRAGEN if q.lower().startswith("spiel:")), 1)
         for q in ("Wie punktet man in Food Chain Magnate?", "Wie endet Das Spiel?", "Azul: wer beginnt?",
                   "Wie funktioniert bei 7 Wonders die Wertung?", "Azul"):
             with self.subTest(q=q):
@@ -174,7 +182,8 @@ class TestKeineErkennungImFreitext(unittest.TestCase):
     def test_laufender_chat_wechselt_nie_ueber_freitext(self):
         for start in ("Spiel: Food Chain Magnate", "Spiel: Azul", "Wechsel zu Everdell"):
             soll = rag.explizite_wahl(start, WB)[0][0]
-            falsch = [(q, r) for q in FRAGEN if (r := wahl(start, "Ok.", q)) != ("frage", soll, 2, None)]
+            falsch = [(q, r) for q in FRAGEN if not q.lower().startswith("spiel:")
+                      and (r := wahl(start, "Ok.", q)) != ("frage", soll, 2, None)]
             with self.subTest(start=start):
                 self.assertEqual(falsch, [])
 
@@ -184,21 +193,23 @@ class TestKeineErkennungImFreitext(unittest.TestCase):
         for w in ("Und jetzt eine Frage zu Azul: wie viele Fliesen?", "Bei Root: wer beginnt?", "Wechseln wir zu Hive",
                   "Jetzt Azul", "Nun zu Azul: wer beginnt?", "Neues Spiel: Azul", "Zu Azul", "Bei Azul", "Für Azul",
                   "Wechsle zu Azul", "Wechsel auf Azul", "Azul: wer beginnt?", "Zu Azul: wer beginnt?", "OK, Azul",
-                  "Und Azul?", "Azul", "Azul bitte", "Spiel: Azul wer beginnt?"):
+                  "Und Azul?", "Azul", "Azul bitte", "Spiel Azul", "Spiel Azul: wer beginnt?", "Spiel solo",
+                  "Spiel nochmal", "Spiel Leben"):
             with self.subTest(w=w):
                 self.assertEqual(wahl("Spiel: Food Chain Magnate", "Ok.", w), ("frage", "Food Chain Magnate", 2, None))
 
 
 class TestExpliziteWahl(unittest.TestCase):
-    def test_die_drei_formen(self):
-        for w in ("Spiel: Azul", "Spiel Azul", "Wechsel zu Azul", "spiel:Azul", "SPIEL : azul", "Spiel: Azul!",
-                  "Spiel: AZUL"):
+    def test_die_formen(self):
+        for w in ("Spiel: Azul", "Wechsel zu Azul", "spiel:Azul", "spiel: azul", "SPIEL : azul", "Spiel: Azul!",
+                  "Spiel: AZUL", "Spiel: Azul bitte", "Wechsel zu Azul danke"):
             with self.subTest(w=w):
                 self.assertEqual(wahl(w), ("gewechselt", "Azul", None, None))
                 self.assertEqual(wahl("Spiel: Root", "Ok.", w), ("gewechselt", "Azul", None, None))
 
     def test_mit_frage(self):
-        for w in ("Spiel: Azul: wer beginnt?", "Spiel Azul: wer beginnt?", "Wechsel zu Azul: wer beginnt?"):
+        for w in ("Spiel: Azul: wer beginnt?", "Spiel: Azul:wer beginnt?", "Spiel:Azul:wer beginnt?",
+                  "Wechsel zu Azul: wer beginnt?"):
             with self.subTest(w=w):
                 self.assertEqual(wahl(w), ("frage", "Azul", 0, "wer beginnt?"))
         self.assertEqual(wahl("Spiel: 7 Wonders: Duel"), ("gewechselt", "7 Wonders: Duel", None, None))
@@ -206,8 +217,27 @@ class TestExpliziteWahl(unittest.TestCase):
         self.assertEqual(wahl("Spiel: 7 Wonders: wer beginnt?"), ("frage", "7 Wonders", 0, "wer beginnt?"))
         self.assertEqual(wahl("Spiel: Fluegelschlag: wie fliegt man?"), ("frage", "Flügelschlag", 0, "wie fliegt man?"))
 
-    def test_ohne_doppelpunkt_nach_dem_namen_keine_wahl(self):
-        self.assertEqual(wahl("Spiel: Azul wer beginnt?"), ("frage", None, 0, None))
+    def test_spiel_x_ohne_doppelpunkt_ist_keine_wahl(self):
+        for w in ("Spiel Azul", "Spiel solo", "Spiel nochmal", "Spiel Azul: wer beginnt?"):
+            with self.subTest(w=w):
+                self.assertEqual(wahl(w), ("frage", None, 0, None))
+
+    def test_unbekannte_wahl_wird_gemeldet(self):
+        for w, genannt in (("Spiel: Azull", "Azull"), ("Spiel: Nichtda: Geld?", "Nichtda"), ("Wechsel zu Muhle", "Muhle"),
+                           ("Spiel: Azul wer beginnt?", "Azul wer beginnt?"), ("Spiel:", "")):
+            with self.subTest(w=w):
+                self.assertEqual(wahl(w), ("unbekannt", genannt, None, None))
+                # das bisherige Spiel bleibt gewaehlt, die Frage wird NICHT beantwortet
+                self.assertEqual(wahl("Spiel: Root", "Ok.", w), ("unbekannt", genannt, None, None))
+                self.assertEqual(wahl("Spiel: Root", "Ok.", w, "Kein Regelheft ...", "Wer beginnt?"),
+                                 ("frage", "Root", 4, None))
+
+    def test_namensnachricht_im_verlauf_ohne_rueckfrage_setzt_nichts(self):
+        # K25: nur Antworten auf UNSERE Rueckfrage zaehlen als Wahl
+        self.assertEqual(wahl("Spiel: Azul", "Ok.", "Root", "A.", "Wer beginnt?"), ("frage", "Azul", 4, None))
+        self.assertEqual(wahl("Root", "A.", "Wer beginnt?"), ("frage", None, 2, None))
+        self.assertEqual(wahl("Frage?", "A.", "Root", "A.", "Hive", "A.", "Wer beginnt?"), ("frage", None, 6, None))
+        self.assertEqual(wahl("Spiel: Azul", "Ok.", "Root", "A.", "Hive", "A.", "Wer?"), ("frage", "Azul", 6, None))
 
     def test_wahl_gilt_ohne_fenster(self):
         v = ["Spiel: Azul", "Ok, ab jetzt Azul."]
@@ -216,6 +246,14 @@ class TestExpliziteWahl(unittest.TestCase):
             v += [f"Folgefrage {i}?", "A."]
         v.append("Und noch eine?")
         self.assertEqual(wahl(*v)[1], "Azul")
+
+    def test_umlaut_im_alias(self):
+        # K15: Umlaut-Schreibung auch fuer Aliase
+        k, _ = rag.katalog_aus_index([{"spiel_id": "wingspan", "name": "Wingspan", "aliase": ["Flügelschlag"]}])
+        wb = rag.chat_woerterbuch(k)
+        for w in ("Spiel: Fluegelschlag", "Spiel: FLÜGELSCHLAG", "Spiel: flügel-schlag"):
+            with self.subTest(w=w):
+                self.assertEqual(rag.spiel_im_chat(chat(w), wb), ("gewechselt", "Wingspan", None, None))
 
     def test_letzte_wahl_gilt(self):
         self.assertEqual(wahl("Spiel: Azul", "Ok.", "Spiel: Root", "Ok.", "Wer beginnt?"), ("frage", "Root", 4, None))
@@ -235,18 +273,42 @@ class TestExpliziteWahl(unittest.TestCase):
 
 class TestRueckfrage(unittest.TestCase):
     def test_name_auf_rueckfrage_beantwortet_die_frage(self):
-        for antwort in ("Azul", "Azul bitte", "Azul danke", "azul!", "Spiel: Azul"):
+        # SOLLTE-4: auch jede explizite Wahl nach der Rueckfrage -- so passt die Anleitung
+        for antwort in ("Azul", "Azul bitte", "Azul danke", "azul!", "Spiel: Azul", "Wechsel zu Azul",
+                        "Spiel: Azul bitte"):
             with self.subTest(antwort=antwort):
-                erg = wahl("Wer beginnt?", R, antwort)
-                self.assertEqual(erg, ("frage", "Azul", 0, None) if not antwort.startswith("Spiel")
-                                 else ("gewechselt", "Azul", None, None))
+                self.assertEqual(wahl("Wer beginnt?", R, antwort), ("frage", "Azul", 0, None))
+        # mit eigener Frage gilt die neue Frage
+        self.assertEqual(wahl("Wer beginnt?", R, "Spiel: Azul: Wie viele Fliesen?"),
+                         ("frage", "Azul", 2, "Wie viele Fliesen?"))
+
+    def test_kette_ueber_mehrere_rueckfragen(self):
+        # SOLLTE-5: F1, R, "Brass", R(mehrdeutig), "Brass: Birmingham" -> F1
+        k, _ = rag.katalog_aus_index([{"spiel_id": "brass-birmingham", "name": "Brass: Birmingham", "aliase": ["Brass"]},
+                                      {"spiel_id": "brass-lancashire", "name": "Brass: Lancashire", "aliase": ["Brass"]}])
+        wb = rag.chat_woerterbuch(k)
+        rm = rag.RUECKFRAGE + " Meintest du Brass: Birmingham oder Brass: Lancashire?"
+        self.assertEqual(rag.spiel_im_chat(chat("Wie viel Geld?", R, "Brass", rm, "Brass: Birmingham"), wb),
+                         ("frage", "Brass: Birmingham", 0, None))
+        self.assertEqual(rag.spiel_im_chat(chat("Wie viel Geld?", R, "Spiel: Brass", rm, "Spiel: Brass Lancashire"), wb),
+                         ("frage", "Brass: Lancashire", 0, None))
+        # Namensnachricht ohne vorige Rueckfrage ist keine Frage -> nur Bestaetigung
+        self.assertEqual(wahl("Azul", R, "Azul"), ("gewechselt", "Azul", None, None))
+
+    def test_rueckfrage_nur_von_uns_und_am_anfang(self):
+        # K1: nur Assistant-Rolle; K2: nur Textanfang
+        self.assertEqual(rag.spiel_im_chat([U("Wer beginnt?"), U(rag.RUECKFRAGE + " weiss ich nicht"), U("Azul")], WB),
+                         ("frage", None, 2, None))
+        self.assertEqual(wahl("Wer beginnt?", "Gute Frage. " + rag.RUECKFRAGE, "Azul"), ("frage", None, 2, None))
+        self.assertEqual(rag.spiel_im_chat([U("Wer beginnt?"), {"role": "system", "content": R}, U("Azul")], WB),
+                         ("frage", None, 2, None))
 
     def test_zweite_rueckfrage_beantwortet_die_juengste_frage(self):
         # D4: F1, Rueckfrage, F2, Rueckfrage, Name -> F2
         self.assertEqual(wahl("Frage eins?", R, "Frage zwei?", R, "Azul"), ("frage", "Azul", 2, None))
 
     def test_andere_antwort_ist_keine_wahl(self):
-        for antwort in ("Bei Azul", "Zu Azul", "Fudschein Magnat", "Azulx"):
+        for antwort in ("Bei Azul", "Zu Azul", "Fudschein Magnat", "Azulx", "Spiel Azul"):
             with self.subTest(antwort=antwort):
                 self.assertEqual(wahl("Wer beginnt?", R, antwort), ("frage", None, 2, None))
 
@@ -261,6 +323,7 @@ class TestRueckfrage(unittest.TestCase):
         r = rag.RUECKFRAGE + " Meintest du Brass: Birmingham oder Brass: Lancashire?"
         self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass: wieviel Geld?", r, "Brass: Birmingham"), wb),
                          ("frage", "Brass: Birmingham", 0, "wieviel Geld?"))
+        # nach der Rueckfrage: die mehrdeutige Wahl war keine Frage -> nur Bestaetigung
         self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass", r, "Brass: Lancashire"), wb),
                          ("gewechselt", "Brass: Lancashire", None, None))
 

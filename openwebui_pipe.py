@@ -43,7 +43,7 @@ _FEHLERZEILE = re.compile(r"(?:\n\n)?\*\*Fehler in der RAG-Pipe:\*\*.*\Z", re.S)
 _FUSSZEILE_INDEX = re.compile(r"(?:\n\n)?---\n\*Quelle: [^\n]*\*\s*\Z")
 # Mindest-Schnittstelle des geladenen rag.py fuer den Index-Weg (rag.SCHNITTSTELLE).
 # Ein aelterer Clone im Mount ergaebe sonst AttributeError mitten in der Antwort.
-MIN_SCHNITTSTELLE = 5
+MIN_SCHNITTSTELLE = 6
 _RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten")
 _RAG_INDEX_WEG = _RAG_ALTER_WEG + ("oeffne_index", "spiele_im_index", "katalog_aus_index", "ordne_spiel",
                                    "chat_woerterbuch", "spiel_im_chat", "RUECKFRAGE", "index_konfig",
@@ -424,6 +424,15 @@ class Pipe:
         art, erg, bis, frage = rag.spiel_im_chat(als_text, wb)
         if art == "gewechselt":
             return None, messages, f"Ok, ab jetzt {erg}."
+        if art == "unbekannt":
+            # Explizite Wahl eines Spiels, das es nicht gibt: nie still im alten Spiel
+            # antworten. Das bisherige Spiel bleibt gewaehlt, die Frage bleibt unbeantwortet.
+            status, vorschlaege = rag.ordne_spiel(erg, katalog) if erg else ("unbekannt", [])
+            vorschlaege = [vorschlaege] if status == "treffer" else vorschlaege
+            meintest = f" Meintest du {' oder '.join(vorschlaege[:3])}?" if vorschlaege else ""
+            beispiel = vorschlaege[0] if vorschlaege else spiele[0]["name"]
+            return None, messages, (f"Kein Regelheft zu „{erg}“ im Index.{meintest} "
+                                    f"Schreib zum Beispiel „Spiel: {beispiel}“.")
         if art == "mehrdeutig":
             return None, messages, (f"{rag.RUECKFRAGE} Meintest du {' oder '.join(erg[:3])}? "
                                     f"Schreib zum Beispiel „Spiel: {erg[0]}“.")
@@ -449,8 +458,14 @@ class Pipe:
             yield "Keine Frage gefunden."
             return
         nachrichten, hits = await asyncio.to_thread(self._suche_spiel, frage, v, spiel_id)
-        async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
-            yield stueck
+        name = next((s["name"] for s in self._katalog[0] if s["spiel_id"] == spiel_id), spiel_id)
+        try:
+            async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
+                yield stueck
+        except Exception as e:
+            # Auch im Fehlerpfad sichtbar, welches Heft geantwortet hat (Teilantwort!)
+            grund = " ".join(f"{type(e).__name__}: {e}".split())
+            yield f"\n\n---\n*Quelle: {name} -- Antwort unvollstaendig: {grund}*"
+            return
         if not rf.get("sprache"):
-            name = next((s["name"] for s in self._katalog[0] if s["spiel_id"] == spiel_id), spiel_id)
             yield fundstellen_spiel(hits, name)
