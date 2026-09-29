@@ -195,6 +195,33 @@ class TestHybrid(SucheTest):
         spiele = {self.con.execute("SELECT spiel_id FROM chunks WHERE id=?", r).fetchone()[0] for r in roh}
         self.assertEqual(spiele, {B})
 
+    def test_scharfes_s_findet_etwas(self):
+        C = "strasse"
+        meta = rag.lege_spiel_an("Strasse")
+        rag.schreibe_jsonl(rag.knowledge_pfad(C), [
+            c(C, "Strasse", 1, 2, "Die Straße ist lang und groß."),
+            c(C, "Strasse", 2, 3, "Das Maß aller Dinge."),
+            c(C, "Strasse", 3, 4, "Nichts davon.")])
+        self.assertEqual(meta["spiel_id"], C)
+        rag.aktualisiere_index([C], ausgabe=lambda *_: None)
+        chunks, _ = rag.lade_spiel(self.con, C)
+        for frage, seite in (("Straße", 2), ("Wie groß?", 2), ("Maß", 3)):
+            with self.subTest(frage=frage):
+                self.assertEqual([chunks[i]["seite"] for i in rag.bm25_rangfolge(self.con, frage, chunks, 5)], [seite])
+
+    def test_bm25_gleichstand_in_chunk_folge(self):
+        # Identische Texte -> gleicher BM25-Wert; Reihenfolge = Folge im Heft (rowid aufsteigend)
+        C = "doppelt"
+        meta = rag.lege_spiel_an("Doppelt")
+        rag.schreibe_jsonl(rag.knowledge_pfad(C), [
+            c(C, "Doppelt", 1, 7, "Die Waitress bringt Geld."),
+            c(C, "Doppelt", 2, 8, "Die Waitress bringt Geld."),
+            c(C, "Doppelt", 3, 9, "Die Waitress bringt Geld.")])
+        self.assertEqual(meta["spiel_id"], C)
+        rag.aktualisiere_index([C], ausgabe=lambda *_: None)
+        chunks, _ = rag.lade_spiel(self.con, C)
+        self.assertEqual([chunks[i]["seite"] for i in rag.bm25_rangfolge(self.con, "Waitress", chunks, 2)], [7, 8])
+
     def test_nutzertext_ist_keine_abfragesprache(self):
         chunks, _ = rag.lade_spiel(self.con, A)
         for frage in ('Was kostet "Waitress"?', "(Geld) AND OR NOT *", "NEAR(a b)", "", "???", 'a"b'):

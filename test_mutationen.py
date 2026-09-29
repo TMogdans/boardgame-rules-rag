@@ -356,6 +356,16 @@ MUTATIONEN = [
     ("C6 Spielnamen nur als ganze Nachricht, nicht im Satz",
      "rag.py", "        for j in range(i + 1, min(len(woerter), i + max_woerter) + 1):",
      "        for j in range(len(woerter) + 1, len(woerter) + 1):"),
+    # ---- Testluecken aus dem Review ----
+    ("K7 Pipe-Cache-Schluessel ohne CHUNK_SIZE",
+     "openwebui_pipe.py", "               v.DROP_TYPES, v.EMBED_MODEL, v.CHUNK_SIZE, v.CHUNK_OVERLAP)",
+     "               v.DROP_TYPES, v.EMBED_MODEL, v.CHUNK_OVERLAP)"),
+    ("K19 BM25-Gleichstand rowid absteigend",
+     "rag.py", "ORDER BY bm25(chunks_fts, 1.0, 0.0), rowid LIMIT ?", "ORDER BY bm25(chunks_fts, 1.0, 0.0), rowid DESC LIMIT ?"),
+    ("B1 BM25-Abfrage mit casefold (ß -> ss, findet 'Straße' nicht)",
+     "rag.py", '    woerter = re.findall(r"\\w+", query.lower())', '    woerter = re.findall(r"\\w+", query.casefold())'),
+    ("B2 WAL-Index wird nicht erkannt",
+     "rag.py", "    if len(kopf) == 20 and kopf[18] == 2 and kopf[19] == 2:", "    if False:"),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]

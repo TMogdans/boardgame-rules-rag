@@ -195,6 +195,28 @@ class TestGleichheitUndStellschrauben(PipeIndexBasis):
         self.assertFalse(self.pipe._rag.HYBRID)
         self.assertIn("S. 11 ", text)
 
+    def test_geaenderte_valves_nach_cache_treffer(self):
+        # Erst mit passendem Stand (Cache gefuellt), dann Valves ohne Stand im Index:
+        # das muss auffallen, statt still den alten Cache-Eintrag weiterzuliefern.
+        self.assertIn("S. 11 ", self.frage("Geld", spiel="FCM"))
+        for feld, wert in (("CHUNK_SIZE", 800), ("CHUNK_OVERLAP", 100), ("EMBED_MODEL", "anderes")):
+            with self.subTest(feld=feld):
+                alt = getattr(self.pipe.valves, feld)
+                setattr(self.pipe.valves, feld, wert)
+                text = self.frage("Geld", spiel="FCM")
+                self.assertIn("rag.py index food-chain-magnate", text)
+                setattr(self.pipe.valves, feld, alt)
+
+    def test_wal_index_wird_laut_abgelehnt(self):
+        import sqlite3
+        con = sqlite3.connect(self.index)
+        self.assertEqual(con.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+        con.close()
+        text = self.frage("Geld", spiel="FCM")
+        self.assertIn("WAL-Modus", text)
+        self.assertIn("journal_mode=DELETE", text)
+        self.assertEqual(self.llm_bekam, [])
+
     def test_valves_passen_nicht_zum_index(self):
         self.pipe.valves.CHUNK_SIZE = 800
         text = self.frage("Geld", spiel="FCM")

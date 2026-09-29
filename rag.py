@@ -698,6 +698,13 @@ def oeffne_index(pfad=None, schreibend=False):
         return con
     if not os.path.exists(pfad):
         raise KonfigFehler(f"Index {pfad} fehlt -- zuerst `python rag.py index --alle` laufen lassen.")
+    with open(pfad, "rb") as f:
+        kopf = f.read(20)
+    # Byte 18/19 des SQLite-Kopfs = 2: WAL-Modus. Lesen braucht dann -shm/-wal neben der
+    # Datei -- auf dem read-only-Mount der Pipe scheitert das, und zwar nicht sofort.
+    if len(kopf) == 20 and kopf[18] == 2 and kopf[19] == 2:
+        raise KonfigFehler(f"Index {pfad} ist im WAL-Modus; read-only (Pipe-Mount) geht das nicht. "
+                           f"Auf dem Host: sqlite3 {pfad} 'PRAGMA journal_mode=DELETE'")
     return sqlite3.connect(f"file:{pfad}?mode=ro", uri=True, timeout=30)
 
 
@@ -857,7 +864,9 @@ def fts_abfrage(query):
     Die Frage direkt als MATCH-Ausdruck zu geben, bricht an Anfuehrungszeichen,
     Klammern, AND/OR/NOT und '*' -- Nutzertext ist keine Abfragesprache.
     """
-    woerter = re.findall(r"\w+", query.casefold())
+    # lower, NICHT casefold: casefold macht aus "Straße" "strasse", der FTS5-Tokenizer
+    # unicode61 behaelt ß -- "Straße", "Maß", "groß" faenden sonst nichts.
+    woerter = re.findall(r"\w+", query.lower())
     return " OR ".join('"' + w.replace('"', '""') + '"' for w in dict.fromkeys(woerter))
 
 
