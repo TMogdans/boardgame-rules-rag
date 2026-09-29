@@ -6,6 +6,9 @@ So laesst sich Flavor-/Meta-Rauschen beim Retrieval ausfiltern
 (rag.py: DROP_TYPES="flavor,meta"). Im Zweifel wird "regel" vergeben --
 lieber eine Regel behalten als faelschlich verwerfen.
 
+    python classify.py food-chain-magnate     # data/food-chain-magnate/knowledge.jsonl
+    python classify.py                        # alte Einzeldatei knowledge.jsonl
+
 Neben dem Tag 'typ' wird die rohe Modellantwort als 'typ_antwort' mitgeschrieben.
 Erst damit ist am fertigen Lauf pruefbar, ob das MODELL einen Chunk als flavor
 bezeichnet hat oder die AUSWERTUNG ihn dazu gemacht hat.
@@ -15,7 +18,7 @@ Substring-Suche hat die Zusage der Zeile darueber ins Gegenteil verkehrt:
 "Das ist eine regel, kein flavor." wurde zu flavor, und bei
 DROP_TYPES=flavor,meta fiel die Regel damit aus dem Index.
 """
-import os, re, json, requests
+import os, re, sys, json, requests
 
 BASE   = os.path.dirname(os.path.abspath(__file__))
 OLLAMA = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -124,9 +127,24 @@ def classify(text):
     return auswerten(roh), roh.strip()
 
 
-def main():
-    with open(KNOW) as f:
-        entries = [json.loads(l) for l in f]
+def ziel(argv):
+    """Pfad der zu taggenden Wissensbasis: data/<spiel_id>/knowledge.jsonl oder KNOW."""
+    rest = [a for a in argv if a.strip()]
+    if not rest:
+        return KNOW
+    if BASE not in sys.path:
+        sys.path.insert(0, BASE)
+    import rag
+    pfad = rag.knowledge_pfad(rest[0])
+    if not os.path.exists(pfad):
+        raise SystemExit(f"{pfad} fehlt -- erst einlesen (auto_ingest.py --spiel ...).")
+    return pfad
+
+
+def main(argv=()):
+    KNOW = ziel(argv)  # lokal: das Modul-KNOW bleibt der Default fuer den alten Weg
+    with open(KNOW, encoding="utf-8") as f:
+        entries = [json.loads(l) for l in f if l.strip()]
     counts = {}
     for e in entries:
         e["typ"], e["typ_antwort"] = classify(e["text"])
@@ -149,4 +167,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -202,6 +202,7 @@ Die Auswertungslogik ist ohne Ollama, ohne Modelle und ohne PDF pruefbar:
 python test_wertung.py       # Dreiteilung, DROP_TYPES-Entkopplung, Keywords, Guards
 python test_classify.py      # Klassifikator-Auswertung, 17 Antwortvarianten
 python test_ingest_seite.py  # 'seite'-Feld in ingest.py und vision_ingest.py
+python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins eigene Spielverzeichnis
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
 # test_mutationen.py faehrt auch die Pipe-Mutationen (P1-P26)
@@ -210,6 +211,27 @@ python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die C
 ### Ingestion nach Inhaltstyp
 
 Es gibt keine eine beste Methode -- es haengt davon ab, was auf der Seite steht.
+
+**Mehrere Spiele:** Jedes Spiel bekommt ein eigenes Verzeichnis `data/<spiel_id>/`
+(gitignored) mit `knowledge.jsonl`, `spiel.json` (Name, Aliase, Sprache, Quell-PDF) und
+optional `golden_set.json`. Alle Ingestion-Skripte nehmen dafuer dieselben Optionen und
+schreiben nur in das Verzeichnis dieses einen Spiels; jeder Chunk traegt `spiel` und
+`spiel_id`. Die `spiel_id` ist ein Slug aus dem Namen ("Brass: Birmingham" ->
+`brass-birmingham`), `--sprache` (de/en) ist die Sprache des Hefts und steuert die
+Verbalisierung; der Vision-Prompt nennt das Spiel beim Namen.
+
+```bash
+python auto_ingest.py pdfs/brass.pdf --spiel "Brass: Birmingham" --sprache en --aliase "Brass"
+python vision_ingest.py seite_6.png --spiel-id brass-birmingham   # Spiel existiert schon
+python classify.py brass-birmingham
+```
+
+Ohne `--spiel` bleibt es beim alten Ein-Spiel-Weg (`knowledge.jsonl` neben den Skripten).
+`auto_ingest.py` und `ingest.py` verweigern dort aber das Ueberschreiben einer vorhandenen
+Datei -- frueher hat genau das ein Heft durch das naechste ersetzt. `vision_ingest.py`
+ersetzt nur noch die Chunks desselben Bildes (vorher fiel jede fruehere Grafikseite weg).
+
+Beispiele unten zeigen den Ein-Spiel-Weg; mit `--spiel`/`--spiel-id` gilt dasselbe pro Spiel.
 
 **Alles automatisch** (Auto-Router -- der bequemste Weg): entscheidet pro Seite selbst,
 welcher der folgenden Wege genommen wird.

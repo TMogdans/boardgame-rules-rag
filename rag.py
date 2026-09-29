@@ -11,6 +11,10 @@ Nutzung:
     python rag.py eval                            # Golden Set durchlaufen
     RERANK=1 CHUNK_SIZE=400 python rag.py eval    # mit Reranker + kleineren Chunks
 
+Mehrere Spiele liegen je in einem eigenen Verzeichnis data/<spiel_id>/ (knowledge.jsonl,
+spiel.json, golden_set.json). Die Einzeldatei knowledge.jsonl neben rag.py ist der
+alte Ein-Spiel-Weg und funktioniert unveraendert weiter.
+
 Grundsatz der Auswertung: Die Messlatte haengt an der Natur der Frage, nie an der
 Konfiguration des Laufs. Keine Stellschraube (DROP_TYPES, SOURCE, CHUNK_SIZE) darf
 einen Nenner verschieben -- sonst zieht dieselbe Einstellung, die das Retrieval
@@ -36,6 +40,7 @@ RERANK        = os.environ.get("RERANK", "0") == "1"      # zweite Stufe: Cross-
 RERANK_MODEL  = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 CANDIDATES    = int(os.environ.get("CANDIDATES", 20))     # so viele grob abrufen, bevor der Reranker auf TOP_K eindampft
 PDF_DIR       = os.path.join(os.path.dirname(__file__), "pdfs")
+DATA_DIR      = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
 # Vokabular des Klassifikators (classify.py): nur diese drei Chunk-Typen werden
 # ueberhaupt vergeben. DROP_TYPES darf nichts anderes nennen -- die Frage-Typen des
@@ -152,6 +157,199 @@ def pruefe_typ_feld(rohchunks, drop):
             "Ohne Typen filtert der Filter nichts und die Zahl waere eine andere, "
             "als das Etikett behauptet."
         )
+
+
+# ---------- Spiele: ein Verzeichnis pro Spiel unter data/ ----------
+# data/<spiel_id>/knowledge.jsonl  -- Chunks, jeder mit 'spiel' und 'spiel_id'
+# data/<spiel_id>/spiel.json       -- Name, Aliase, Sprache, Quell-PDF
+# data/<spiel_id>/golden_set.json  -- optional, Format wie golden_set.example.json
+# Die spiel_id ist ein Slug und zugleich Verzeichnisname. Sie wird streng geprueft,
+# weil sie aus Aufrufen von aussen (Pipe, CLI) in einen Pfad wandert.
+SPIEL_ID_MUSTER = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+# Sprache des Regelhefts -> Wort fuer die Ingestion-Prompts. Neue Sprachen hier ergaenzen.
+SPRACHEN = {"de": ("deutsche", "Deutsch"), "en": ("englische", "Englisch")}
+
+
+def spiel_slug(name):
+    """Anzeigename -> stabile spiel_id ("Brass: Birmingham" -> "brass-birmingham").
+
+    Umlaute werden ausgeschrieben statt zu Bindestrichen ("Kämpfer" -> "kaempfer",
+    nicht "k-mpfer"); ß wird zu ss (APFS faltet ohnehin so).
+    """
+    s = (name or "").casefold()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        s = s.replace(alt, neu)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    if not s:
+        raise KonfigFehler(f"Aus dem Spielnamen {name!r} laesst sich keine spiel_id bilden.")
+    return s
+
+
+def pruefe_spiel_id(spiel_id):
+    if not isinstance(spiel_id, str) or not SPIEL_ID_MUSTER.fullmatch(spiel_id):
+        raise KonfigFehler(
+            f"Ungueltige spiel_id {spiel_id!r}: erlaubt sind Kleinbuchstaben, Ziffern und "
+            "einzelne Bindestriche (z.B. food-chain-magnate).")
+    return spiel_id
+
+
+def spiel_verzeichnis(spiel_id, data_dir=None):
+    return os.path.join(data_dir or DATA_DIR, pruefe_spiel_id(spiel_id))
+
+
+def knowledge_pfad(spiel_id, data_dir=None):
+    return os.path.join(spiel_verzeichnis(spiel_id, data_dir), "knowledge.jsonl")
+
+
+def lies_spiel(spiel_id, data_dir=None):
+    """spiel.json eines Spiels -- fehlt es, ist das Verzeichnis kein Spiel."""
+    pfad = os.path.join(spiel_verzeichnis(spiel_id, data_dir), "spiel.json")
+    if not os.path.exists(pfad):
+        raise KonfigFehler(f"{pfad} fehlt -- {spiel_id!r} ist kein angelegtes Spiel.")
+    with open(pfad, encoding="utf-8") as f:
+        meta = json.load(f)
+    if meta.get("spiel_id") != spiel_id:
+        raise KonfigFehler(f"{pfad}: spiel_id {meta.get('spiel_id')!r} passt nicht zum Verzeichnis {spiel_id!r}.")
+    if not meta.get("name"):
+        raise KonfigFehler(f"{pfad}: Feld 'name' fehlt.")
+    return meta
+
+
+def liste_spiele(data_dir=None):
+    """Alle spiel_ids unter data/ (Verzeichnisse mit spiel.json), sortiert."""
+    data_dir = data_dir or DATA_DIR
+    if not os.path.isdir(data_dir):
+        return []
+    return sorted(d for d in os.listdir(data_dir)
+                  if SPIEL_ID_MUSTER.fullmatch(d)
+                  and os.path.exists(os.path.join(data_dir, d, "spiel.json")))
+
+
+def lege_spiel_an(name, spiel_id=None, sprache=None, aliase=None, quelle_pdf=None, data_dir=None):
+    """Verzeichnis + spiel.json anlegen oder ergaenzen; gibt die Metadaten zurueck.
+
+    Vorhandene Angaben bleiben stehen, wenn der Aufruf sie nicht nennt -- ein
+    zweiter Ingestion-Lauf ohne --aliase loescht also keine gepflegten Aliase.
+    """
+    spiel_id = pruefe_spiel_id(spiel_id or spiel_slug(name))
+    verz = spiel_verzeichnis(spiel_id, data_dir)
+    os.makedirs(verz, exist_ok=True)
+    pfad = os.path.join(verz, "spiel.json")
+    meta = {"spiel_id": spiel_id, "name": name, "aliase": [], "sprache": "de", "quelle_pdf": None}
+    if os.path.exists(pfad):
+        with open(pfad, encoding="utf-8") as f:
+            meta.update(json.load(f))
+        meta["name"] = name or meta["name"]
+    if aliase is not None:
+        meta["aliase"] = [a.strip() for a in aliase if a and a.strip()]
+    if sprache is not None:
+        meta["sprache"] = sprache
+    if quelle_pdf is not None:
+        meta["quelle_pdf"] = os.path.basename(quelle_pdf)
+    if meta["sprache"] not in SPRACHEN:
+        raise KonfigFehler(f"Sprache {meta['sprache']!r} unbekannt; bekannt: {', '.join(SPRACHEN)}. "
+                           "Neue Sprachen in rag.SPRACHEN ergaenzen.")
+    with open(pfad, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return meta
+
+
+def vision_prompt(spiel=None, sprache="de"):
+    """Vision-Prompt fuer auto_ingest.py und vision_ingest.py.
+
+    Frueher stand dort fest "Diagramm von Mitarbeiterkarten" (Food Chain Magnate).
+    Das Spiel geht nur als Name ein, die Art der Elemente wird nicht vorgegeben.
+    """
+    wo = f"des Brettspiels „{spiel}“" if spiel else "eines Brettspiels"
+    return (f"Auf dem Bild ist eine Seite aus dem Regelheft {wo} mit Grafiken "
+            "(z.B. Karten, Plaettchen, Tabellen oder Diagramme). "
+            "Liste JEDES dargestellte Element einzeln auf, ein Eintrag pro Zeile im Format "
+            "'Name: Effekt und alle Werte'. Uebernimm alle Zahlen (z.B. Reichweite, "
+            "Dauer, Kosten) exakt vom Bild. Erfinde nichts. "
+            f"Antworte auf {SPRACHEN[sprache][1]}.")
+
+
+def spiel_felder(meta):
+    """Die zwei Felder, die jeder Chunk eines Spiels traegt."""
+    return {"spiel": meta["name"], "spiel_id": meta["spiel_id"]}
+
+
+def spiel_argumente(argv):
+    """--spiel NAME [--spiel-id ID] [--sprache de] [--aliase "a,b"] aus argv loesen.
+
+    Gibt (restliche Argumente, Optionen-dict oder None) zurueck. Ohne --spiel und
+    --spiel-id bleibt es beim alten Ein-Datei-Weg. Bewusst ohne argparse, weil die
+    Skripte ihre Positionsargumente weiter selbst lesen (Tests rufen main() direkt).
+    """
+    rest, opt = [], {}
+    namen = {"--spiel": "name", "--spiel-id": "spiel_id", "--sprache": "sprache", "--aliase": "aliase"}
+    i = 0
+    argv = list(argv)
+    while i < len(argv):
+        a = argv[i]
+        schluessel, wert = (a.split("=", 1) + [None])[:2] if a.startswith("--") else (a, None)
+        if schluessel in namen:
+            if wert is None:
+                if i + 1 >= len(argv):
+                    raise KonfigFehler(f"{schluessel} braucht einen Wert.")
+                wert = argv[i + 1]
+                i += 1
+            opt[namen[schluessel]] = wert
+        else:
+            rest.append(a)
+        i += 1
+    if not opt:
+        return rest, None
+    if "aliase" in opt:
+        opt["aliase"] = opt["aliase"].split(",")
+    if "name" not in opt:
+        # Nur --spiel-id: das Spiel muss schon angelegt sein, der Name kommt aus spiel.json.
+        if "spiel_id" not in opt:
+            raise KonfigFehler("--spiel NAME oder --spiel-id ID angeben.")
+        opt["name"] = None
+    return rest, opt
+
+
+def bereite_spiel_vor(opt, quelle_pdf=None, data_dir=None):
+    """Optionen aus spiel_argumente -> (meta, Pfad der knowledge.jsonl des Spiels)."""
+    if opt.get("name") is None:
+        meta_alt = lies_spiel(pruefe_spiel_id(opt["spiel_id"]), data_dir)
+        opt = dict(opt, name=meta_alt["name"])
+    meta = lege_spiel_an(opt["name"], opt.get("spiel_id"), opt.get("sprache"),
+                         opt.get("aliase"), quelle_pdf, data_dir)
+    return meta, knowledge_pfad(meta["spiel_id"], data_dir)
+
+
+def lies_jsonl(pfad):
+    with open(pfad, encoding="utf-8") as f:
+        return [json.loads(z) for z in f if z.strip()]
+
+
+def schreibe_jsonl(pfad, eintraege):
+    with open(pfad, "w", encoding="utf-8") as f:
+        for e in eintraege:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+
+def lies_spiel_chunks(spiel_id, data_dir=None):
+    """knowledge.jsonl eines Spiels -- jeder Eintrag muss zu diesem Spiel gehoeren.
+
+    Ein Chunk mit fremder oder fehlender spiel_id ist ein Kopierfehler: er wuerde
+    im Index unter dem falschen Spiel stehen und Regeln eines anderen Spiels
+    zitieren. Deshalb Abbruch statt stiller Uebernahme.
+    """
+    pfad = knowledge_pfad(spiel_id, data_dir)
+    if not os.path.exists(pfad):
+        raise KonfigFehler(f"{pfad} fehlt -- fuer {spiel_id!r} wurde noch nichts eingelesen.")
+    roh = lies_jsonl(pfad)
+    falsch = [c.get("id", "?") for c in roh if c.get("spiel_id") != spiel_id]
+    if falsch:
+        raise KonfigFehler(
+            f"{pfad}: {len(falsch)} Eintrag/Eintraege ohne oder mit fremder spiel_id "
+            f"(z.B. id {falsch[0]!r}). Einlesen mit --spiel wiederholen oder "
+            "`python rag.py migriere` benutzen.")
+    return roh
 
 
 # ---------- PDF -> Chunks (seitenbewusst, damit Zitate eine Seite haben) ----------

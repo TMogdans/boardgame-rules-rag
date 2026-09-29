@@ -17,7 +17,8 @@ import subprocess
 import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py")
+TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
+         "test_spiele.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -182,6 +183,28 @@ MUTATIONEN = [
      "openwebui_pipe.py", '    return "unbekannt", [k for r, k in bewertet if r >= 0.5]', '    return "unbekannt", []'),
     ("P26 Katalog kommt nicht aus den Valves",
      "openwebui_pipe.py", "ordne_spiel(rf[\"spiel\"], katalog_aus(v.SPIEL, v.SPIEL_ALIASE))", "ordne_spiel(rf[\"spiel\"], katalog_aus(\"Food Chain Magnate\", \"Food Chain, FCM\"))"),
+
+    # ---- Spiel als Dimension (test_spiele.py) ----
+    ("S1 auto_ingest.py schreibt wieder in die gemeinsame knowledge.jsonl",
+     "auto_ingest.py", "    return pdf, pfad, rag.spiel_felder(meta), meta", "    return pdf, KNOW, rag.spiel_felder(meta), meta"),
+    ("S2 auto_ingest.py-Chunks tragen kein Spiel",
+     "auto_ingest.py", "    return pdf, pfad, rag.spiel_felder(meta), meta", "    return pdf, pfad, {}, meta"),
+    ("S3 Einzeldatei-Weg ueberschreibt wieder ein vorhandenes Heft",
+     "auto_ingest.py", "        if os.path.exists(KNOW):", "        if False:"),
+    ("S4 vision_ingest.py ersetzt wieder alle vision:-Chunks (zweite Grafikseite loescht die erste)",
+     "vision_ingest.py", '    entries = lade_ohne_vision(know, f"vision:{os.path.basename(img)}")', "    entries = lade_ohne_vision(know)"),
+    ("S5 vision_ingest.py schreibt trotz --spiel in die Einzeldatei",
+     "vision_ingest.py", "        meta, know = rag.bereite_spiel_vor(opt)", "        meta, _ = rag.bereite_spiel_vor(opt)"),
+    ("S6 Vision-Prompt ohne Spielname/Sprache",
+     "vision_ingest.py", '        PROMPT = vision_prompt(meta["name"], meta["sprache"])', "        pass"),
+    ("S7 ingest.py ignoriert die Heftsprache",
+     "ingest.py", '    return VERB_PROMPT.replace("{satzsprache}", rag.SPRACHEN[sprache][0])', '    return VERB_PROMPT.replace("{satzsprache}", "deutsche")'),
+    ("S8 spiel_id wird nicht geprueft (Pfad-Ausbruch)",
+     "rag.py", "    if not isinstance(spiel_id, str) or not SPIEL_ID_MUSTER.fullmatch(spiel_id):", "    if False:"),
+    ("S9 fremde Chunks im Spielverzeichnis werden still uebernommen",
+     "rag.py", '    falsch = [c.get("id", "?") for c in roh if c.get("spiel_id") != spiel_id]', "    falsch = []"),
+    ("S10 classify.py ignoriert die spiel_id",
+     "classify.py", "    if not rest:\n        return KNOW", "    if True:\n        return KNOW"),
 ]
 
 
