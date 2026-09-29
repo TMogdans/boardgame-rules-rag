@@ -222,6 +222,10 @@ class TestGleichheitUndStellschrauben(PipeIndexBasis):
         text = self.frage("Geld", spiel="FCM")
         self.assertIn("Fehler in der RAG-Pipe", text)
         self.assertIn("rag.py index food-chain-magnate", text)
+        # richtige Diagnose: kein Stand fuer diese Konfiguration -- NICHT "veraltet"
+        # (die knowledge.jsonl hat sich ja nicht geaendert)
+        self.assertIn("nicht im Index", text)
+        self.assertNotIn("veraltet", text)
         self.assertEqual(self.llm_bekam, [])
 
     def test_hybrid_valve(self):
