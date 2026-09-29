@@ -202,6 +202,8 @@ Default 64, und inklusive `flavor`/`meta` ein, der alte Weg alles in einem Aufru
 **Suche pro Spiel:** `retrieve(frage, spiel_id=...)` laedt nur die Zeilen dieses Spiels
 und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine Treffer
 verdraengen. `python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"`
+(`--spiel` und die Spielangaben von `eval`/`index`/`vergleiche` nehmen spiel_id, Name,
+Alias oder Hoerfehler -- dieselbe Zuordnung wie die Pipe)
 bringt den Index vorher auf Stand. `HYBRID=1` fusioniert die Vektor-Rangfolge mit BM25
 (beide auf `CANDIDATES` begrenzt, mit `RERANK=1` danach Cross-Encoder); Default ist aus,
 damit der Standardweg unveraendert bleibt. Der Spielfilter steht im MATCH-Ausdruck (ein
@@ -281,6 +283,7 @@ python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nu
 python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
+python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
 python test_regression.py    # alter UND neuer Weg == eingefrorene Ausgabe von ed36f99 (regression_referenz.json)
 # Referenz neu erzeugen (braucht git, nur bei gewollter Aenderung der Testdaten):
 # python regression_referenz.py --erzeuge
@@ -429,6 +432,9 @@ noch die Frage ein. Dann gilt:
   Spiele im Index zugeordnet; `SPIEL`/`SPIEL_ALIASE` gelten nicht mehr. Unbekannt ->
   "kein Regelheft" wie bisher, ohne Suche und ohne LLM. Mehrdeutig (gemeinsamer Alias,
   zwei unscharfe Treffer fast gleichauf) -> ebenfalls kein Treffer, mit Vorschlaegen.
+  Unscharf trifft nur, was ungefaehr gleich lang ist (Laengenverhaeltnis >= 0,8): sonst
+  wird ein kurzer Name zum Auffangbecken ("Fujian" traf "Fuji" genau auf der Schwelle).
+  Dieselbe Zuordnung (`rag.ordne_spiel`) gilt fuer `--spiel` auf der Kommandozeile.
 - Ohne `regelfrage.spiel` (Chat): Valve `STANDARD_SPIEL`, sonst das einzige Spiel im
   Index, sonst die Rueckfrage "Zu welchem Spiel ist die Frage?".
 - Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`

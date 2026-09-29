@@ -275,21 +275,21 @@ class TestAktualitaet(PipeIndexBasis):
 class TestKatalog(unittest.TestCase):
     def test_gleicher_name_zweimal_ist_fehler(self):
         with self.assertRaises(ValueError):
-            op.katalog_aus_index([{"spiel_id": "a", "name": "X", "aliase": []},
+            rag.katalog_aus_index([{"spiel_id": "a", "name": "X", "aliase": []},
                                   {"spiel_id": "b", "name": "X", "aliase": []}])
 
     def test_unscharf_fast_gleichauf_ist_mehrdeutig(self):
-        k, _ = op.katalog_aus_index([{"spiel_id": "brass-birmingham", "name": "Brass Birmingham", "aliase": []},
+        k, _ = rag.katalog_aus_index([{"spiel_id": "brass-birmingham", "name": "Brass Birmingham", "aliase": []},
                                      {"spiel_id": "brass-birminghan", "name": "Brass Birminghan", "aliase": []}])
         # "brassbirminghal" teilt mit beiden 14 Zeichen -> je 0,875
-        status, vorschlaege = op.ordne_spiel("Brass Birminghal", k)
+        status, vorschlaege = rag.ordne_spiel("Brass Birminghal", k)
         self.assertEqual(status, "unbekannt")
         self.assertEqual(sorted(vorschlaege), ["Brass Birmingham", "Brass Birminghan"])
 
     def test_unscharf_eindeutig_trifft(self):
-        k, _ = op.katalog_aus_index([{"spiel_id": "food-chain-magnate", "name": "Food Chain Magnate", "aliase": []},
+        k, _ = rag.katalog_aus_index([{"spiel_id": "food-chain-magnate", "name": "Food Chain Magnate", "aliase": []},
                                      {"spiel_id": "brass-birmingham", "name": "Brass: Birmingham", "aliase": []}])
-        self.assertEqual(op.ordne_spiel("Food Chain Magnet", k), ("treffer", "Food Chain Magnate"))
+        self.assertEqual(rag.ordne_spiel("Food Chain Magnet", k), ("treffer", "Food Chain Magnate"))
 
 
 if __name__ == "__main__":

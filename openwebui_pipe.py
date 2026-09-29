@@ -22,7 +22,6 @@ Modell rechnet. Die requests-basierten rag.py-Funktionen laufen deshalb per
 asyncio.to_thread, die Antwort streamt ueber httpx.
 """
 import asyncio
-import difflib
 import importlib.util
 import json
 import os
@@ -99,71 +98,8 @@ def ollama_zeile(zeile):
     return (d.get("message") or {}).get("content", "")
 
 
-def normalisiere(name):
-    """Spielname fuer den Vergleich: klein, ohne Satzzeichen und Leerraum.
-
-    "Brass: Birmingham" und "brass birmingham" sollen gleich aussehen; Whisper
-    und Haiku liefern Titel in wechselnder Schreibweise.
-    """
-    return re.sub(r"[\W_]+", "", (name or "").casefold())
-
-
-def katalog_aus(name, aliase):
-    """{kanonischer Name: [normalisierte Schreibweisen]} aus den Valves."""
-    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]
-    return {name: sorted({normalisiere(f) for f in formen if normalisiere(f)})}
-
-
-# Liegen die zwei besten unscharfen Treffer naeher beieinander, ist die Zuordnung
-# ein Muenzwurf -- dann lieber nachfragen. Mit vielen Spielen im Index real
-# ("Brass: Lancashire" / "Brass: Birmingham").
-MEHRDEUTIG_ABSTAND = 0.05
-
-
-def ordne_spiel(anfrage, katalog, schwelle=0.8):
-    """("treffer", Name) oder ("unbekannt", [Vorschlaege]).
-
-    Exakt nach Normalisierung, sonst unscharf (difflib) gegen jede Schreibweise --
-    fuer Hoerfehler wie "Food Chain Magnet". Unterhalb der Schwelle kein Treffer:
-    lieber "kein Regelheft" als die Regeln des falschen Spiels. Ebenso kein
-    Treffer, wenn die Anfrage mehrdeutig ist (exakt bei mehreren Spielen, etwa
-    ein gemeinsamer Alias, oder zwei unscharfe Treffer fast gleichauf).
-    """
-    n = normalisiere(anfrage)
-    if not n:
-        return "unbekannt", []
-    exakt = sorted(kanon for kanon, formen in katalog.items() if n in formen)
-    if len(exakt) == 1:
-        return "treffer", exakt[0]
-    if exakt:
-        return "unbekannt", exakt
-    bewertet = []
-    for kanon, formen in katalog.items():
-        bewertet.append((max(difflib.SequenceMatcher(None, n, f).ratio() for f in formen), kanon))
-    bewertet.sort(reverse=True)
-    if bewertet and bewertet[0][0] >= schwelle:
-        knapp = [k for r, k in bewertet if r >= schwelle and bewertet[0][0] - r < MEHRDEUTIG_ABSTAND]
-        if len(knapp) > 1:
-            return "unbekannt", knapp
-        return "treffer", bewertet[0][1]
-    return "unbekannt", [k for r, k in bewertet if r >= 0.5]
-
-
-def katalog_aus_index(spiele):
-    """({Name: [Schreibweisen]}, {Name: spiel_id}) aus rag.spiele_im_index.
-
-    Name, Aliase aus spiel.json und die spiel_id selbst zaehlen als Schreibweise.
-    Zwei Spiele mit gleichem Namen waeren nicht unterscheidbar -> Fehler.
-    """
-    katalog, ids = {}, {}
-    for s in spiele:
-        if s["name"] in katalog:
-            raise ValueError(f"Zwei Spiele im Index heissen {s['name']!r} ({ids[s['name']]}, {s['spiel_id']}) "
-                             "-- Namen in spiel.json eindeutig machen.")
-        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])
-        katalog[s["name"]] = sorted({normalisiere(f) for f in formen if normalisiere(f)})
-        ids[s["name"]] = s["spiel_id"]
-    return katalog, ids
+# Spielzuordnung (normalisiere, katalog_aus, katalog_aus_index, ordne_spiel) liegt in
+# rag.py: dieselbe Zuordnung fuer Pipe und CLI (`rag.py ask --spiel`, `eval`).
 
 
 def datei_stand(pfad):
@@ -256,6 +192,10 @@ class Pipe:
             hits = rag.retrieve(frage, chunks, embs, k=v.TOP_K)
         return rag.baue_nachrichten(frage, hits), hits
 
+    def _rag_fuer(self, v):
+        with self._lock:
+            return self._lade_rag(v)
+
     # ---------- Index-Weg (viele Spiele) ----------
     def _lade_katalog(self, rag, v):
         """Katalog aller Spiele im Index, neu gelesen, wenn sich die Indexdatei aendert."""
@@ -266,7 +206,7 @@ class Pipe:
                 spiele = rag.spiele_im_index(con)
             finally:
                 con.close()
-            self._katalog, self._katalog_key = (spiele,) + katalog_aus_index(spiele), key
+            self._katalog, self._katalog_key = (spiele,) + rag.katalog_aus_index(spiele), key
         return self._katalog
 
     def _waehle_spiel(self, anfrage, v):
@@ -286,7 +226,7 @@ class Pipe:
             if len(spiele) == 1:
                 return spiele[0]["spiel_id"], None
             return None, f"Zu welchem Spiel ist die Frage? Im Index: {verfuegbar}."
-        status, ergebnis = ordne_spiel(anfrage, katalog)
+        status, ergebnis = rag.ordne_spiel(anfrage, katalog)
         if status == "treffer":
             return ids[ergebnis], None
         vorschlag = f" Meintest du {' oder '.join(ergebnis[:3])}?" if ergebnis else ""
@@ -383,7 +323,8 @@ class Pipe:
             return
         if rf.get("spiel") is not None:
             v = self.valves
-            status, ergebnis = ordne_spiel(rf["spiel"], katalog_aus(v.SPIEL, v.SPIEL_ALIASE))
+            rag = await asyncio.to_thread(self._rag_fuer, v)
+            status, ergebnis = rag.ordne_spiel(rf["spiel"], rag.katalog_aus(v.SPIEL, v.SPIEL_ALIASE))
             if status != "treffer":
                 vorschlag = f" Meintest du {' oder '.join(ergebnis)}?" if ergebnis else ""
                 yield (f"Zu „{rf['spiel']}“ habe ich kein Regelheft.{vorschlag} "

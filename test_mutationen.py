@@ -19,7 +19,7 @@ import sys
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
-         "test_pipe_index.py", "test_regression.py")
+         "test_pipe_index.py", "test_regression.py", "test_zuordnung.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -171,19 +171,19 @@ MUTATIONEN = [
     ("P19 unbekanntes Spiel wird trotzdem beantwortet",
      "openwebui_pipe.py", '            if status != "treffer":', '            if False:'),
     ("P20 Spielzuordnung ohne Unschaerfe (nur exakt)",
-     "openwebui_pipe.py", "    if bewertet and bewertet[0][0] >= schwelle:", "    if False:"),
+     "rag.py", "    if bewertet and bewertet[0][0] >= schwelle:", "    if False:"),
     ("P21 Schwelle so niedrig, dass fremde Spiele treffen",
-     "openwebui_pipe.py", "def ordne_spiel(anfrage, katalog, schwelle=0.8):", "def ordne_spiel(anfrage, katalog, schwelle=0.1):"),
+     "rag.py", "def ordne_spiel(anfrage, katalog, schwelle=0.8):", "def ordne_spiel(anfrage, katalog, schwelle=0.1):"),
     ("P22 Normalisierung ignoriert Leerzeichen/Satzzeichen nicht",
-     "openwebui_pipe.py", 'return re.sub(r"[\\W_]+", "", (name or "").casefold())', 'return (name or "").casefold()'),
+     "rag.py", 'return re.sub(r"[\\W_]+", "", (name or "").casefold())', 'return (name or "").casefold()'),
     ("P23 Aliase aus den Valves werden ignoriert",
-     "openwebui_pipe.py", '    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]', '    formen = [name]'),
+     "rag.py", '    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]', '    formen = [name]'),
     ("P24 Sprachmodus behaelt die Fusszeile",
      "openwebui_pipe.py", '        if not rf.get("sprache"):\n            yield fundstellen(hits)', '        yield fundstellen(hits)'),
     ("P25 Vorschlaege werden nicht genannt",
-     "openwebui_pipe.py", '    return "unbekannt", [k for r, k in bewertet if r >= 0.5]', '    return "unbekannt", []'),
+     "rag.py", '    return "unbekannt", [k for r, k in roh if r >= 0.5]', '    return "unbekannt", []'),
     ("P26 Katalog kommt nicht aus den Valves",
-     "openwebui_pipe.py", "ordne_spiel(rf[\"spiel\"], katalog_aus(v.SPIEL, v.SPIEL_ALIASE))", "ordne_spiel(rf[\"spiel\"], katalog_aus(\"Food Chain Magnate\", \"Food Chain, FCM\"))"),
+     "openwebui_pipe.py", "rag.ordne_spiel(rf[\"spiel\"], rag.katalog_aus(v.SPIEL, v.SPIEL_ALIASE))", "rag.ordne_spiel(rf[\"spiel\"], rag.katalog_aus(\"Food Chain Magnate\", \"Food Chain, FCM\"))"),
 
     # ---- Spiel als Dimension (test_spiele.py) ----
     ("S1 auto_ingest.py schreibt wieder in die gemeinsame knowledge.jsonl",
@@ -274,15 +274,15 @@ MUTATIONEN = [
 
     # ---- Pipe auf dem Index-Weg, Spielzuordnung (test_pipe_index.py) ----
     ("P27 Index-Weg ordnet gegen die Valves statt gegen den Index",
-     "openwebui_pipe.py", "        status, ergebnis = ordne_spiel(anfrage, katalog)\n",
-     "        status, ergebnis = ordne_spiel(anfrage, katalog_aus(v.SPIEL, v.SPIEL_ALIASE))\n"),
+     "openwebui_pipe.py", "        status, ergebnis = rag.ordne_spiel(anfrage, katalog)\n",
+     "        status, ergebnis = rag.ordne_spiel(anfrage, rag.katalog_aus(v.SPIEL, v.SPIEL_ALIASE))\n"),
     ("P28 Aliase aus spiel.json werden ignoriert",
-     "openwebui_pipe.py", '        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])',
+     "rag.py", '        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])',
      '        formen = [s["name"], s["spiel_id"]]'),
     ("P29 gemeinsamer Alias: das erste Spiel gewinnt",
-     "openwebui_pipe.py", '    if exakt:\n        return "unbekannt", exakt', '    if exakt:\n        return "treffer", exakt[0]'),
+     "rag.py", '    if exakt:\n        return "unbekannt", exakt', '    if exakt:\n        return "treffer", exakt[0]'),
     ("P30 unscharfer Fast-Gleichstand wird nicht erkannt",
-     "openwebui_pipe.py", "        if len(knapp) > 1:", "        if False:"),
+     "rag.py", "        if len(knapp) > 1:", "        if False:"),
     ("P31 veralteter Index wird still benutzt",
      "openwebui_pipe.py", "            if stand and stand[0] != rag.fingerprint(wissen, konfig):", "            if False:"),
     ("P32 HYBRID aus der Container-Umgebung schlaegt durch",
@@ -321,6 +321,25 @@ MUTATIONEN = [
     ("K3 Gleichstand kippt nur im Index-Weg",
      "rag.py", "    order = np.argsort(-sims)[:k]\n",
      "    order = np.argsort(-sims)[:k] if spiel_id is None else np.lexsort((-np.arange(len(sims)), -sims))[:k]\n"),
+    # ---- Strenge Spielzuordnung, eine Quelle fuer Pipe und CLI (test_zuordnung.py) ----
+    ("Z1 Laengenbedingung aus ('Fujian' trifft 'Fuji')",
+     "rag.py", "    if min(len(n), len(f)) < MIN_LAENGENVERHAELTNIS * max(len(n), len(f)):\n        return 0.0",
+     "    if False:\n        return 0.0"),
+    ("Z2 Schnelltest verwirft jeden unscharfen Treffer",
+     "rag.py", "    if m.real_quick_ratio() < schwelle or m.quick_ratio() < schwelle:",
+     "    if m.real_quick_ratio() < schwelle or m.quick_ratio() <= 1.0:"),
+    ("Z3 CLI nimmt nur spiel_ids, keine Namen",
+     "rag.py", '    status, ergebnis = ordne_spiel(anfrage, katalog)\n    if status == "treffer":\n        return zu_id[ergebnis]',
+     '    status, ergebnis = "unbekannt", []'),
+    ("Z4 ask --spiel=X wird als Frage gelesen",
+     "rag.py", '        if a.startswith("--spiel="):', '        if False:'),
+    ("K14 Mehrdeutigkeitsabstand 0.5 (fast jeder Hoerfehler wird abgelehnt)",
+     "rag.py", "MEHRDEUTIG_ABSTAND = 0.05", "MEHRDEUTIG_ABSTAND = 0.5"),
+    ("K15 Mehrdeutigkeitsabstand 0 (Muenzwurf gewinnt)",
+     "rag.py", "MEHRDEUTIG_ABSTAND = 0.05", "MEHRDEUTIG_ABSTAND = 0.0"),
+    ("K16 spiel_id zaehlt nicht als Schreibweise",
+     "rag.py", '        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])',
+     '        formen = [s["name"]] + list(s.get("aliase") or [])'),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]

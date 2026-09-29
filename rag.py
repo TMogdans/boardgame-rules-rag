@@ -27,7 +27,7 @@ Konfiguration des Laufs. Keine Stellschraube (DROP_TYPES, SOURCE, CHUNK_SIZE) da
 einen Nenner verschieben -- sonst zieht dieselbe Einstellung, die das Retrieval
 veraendert, auch den Beobachtungspunkt mit.
 """
-import sys, json, glob, re, os, sqlite3
+import sys, json, glob, re, os, sqlite3, difflib
 import numpy as np
 import requests
 # pypdf wird erst im PDF-Zweig von load_chunks importiert. Die Wissensbasis-Route
@@ -359,6 +359,112 @@ def lies_spiel_chunks(spiel_id, data_dir=None):
             f"(z.B. id {falsch[0]!r}). Einlesen mit --spiel wiederholen oder "
             "`python rag.py migriere` benutzen.")
     return roh
+
+
+# ---------- Spielzuordnung: Name/Alias/Hoerfehler -> Spiel (Pipe und CLI) ----------
+def normalisiere(name):
+    """Spielname fuer den Vergleich: klein, ohne Satzzeichen und Leerraum.
+
+    "Brass: Birmingham" und "brass birmingham" sollen gleich aussehen; Whisper
+    und Haiku liefern Titel in wechselnder Schreibweise.
+    """
+    return re.sub(r"[\W_]+", "", (name or "").casefold())
+
+
+def katalog_aus(name, aliase):
+    """{kanonischer Name: [normalisierte Schreibweisen]} aus den Valves."""
+    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]
+    return {name: sorted({normalisiere(f) for f in formen if normalisiere(f)})}
+
+
+# Liegen die zwei besten unscharfen Treffer naeher beieinander, ist die Zuordnung
+# ein Muenzwurf -- dann lieber nachfragen. Mit vielen Spielen im Index real
+# ("Brass: Lancashire" / "Brass: Birmingham").
+MEHRDEUTIG_ABSTAND = 0.05
+
+
+# Unscharfe Treffer nur zwischen aehnlich langen Schreibweisen. Ohne diese Bedingung
+# wurde ein kurzer Name zum Auffangbecken: "Fujian" -> "Fuji" liegt bei difflib genau
+# auf der Schwelle 0,8 (2*4/10), obwohl zwei Buchstaben fehlen. Laengen 4 zu 6 = 0,67.
+# Hoerfehler aendern die Laenge kaum ("Food Chain Magnet" 15 zu 16 Zeichen).
+MIN_LAENGENVERHAELTNIS = 0.8
+
+
+def _treffer_wert(n, f, schwelle):
+    """difflib-Ratio fuer einen TREFFER; 0, wenn Laenge oder Schnelltest ausschliessen."""
+    if min(len(n), len(f)) < MIN_LAENGENVERHAELTNIS * max(len(n), len(f)):
+        return 0.0
+    m = difflib.SequenceMatcher(None, n, f)
+    if m.real_quick_ratio() < schwelle or m.quick_ratio() < schwelle:
+        return 0.0
+    return m.ratio()
+
+
+def ordne_spiel(anfrage, katalog, schwelle=0.8):
+    """("treffer", Name) oder ("unbekannt", [Vorschlaege]).
+
+    Exakt nach Normalisierung, sonst unscharf (difflib) gegen jede Schreibweise --
+    fuer Hoerfehler wie "Food Chain Magnet". Unterhalb der Schwelle kein Treffer:
+    lieber "kein Regelheft" als die Regeln des falschen Spiels. Ebenso kein
+    Treffer, wenn die Anfrage mehrdeutig ist (exakt bei mehreren Spielen, etwa
+    ein gemeinsamer Alias, oder zwei unscharfe Treffer fast gleichauf), und kein
+    unscharfer Treffer zwischen deutlich verschieden langen Schreibweisen.
+    Vorschlaege bleiben grosszuegig (Ratio >= 0,5, ohne Laengenbedingung).
+    """
+    n = normalisiere(anfrage)
+    if not n:
+        return "unbekannt", []
+    exakt = sorted(kanon for kanon, formen in katalog.items() if n in formen)
+    if len(exakt) == 1:
+        return "treffer", exakt[0]
+    if exakt:
+        return "unbekannt", exakt
+    bewertet = []
+    for kanon, formen in katalog.items():
+        bewertet.append((max(_treffer_wert(n, f, schwelle) for f in formen), kanon))
+    bewertet.sort(reverse=True)
+    if bewertet and bewertet[0][0] >= schwelle:
+        knapp = [k for r, k in bewertet if r >= schwelle and bewertet[0][0] - r < MEHRDEUTIG_ABSTAND]
+        if len(knapp) > 1:
+            return "unbekannt", knapp
+        return "treffer", bewertet[0][1]
+    roh = sorted(((max(difflib.SequenceMatcher(None, n, f).ratio() for f in formen), kanon)
+                  for kanon, formen in katalog.items()), reverse=True)
+    return "unbekannt", [k for r, k in roh if r >= 0.5]
+
+
+def katalog_aus_index(spiele):
+    """({Name: [Schreibweisen]}, {Name: spiel_id}) aus rag.spiele_im_index.
+
+    Name, Aliase aus spiel.json und die spiel_id selbst zaehlen als Schreibweise.
+    Zwei Spiele mit gleichem Namen waeren nicht unterscheidbar -> Fehler.
+    """
+    katalog, ids = {}, {}
+    for s in spiele:
+        if s["name"] in katalog:
+            raise ValueError(f"Zwei Spiele im Index heissen {s['name']!r} ({ids[s['name']]}, {s['spiel_id']}) "
+                             "-- Namen in spiel.json eindeutig machen.")
+        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])
+        katalog[s["name"]] = sorted({normalisiere(f) for f in formen if normalisiere(f)})
+        ids[s["name"]] = s["spiel_id"]
+    return katalog, ids
+
+
+def loese_spiel(anfrage, data_dir=None):
+    """spiel_id zu einer Angabe auf der Kommandozeile: spiel_id ODER Name/Alias.
+
+    Dieselbe Zuordnung wie die Pipe, damit --spiel ueberall dasselbe bedeutet.
+    """
+    ids = liste_spiele(data_dir)
+    if anfrage in ids:
+        return anfrage
+    katalog, zu_id = katalog_aus_index([lies_spiel(s, data_dir) for s in ids])
+    status, ergebnis = ordne_spiel(anfrage, katalog)
+    if status == "treffer":
+        return zu_id[ergebnis]
+    vorschlag = f" Meintest du {' oder '.join(ergebnis[:3])}?" if ergebnis else ""
+    raise KonfigFehler(f"Kein Spiel {anfrage!r} unter {data_dir or DATA_DIR}.{vorschlag} "
+                       f"Vorhanden: {', '.join(ids) or '-'}")
 
 
 # ---------- PDF -> Chunks (seitenbewusst, damit Zitate eine Seite haben) ----------
@@ -1019,7 +1125,7 @@ def cmd_vergleiche(args):
     """
     if not args:
         raise KonfigFehler(cmd_vergleiche.__doc__)
-    sid = pruefe_spiel_id(args[0])
+    sid = loese_spiel(args[0])
     quelle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge.jsonl")
     if "--quelle" in args[1:-1]:
         quelle = args[args.index("--quelle") + 1]
@@ -1056,12 +1162,34 @@ def cmd_vergleiche(args):
 # ---------- Modi ----------
 def cmd_index(args):
     """python rag.py index [spiel_id ...|--alle] -- nur Geaendertes wird neu eingebettet."""
-    ids = [a for a in args if a != "--alle"]
+    ids = [loese_spiel(a) for a in args if a != "--alle"]
     print(f"Index {INDEX_PATH}  Konfiguration {index_konfig()}")
     aktualisiere_index(ids or None)
 
 
-def cmd_ask(query, spiel_id=None):
+def ask_argumente(args):
+    """(spiel oder None, Frage) aus `ask [--spiel X | --spiel=X] Frage...` -- --spiel an beliebiger Stelle."""
+    spiel, rest, i = None, [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--spiel":
+            if i + 1 >= len(args):
+                raise KonfigFehler("--spiel braucht einen Wert (Name oder spiel_id).")
+            spiel, i = args[i + 1], i + 2
+            continue
+        if a.startswith("--spiel="):
+            spiel = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+        i += 1
+    if not " ".join(rest).strip():
+        raise KonfigFehler("Keine Frage angegeben.")
+    return spiel, " ".join(rest)
+
+
+def cmd_ask(query, spiel=None):
+    """spiel: Name, Alias oder spiel_id -- dieselbe Zuordnung wie in der Pipe."""
+    spiel_id = None if spiel is None else loese_spiel(spiel)
     if spiel_id is None:
         chunks, embs = build_index()
         hits = retrieve(query, chunks, embs)
@@ -1147,7 +1275,7 @@ def cmd_eval_spiele(args, data_dir=None):
         if not ids:
             raise KonfigFehler("Kein Spiel unter data/ hat ein golden_set.json.")
     else:
-        ids = [pruefe_spiel_id(a) for a in args]
+        ids = [loese_spiel(a, data_dir) for a in args]
     alle_saetze = []
     for sid in ids:
         print(f"==================== {sid} ====================")
@@ -1186,11 +1314,8 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "eval"
     try:
         if mode == "ask" and len(sys.argv) > 2:
-            rest = sys.argv[2:]
-            spiel = None
-            if rest[0] == "--spiel" and len(rest) > 2:
-                spiel, rest = rest[1], rest[2:]
-            cmd_ask(" ".join(rest), spiel)
+            spiel, frage = ask_argumente(sys.argv[2:])
+            cmd_ask(frage, spiel)
         elif mode == "index":
             cmd_index(sys.argv[2:])
         elif mode == "eval" and len(sys.argv) > 2:

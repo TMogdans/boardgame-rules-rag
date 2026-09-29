@@ -429,25 +429,25 @@ class TestRegelfrageFeld(PipeTestBasis):
 
 
 class TestSpielzuordnung(unittest.TestCase):
-    K = op.katalog_aus("Food Chain Magnate", "Food Chain, FCM")
+    K = rag.katalog_aus("Food Chain Magnate", "Food Chain, FCM")
 
     def test_treffer(self):
         for q in ("Food Chain Magnate", "food-chain magnate", "FoodChain", "FCM", "Food Chain Magnet"):
-            self.assertEqual(op.ordne_spiel(q, self.K), ("treffer", "Food Chain Magnate"), q)
+            self.assertEqual(rag.ordne_spiel(q, self.K), ("treffer", "Food Chain Magnate"), q)
 
     def test_normalisierung_traegt_bei_kurzen_namen(self):
         # Bei kurzen Namen rettet die Unschaerfe nichts: "f.c.m." gegen "fcm" liegt
         # ohne Normalisierung bei 0,67 -- erst das Entfernen der Satzzeichen trifft.
-        self.assertEqual(op.ordne_spiel("F.C.M.", self.K), ("treffer", "Food Chain Magnate"))
-        self.assertEqual(op.ordne_spiel("F C M", self.K), ("treffer", "Food Chain Magnate"))
+        self.assertEqual(rag.ordne_spiel("F.C.M.", self.K), ("treffer", "Food Chain Magnate"))
+        self.assertEqual(rag.ordne_spiel("F C M", self.K), ("treffer", "Food Chain Magnate"))
 
     def test_kein_treffer(self):
         for q in ("Terraforming Mars", "Brass Birmingham", "", None, "Food"):
-            self.assertEqual(op.ordne_spiel(q, self.K)[0], "unbekannt", q)
+            self.assertEqual(rag.ordne_spiel(q, self.K)[0], "unbekannt", q)
 
     def test_vorschlag_nur_bei_aehnlichkeit(self):
-        self.assertEqual(op.ordne_spiel("Fudschein Magnat", self.K), ("unbekannt", ["Food Chain Magnate"]))
-        self.assertEqual(op.ordne_spiel("Terraforming Mars", self.K), ("unbekannt", []))
+        self.assertEqual(rag.ordne_spiel("Fudschein Magnat", self.K), ("unbekannt", ["Food Chain Magnate"]))
+        self.assertEqual(rag.ordne_spiel("Terraforming Mars", self.K), ("unbekannt", []))
 
 
 class TestHelfer(unittest.TestCase):
