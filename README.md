@@ -154,6 +154,32 @@ Und ein Hinweis auf die Grenze der Messlatte selbst: "erwartete Seite unter top_
 binaer und hat in allen vier Konfigurationen 7/8 gemeldet. Erst Precision@4 und MRR zeigen
 ueberhaupt einen Unterschied. Wer nur die Quote ansieht, sieht keine Stellschraube wirken.
 
+### Mehrere Spiele: persistenter Index
+
+Fuer die Spiele unter `data/` gibt es einen Index in einer SQLite-Datei
+(`data/index.sqlite`, per `INDEX_PATH` verlegbar). Vektoren liegen dort als float32-BLOB,
+Volltext (BM25) in einer FTS5-Tabelle. Eingebettet wird nur, was sich geaendert hat:
+Der Fingerprint je Spiel ist SHA-256 der `knowledge.jsonl` plus `EMBED_MODEL`,
+`CHUNK_SIZE`, `CHUNK_OVERLAP` und eine Schema-Version. Jede Konfiguration ist ein eigener
+Stand -- ein Lauf mit `CHUNK_SIZE=800` ersetzt nicht den 400er-Stand der Pipe.
+`DROP_TYPES` wirkt beim Laden und braucht kein neues Embedding.
+
+```bash
+CHUNK_SIZE=400 python rag.py index --alle            # alle Spiele unter data/, entfernt verschwundene
+CHUNK_SIZE=400 python rag.py index brass-birmingham  # nur dieses Spiel
+```
+
+**Warum kein sqlite-vec**, obwohl es auf der Zielmaschine laedt (Wheel 0.1.9 fuer
+Python 3.14/manylinux, `enable_load_extension` vorhanden): Gesucht wird immer innerhalb
+eines Spiels, also ueber hunderte bis wenige tausend Vektoren. Gemessen bei 47k x 1024
+Vektoren in 250 Spielen (k=4, 200 Fragen): pro Spiel numpy typisch 0,07 ms (max 0,12),
+sqlite-vec 0,29 ms (max 0,37). Entscheidend ist aber die Reihenfolge bei Gleichstand:
+Bei identischen Vektoren liefert `vec0` die umgekehrte rowid-Folge wie `np.argsort`
+(`[6,4,3,1]` statt `[1,3,4,6]`). An der top_k-Grenze aendert das, *welche* Chunks
+zurueckkommen, und der bisherige Weg waere fuer FCM nicht mehr zahlengleich. Dazu kaeme
+eine Abhaengigkeit mehr im Open-WebUI-Container. Das BLOB-Format ist das `vec_f32` von
+sqlite-vec; ein spaeterer Wechsel kostet eine Abfrage, kein Neu-Embedden.
+
 ### Was die Eval misst -- und was nicht
 
 `python rag.py eval` erhebt **zwei** Dinge, und beide sind Regressionswarner, kein
@@ -203,7 +229,9 @@ python test_wertung.py       # Dreiteilung, DROP_TYPES-Entkopplung, Keywords, Gu
 python test_classify.py      # Klassifikator-Auswertung, 17 Antwortvarianten
 python test_ingest_seite.py  # 'seite'-Feld in ingest.py und vision_ingest.py
 python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins eigene Spielverzeichnis
+python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nur bei Aenderung
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
+NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
 # test_mutationen.py faehrt auch die Pipe-Mutationen (P1-P26)
 ```

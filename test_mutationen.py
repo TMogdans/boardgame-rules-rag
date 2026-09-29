@@ -18,7 +18,7 @@ import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
-         "test_spiele.py")
+         "test_spiele.py", "test_index.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -205,6 +205,28 @@ MUTATIONEN = [
      "rag.py", '    falsch = [c.get("id", "?") for c in roh if c.get("spiel_id") != spiel_id]', "    falsch = []"),
     ("S10 classify.py ignoriert die spiel_id",
      "classify.py", "    if not rest:\n        return KNOW", "    if True:\n        return KNOW"),
+
+    # ---- Persistenter Index, Fingerprint-Invalidierung (test_index.py) ----
+    ("F1 Fingerprint ohne Dateiinhalt (nur Konfiguration)",
+     "rag.py", "            h.update(block)\n", "            pass\n"),
+    ("F2 Konfiguration ohne EMBED_MODEL",
+     "rag.py", '"embed_model": embed_model or EMBED_MODEL,', '"embed_model": "egal",'),
+    ("F3 Konfiguration ohne CHUNK_OVERLAP",
+     "rag.py", '"chunk_size": size, "chunk_overlap": overlap}', '"chunk_size": size}'),
+    ("F4 Konfiguration ohne Schema-Version",
+     "rag.py", 'json.dumps({"schema": INDEX_SCHEMA, ', 'json.dumps({'),
+    ("F5 vorhandener Stand gilt immer als aktuell",
+     "rag.py", "    if alt and alt[0] == fp:", "    if alt:"),
+    ("F6 immer neu einbetten (kein persistenter Nutzen)",
+     "rag.py", "    if alt and alt[0] == fp:", "    if False:"),
+    ("F7 Einzelaufruf raeumt fremde Spiele ab",
+     "rag.py", "    alle = spiel_ids is None\n", "    alle = True\n"),
+    ("F8 erst loeschen, dann einbetten (Abbruch hinterlaesst leeren Stand)",
+     "rag.py", "    embs = l2norm(embed_gebatcht([s for _, _, s in stuecke])).astype(\"<f4\")\n",
+     "    con.execute(\"DELETE FROM chunks WHERE spiel_id=? AND konfig=?\", (spiel_id, konfig)); con.commit()\n"
+     "    embs = l2norm(embed_gebatcht([s for _, _, s in stuecke])).astype(\"<f4\")\n"),
+    ("F9 Seite verliert beim Speichern ihren Typ",
+     "rag.py", '"seite": json.loads(z[1]), "text": z[3],', '"seite": z[1], "text": z[3],'),
 ]
 
 
@@ -221,9 +243,19 @@ def rote_tests():
     return rot
 
 
+def ausgewaehlt():
+    """NUR=F,S3 python test_mutationen.py -- nur Mutationen mit diesen Praefixen (Default: alle)."""
+    praefixe = [p.strip() for p in os.environ.get("NUR", "").split(",") if p.strip()]
+    if not praefixe:
+        return MUTATIONEN
+    return [m for m in MUTATIONEN
+            if any(m[0].replace("[gleich] ", "").startswith(p) for p in praefixe)]
+
+
 def main():
     unerwartet_gruen = []
-    for name, datei, alt, neu in MUTATIONEN:
+    auswahl = ausgewaehlt()
+    for name, datei, alt, neu in auswahl:
         pfad = os.path.join(BASE, datei)
         orig = io.open(pfad, encoding="utf-8").read()
         if alt not in orig:
@@ -247,7 +279,7 @@ def main():
         for n in unerwartet_gruen:
             print(f"  {n}")
         return 1
-    print(f"{len(MUTATIONEN)} Mutationen geprueft, alle erwartungsgemaess.")
+    print(f"{len(auswahl)} Mutationen geprueft, alle erwartungsgemaess.")
     return 0
 
 

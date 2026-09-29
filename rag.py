@@ -20,7 +20,7 @@ Konfiguration des Laufs. Keine Stellschraube (DROP_TYPES, SOURCE, CHUNK_SIZE) da
 einen Nenner verschieben -- sonst zieht dieselbe Einstellung, die das Retrieval
 veraendert, auch den Beobachtungspunkt mit.
 """
-import sys, json, glob, re, os
+import sys, json, glob, re, os, sqlite3
 import numpy as np
 import requests
 # pypdf wird erst im PDF-Zweig von load_chunks importiert. Die Wissensbasis-Route
@@ -405,6 +405,248 @@ def build_index():
     return chunks, embs
 
 
+# ---------- Persistenter Index (SQLite) ----------
+# Eine Datei data/index.sqlite fuer alle Spiele. Vektoren liegen als float32-BLOB
+# (little endian) in einer normalen Tabelle, gesucht wird mit numpy; BM25 kommt
+# aus FTS5. sqlite-vec wird bewusst NICHT benutzt, obwohl es auf der Zielmaschine
+# laedt (Wheel 0.1.9 fuer py3.14/manylinux, enable_load_extension vorhanden):
+#   1. Gleichstaende: bei identischen Vektoren liefert vec0 die umgekehrte
+#      rowid-Reihenfolge wie np.argsort (gemessen: [6,4,3,1] statt [1,3,4,6]).
+#      Duplikat-Chunks sind real (Ueberlappung, wiederholte Vision-Zeilen), und
+#      an der top_k-Grenze aendert das die MENGE, nicht nur die Reihenfolge --
+#      der Default-Pfad waere fuer FCM nicht mehr zahlengleich.
+#   2. Gesucht wird immer innerhalb EINES Spiels (Filter vor dem Ranking). Das
+#      sind hunderte bis wenige tausend Vektoren; vec0 ist in 0.1.x ohnehin
+#      Brute-Force. Gemessen bei 47k x 1024, 250 Spielen, k=4, 200 Fragen:
+#      pro Spiel numpy typisch 0,07 ms (max 0,12), sqlite-vec 0,29 ms (max 0,37).
+#   3. Die Pipe laeuft im Open-WebUI-Container: numpy ist dort vorhanden,
+#      sqlite-vec waere eine weitere Abhaengigkeit samt load_extension.
+# Das BLOB-Format ist genau das, was sqlite-vec als vec_f32 liest -- ein spaeterer
+# Wechsel (etwa auf ANN) ist eine Abfrage-Aenderung, kein Neu-Embedden.
+INDEX_PATH   = os.environ.get("INDEX_PATH", os.path.join(DATA_DIR, "index.sqlite"))
+EMBED_BATCH  = int(os.environ.get("EMBED_BATCH", 64))  # Texte pro /api/embed-Aufruf beim Indexbau
+# Hochzaehlen, wenn sich zerteile() oder das Chunk-Format aendert: dann ist jeder
+# gespeicherte Stand ungueltig, auch bei gleicher Datei und gleichen Stellschrauben.
+INDEX_SCHEMA = 1
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS spiele (
+    spiel_id   TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    aliase     TEXT NOT NULL,          -- JSON-Liste
+    sprache    TEXT,
+    quelle_pdf TEXT
+);
+-- Ein Stand je Spiel UND Konfiguration: ein eval-Lauf mit CHUNK_SIZE=800 ueberschreibt
+-- nicht den 400er-Stand, den die Pipe benutzt.
+CREATE TABLE IF NOT EXISTS staende (
+    spiel_id    TEXT NOT NULL,
+    konfig      TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    chunks      INTEGER NOT NULL,
+    dim         INTEGER NOT NULL,
+    PRIMARY KEY (spiel_id, konfig)
+);
+CREATE TABLE IF NOT EXISTS chunks (
+    id       INTEGER PRIMARY KEY,
+    spiel_id TEXT NOT NULL,
+    konfig   TEXT NOT NULL,
+    pos      INTEGER NOT NULL,         -- Reihenfolge wie beim In-Memory-Weg
+    seite    TEXT NOT NULL,            -- JSON, damit der Wert unveraendert zurueckkommt
+    typ      TEXT,
+    text     TEXT NOT NULL,
+    emb      BLOB NOT NULL,
+    UNIQUE (spiel_id, konfig, pos)
+);
+"""
+_FTS_SQL = ("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
+            "text, tokenize='unicode61 remove_diacritics 2')")   # rowid = chunks.id
+
+
+def index_konfig(embed_model=None, size=None, overlap=None):
+    """Alles, was die gespeicherten Vektoren bestimmt -- ausser der Datei selbst.
+
+    DROP_TYPES gehoert NICHT dazu: der Index enthaelt alle Chunks, gefiltert wird
+    beim Laden. Ein anderer Typ-Filter braucht also kein neues Embedding.
+    """
+    size, overlap = pruefe_chunk_konfiguration(size, overlap)
+    return json.dumps({"schema": INDEX_SCHEMA, "embed_model": embed_model or EMBED_MODEL,
+                       "chunk_size": size, "chunk_overlap": overlap}, sort_keys=True)
+
+
+def fingerprint(pfad, konfig):
+    """Datei-Hash + Konfiguration. mtime taugt nicht (cp -p, Restore)."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(pfad, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    h.update(b"\0" + konfig.encode())
+    return h.hexdigest()
+
+
+def fts5_verfuegbar(con):
+    try:
+        con.execute("CREATE VIRTUAL TABLE temp._fts_probe USING fts5(x)")
+        con.execute("DROP TABLE temp._fts_probe")
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
+def oeffne_index(pfad=None, schreibend=False):
+    """Verbindung zum Index. Lesend mit mode=ro: die Pipe hat den Index read-only gemountet."""
+    pfad = pfad or INDEX_PATH
+    if schreibend:
+        os.makedirs(os.path.dirname(os.path.abspath(pfad)), exist_ok=True)
+        con = sqlite3.connect(pfad, timeout=30)
+        con.executescript(_SCHEMA_SQL)
+        if fts5_verfuegbar(con):
+            con.execute(_FTS_SQL)
+        con.commit()
+        return con
+    if not os.path.exists(pfad):
+        raise KonfigFehler(f"Index {pfad} fehlt -- zuerst `python rag.py index --alle` laufen lassen.")
+    return sqlite3.connect(f"file:{pfad}?mode=ro", uri=True, timeout=30)
+
+
+def _hat_fts(con):
+    return con.execute("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").fetchone() is not None
+
+
+def indexiere_stuecke(rohchunks, size=None, overlap=None):
+    """[(seite, typ, stueck)] in genau der Reihenfolge von baue_knowledge_chunks.
+
+    Anders als dort ohne DROP_TYPES: der Index nimmt alle Typen auf.
+    """
+    out = []
+    for c in rohchunks:
+        seite = chunk_seite(c)
+        for stueck in zerteile(c["text"], size, overlap):
+            out.append((seite, c.get("typ"), stueck))
+    return out
+
+
+def embed_gebatcht(texte, batch=None):
+    batch = batch or EMBED_BATCH
+    teile = [embed(texte[i:i + batch]) for i in range(0, len(texte), batch)]
+    return np.concatenate(teile) if teile else np.zeros((0, 0), dtype=np.float32)
+
+
+def aktualisiere_spiel(con, spiel_id, data_dir=None):
+    """Stand eines Spiels fuer die aktuelle Konfiguration herstellen.
+
+    Neu eingebettet wird nur, wenn sich der Fingerprint geaendert hat. Die
+    Metadaten aus spiel.json (Name, Aliase) werden immer uebernommen -- das
+    kostet nichts und macht einen neuen Alias ohne Neu-Embedding wirksam.
+    Rueckgabe: ("aktuell" | "neu", Anzahl Chunks).
+    """
+    meta = lies_spiel(spiel_id, data_dir)
+    roh = lies_spiel_chunks(spiel_id, data_dir)
+    konfig = index_konfig()
+    fp = fingerprint(knowledge_pfad(spiel_id, data_dir), konfig)
+    con.execute("INSERT OR REPLACE INTO spiele VALUES (?,?,?,?,?)",
+                (spiel_id, meta["name"], json.dumps(meta.get("aliase") or [], ensure_ascii=False),
+                 meta.get("sprache"), meta.get("quelle_pdf")))
+    alt = con.execute("SELECT fingerprint, chunks FROM staende WHERE spiel_id=? AND konfig=?",
+                      (spiel_id, konfig)).fetchone()
+    if alt and alt[0] == fp:
+        con.commit()
+        return "aktuell", alt[1]
+    stuecke = indexiere_stuecke(roh)
+    if not stuecke:
+        raise KonfigFehler(f"{spiel_id}: knowledge.jsonl ergibt keinen einzigen Chunk.")
+    # Erst einbetten, dann schreiben: bricht Ollama ab, bleibt der alte Stand stehen.
+    embs = l2norm(embed_gebatcht([s for _, _, s in stuecke])).astype("<f4")
+    if len(embs) != len(stuecke):
+        raise RuntimeError(f"{spiel_id}: {len(stuecke)} Texte, aber {len(embs)} Embeddings.")
+    fts = _hat_fts(con)
+    with con:
+        if fts:
+            con.execute("DELETE FROM chunks_fts WHERE rowid IN "
+                        "(SELECT id FROM chunks WHERE spiel_id=? AND konfig=?)", (spiel_id, konfig))
+        con.execute("DELETE FROM chunks WHERE spiel_id=? AND konfig=?", (spiel_id, konfig))
+        for pos, ((seite, typ, text), e) in enumerate(zip(stuecke, embs)):
+            cur = con.execute("INSERT INTO chunks (spiel_id, konfig, pos, seite, typ, text, emb) "
+                              "VALUES (?,?,?,?,?,?,?)",
+                              (spiel_id, konfig, pos, json.dumps(seite), typ, text, e.tobytes()))
+            if fts:
+                con.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?,?)", (cur.lastrowid, text))
+        con.execute("INSERT OR REPLACE INTO staende VALUES (?,?,?,?,?)",
+                    (spiel_id, konfig, fp, len(stuecke), int(embs.shape[1])))
+    return "neu", len(stuecke)
+
+
+def entferne_spiel(con, spiel_id):
+    """Spiel samt allen Staenden aus dem Index (Verzeichnis unter data/ ist weg)."""
+    with con:
+        if _hat_fts(con):
+            con.execute("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE spiel_id=?)",
+                        (spiel_id,))
+        for tabelle in ("chunks", "staende", "spiele"):
+            con.execute(f"DELETE FROM {tabelle} WHERE spiel_id=?", (spiel_id,))
+
+
+def aktualisiere_index(spiel_ids=None, pfad=None, data_dir=None, ausgabe=print):
+    """Index fuer die genannten Spiele (None = alle unter data/) auf Stand bringen.
+
+    Nur bei "alle" werden Spiele entfernt, deren Verzeichnis verschwunden ist --
+    ein Einzelaufruf fasst fremde Spiele nie an.
+    """
+    alle = spiel_ids is None
+    spiel_ids = liste_spiele(data_dir) if alle else [pruefe_spiel_id(s) for s in spiel_ids]
+    con = oeffne_index(pfad, schreibend=True)
+    try:
+        ergebnis = {}
+        for sid in spiel_ids:
+            ergebnis[sid] = aktualisiere_spiel(con, sid, data_dir)
+            ausgabe(f"  {sid}: {ergebnis[sid][0]} ({ergebnis[sid][1]} Chunks)")
+        if alle:
+            weg = [r[0] for r in con.execute("SELECT spiel_id FROM spiele")]
+            for sid in sorted(set(weg) - set(spiel_ids)):
+                entferne_spiel(con, sid)
+                ergebnis[sid] = ("entfernt", 0)
+                ausgabe(f"  {sid}: entfernt (kein Verzeichnis mehr unter data/)")
+        return ergebnis
+    finally:
+        con.close()
+
+
+def stand_im_index(con, spiel_id, konfig=None):
+    """(fingerprint, chunks) des gespeicherten Stands oder None."""
+    return con.execute("SELECT fingerprint, chunks FROM staende WHERE spiel_id=? AND konfig=?",
+                       (spiel_id, konfig or index_konfig())).fetchone()
+
+
+def lade_spiel(con, spiel_id, drop=frozenset(), konfig=None):
+    """(chunks, embs) EINES Spiels, gefiltert vor jedem Ranking.
+
+    Reihenfolge und Werte entsprechen dem In-Memory-Weg: gleiche Chunk-Folge
+    (pos), gleiche float32-Vektoren. Deshalb liefert dieselbe Rangfolge-Rechnung
+    dieselben Top-k -- inklusive Gleichstaenden.
+    """
+    konfig = konfig or index_konfig()
+    stand = con.execute("SELECT dim FROM staende WHERE spiel_id=? AND konfig=?", (spiel_id, konfig)).fetchone()
+    if stand is None:
+        raise KonfigFehler(
+            f"{spiel_id!r} ist fuer diese Konfiguration nicht im Index ({konfig}). "
+            f"`python rag.py index {spiel_id}` mit denselben EMBED_MODEL/CHUNK_SIZE/CHUNK_OVERLAP laufen lassen.")
+    zeilen = con.execute("SELECT id, seite, typ, text, emb FROM chunks "
+                         "WHERE spiel_id=? AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()
+    pruefe_typ_feld([{"typ": z[2]} for z in zeilen if z[2] is not None], drop)
+    zeilen = [z for z in zeilen if z[2] not in drop]
+    chunks = [{"doc": "knowledge", "seite": json.loads(z[1]), "text": z[3],
+               "spiel_id": spiel_id, "chunk_id": z[0]} for z in zeilen]
+    embs = np.frombuffer(b"".join(z[4] for z in zeilen), dtype="<f4").reshape(len(zeilen), stand[0])
+    return chunks, embs.astype(np.float32, copy=False)
+
+
+def spiele_im_index(con):
+    """[{spiel_id, name, aliase, sprache, quelle_pdf}] aus der Tabelle spiele."""
+    return [{"spiel_id": r[0], "name": r[1], "aliase": json.loads(r[2]), "sprache": r[3], "quelle_pdf": r[4]}
+            for r in con.execute("SELECT spiel_id, name, aliase, sprache, quelle_pdf FROM spiele ORDER BY spiel_id")]
+
+
 # ---------- Reranker (lazy geladen) ----------
 _reranker = None
 def get_reranker():
@@ -576,6 +818,13 @@ def formatiere_zusammenfassung(z):
 
 
 # ---------- Modi ----------
+def cmd_index(args):
+    """python rag.py index [spiel_id ...|--alle] -- nur Geaendertes wird neu eingebettet."""
+    ids = [a for a in args if a != "--alle"]
+    print(f"Index {INDEX_PATH}  Konfiguration {index_konfig()}")
+    aktualisiere_index(ids or None)
+
+
 def cmd_ask(query):
     chunks, embs = build_index()
     hits = retrieve(query, chunks, embs)
@@ -620,6 +869,8 @@ if __name__ == "__main__":
     try:
         if mode == "ask" and len(sys.argv) > 2:
             cmd_ask(" ".join(sys.argv[2:]))
+        elif mode == "index":
+            cmd_index(sys.argv[2:])
         else:
             cmd_eval()
     except KonfigFehler as e:
