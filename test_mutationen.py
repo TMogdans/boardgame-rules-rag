@@ -18,7 +18,8 @@ import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
-         "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py")
+         "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
+         "test_pipe_index.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -274,6 +275,34 @@ MUTATIONEN = [
     ("E5 Eval ignoriert DROP_TYPES auf dem Index-Weg",
      "rag.py", "        chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())\n        name =",
      "        chunks, embs = lade_spiel(con, spiel_id)\n        name ="),
+
+    # ---- Pipe auf dem Index-Weg, Spielzuordnung (test_pipe_index.py) ----
+    ("P27 Index-Weg ordnet gegen die Valves statt gegen den Index",
+     "openwebui_pipe.py", "        status, ergebnis = ordne_spiel(anfrage, katalog)\n",
+     "        status, ergebnis = ordne_spiel(anfrage, katalog_aus(v.SPIEL, v.SPIEL_ALIASE))\n"),
+    ("P28 Aliase aus spiel.json werden ignoriert",
+     "openwebui_pipe.py", '        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])',
+     '        formen = [s["name"], s["spiel_id"]]'),
+    ("P29 gemeinsamer Alias: das erste Spiel gewinnt",
+     "openwebui_pipe.py", '    if exakt:\n        return "unbekannt", exakt', '    if exakt:\n        return "treffer", exakt[0]'),
+    ("P30 unscharfer Fast-Gleichstand wird nicht erkannt",
+     "openwebui_pipe.py", "        if len(knapp) > 1:", "        if False:"),
+    ("P31 veralteter Index wird still benutzt",
+     "openwebui_pipe.py", "            if stand and stand[0] != rag.fingerprint(wissen, konfig):", "            if False:"),
+    ("P32 HYBRID aus der Container-Umgebung schlaegt durch",
+     "openwebui_pipe.py", "        rag.HYBRID = v.HYBRID  # nie aus der Container-Umgebung\n", ""),
+    ("P33 ohne Spielangabe wird einfach das erste Spiel genommen",
+     "openwebui_pipe.py", "            if len(spiele) == 1:", "            if len(spiele) >= 1:"),
+    ("P34 Spiel-Cache ohne spiel_id im Schluessel",
+     "openwebui_pipe.py", "datei_stand(v.INDEX_PATH), spiel_id, stand_wissen,", "datei_stand(v.INDEX_PATH), stand_wissen,"),
+    ("P35 Katalog wird nie neu gelesen (neues Spiel erst nach Neustart)",
+     "openwebui_pipe.py", "        if key != self._katalog_key:", "        if self._katalog is None:"),
+    ("P36 STANDARD_SPIEL wird ignoriert",
+     "openwebui_pipe.py", "            if v.STANDARD_SPIEL:", "            if False:"),
+    ("P37 INDEX_PATH schaltet den Index-Weg nicht ein",
+     "openwebui_pipe.py", "        if self.valves.INDEX_PATH:", "        if False:"),
+    ("P38 Spiel-Cache waechst unbegrenzt",
+     "openwebui_pipe.py", "        while len(self._spiel_cache) > v.CACHE_SPIELE:", "        while False:"),
 ]
 
 

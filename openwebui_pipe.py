@@ -1,13 +1,20 @@
 """
 title: Brettspiel-Regeln (RAG)
-description: Beantwortet Regelfragen aus knowledge.jsonl mit derselben Retrieval-Logik wie rag.py.
-version: 0.3.0
+description: Beantwortet Regelfragen aus dem Index (viele Spiele) oder knowledge.jsonl mit derselben Retrieval-Logik wie rag.py.
+version: 0.4.0
 
 Open-WebUI-Pipe: erscheint in der Modellauswahl als eigenes Modell. Die Logik
 (Chunking, Embedding, Retrieval, Prompt) kommt aus rag.py -- diese Datei laedt
 rag.py zur Laufzeit aus RAG_DIR und reicht nur durch. Mit denselben Werten fuer
 CHUNK_SIZE, CHUNK_OVERLAP, DROP_TYPES und TOP_K misst `rag.py eval` also dieselbe
 Pipeline, die im Chat antwortet.
+
+Zwei Betriebsarten, per Valve INDEX_PATH gewaehlt:
+  - INDEX_PATH leer (Default): der alte Ein-Spiel-Weg. Die Pipe liest
+    KNOWLEDGE_PATH und bettet selbst ein; das Spiel steht in den Valves SPIEL/SPIEL_ALIASE.
+  - INDEX_PATH gesetzt: der persistente Index aus `rag.py index` (read-only).
+    Gesucht wird nur im zugeordneten Spiel; die Zuordnung laeuft gegen Name und
+    Aliase ALLER Spiele im Index. Die Pipe bettet nur noch die Frage ein.
 
 Bewusst async: Open WebUI ruft eine synchrone Pipe direkt im Event-Loop auf,
 eine blockierende Pipe wuerde die Oberflaeche fuer alle einfrieren, solange das
@@ -107,25 +114,56 @@ def katalog_aus(name, aliase):
     return {name: sorted({normalisiere(f) for f in formen if normalisiere(f)})}
 
 
+# Liegen die zwei besten unscharfen Treffer naeher beieinander, ist die Zuordnung
+# ein Muenzwurf -- dann lieber nachfragen. Mit vielen Spielen im Index real
+# ("Brass: Lancashire" / "Brass: Birmingham").
+MEHRDEUTIG_ABSTAND = 0.05
+
+
 def ordne_spiel(anfrage, katalog, schwelle=0.8):
     """("treffer", Name) oder ("unbekannt", [Vorschlaege]).
 
     Exakt nach Normalisierung, sonst unscharf (difflib) gegen jede Schreibweise --
     fuer Hoerfehler wie "Food Chain Magnet". Unterhalb der Schwelle kein Treffer:
-    lieber "kein Regelheft" als die Regeln des falschen Spiels.
+    lieber "kein Regelheft" als die Regeln des falschen Spiels. Ebenso kein
+    Treffer, wenn die Anfrage mehrdeutig ist (exakt bei mehreren Spielen, etwa
+    ein gemeinsamer Alias, oder zwei unscharfe Treffer fast gleichauf).
     """
     n = normalisiere(anfrage)
     if not n:
         return "unbekannt", []
+    exakt = sorted(kanon for kanon, formen in katalog.items() if n in formen)
+    if len(exakt) == 1:
+        return "treffer", exakt[0]
+    if exakt:
+        return "unbekannt", exakt
     bewertet = []
     for kanon, formen in katalog.items():
-        if n in formen:
-            return "treffer", kanon
         bewertet.append((max(difflib.SequenceMatcher(None, n, f).ratio() for f in formen), kanon))
     bewertet.sort(reverse=True)
     if bewertet and bewertet[0][0] >= schwelle:
+        knapp = [k for r, k in bewertet if r >= schwelle and bewertet[0][0] - r < MEHRDEUTIG_ABSTAND]
+        if len(knapp) > 1:
+            return "unbekannt", knapp
         return "treffer", bewertet[0][1]
     return "unbekannt", [k for r, k in bewertet if r >= 0.5]
+
+
+def katalog_aus_index(spiele):
+    """({Name: [Schreibweisen]}, {Name: spiel_id}) aus rag.spiele_im_index.
+
+    Name, Aliase aus spiel.json und die spiel_id selbst zaehlen als Schreibweise.
+    Zwei Spiele mit gleichem Namen waeren nicht unterscheidbar -> Fehler.
+    """
+    katalog, ids = {}, {}
+    for s in spiele:
+        if s["name"] in katalog:
+            raise ValueError(f"Zwei Spiele im Index heissen {s['name']!r} ({ids[s['name']]}, {s['spiel_id']}) "
+                             "-- Namen in spiel.json eindeutig machen.")
+        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])
+        katalog[s["name"]] = sorted({normalisiere(f) for f in formen if normalisiere(f)})
+        ids[s["name"]] = s["spiel_id"]
+    return katalog, ids
 
 
 def datei_stand(pfad):
@@ -153,6 +191,12 @@ class Pipe:
         # (Home Assistant). Solange es eine Wissensbasis gibt, ist das ein Eintrag.
         SPIEL: str = "Food Chain Magnate"
         SPIEL_ALIASE: str = Field("Food Chain, FCM", description="Kurzformen, kommagetrennt")
+        # Viele Spiele: persistenter Index aus `rag.py index`. Gesetzt schaltet er die
+        # Pipe auf den Index-Weg; SPIEL/SPIEL_ALIASE und KNOWLEDGE_PATH gelten dann nicht.
+        INDEX_PATH: str = Field("", description="z.B. /rag/data/index.sqlite; leer = Ein-Spiel-Weg ueber KNOWLEDGE_PATH")
+        STANDARD_SPIEL: str = Field("", description="spiel_id fuer Anfragen ohne regelfrage.spiel; leer = nur bei genau einem Spiel im Index")
+        HYBRID: bool = Field(False, description="Vektor + BM25 (nur Index-Weg), wie HYBRID=1 bei rag.py")
+        CACHE_SPIELE: int = Field(16, ge=1, description="so viele Spiele haelt die Pipe im Speicher")
 
     def __init__(self):
         self.valves = self.Valves()
@@ -161,6 +205,9 @@ class Pipe:
         self._rag_key = None
         self._index = None
         self._index_key = None
+        self._spiel_cache = {}      # key -> (chunks, embs), Einfuegereihenfolge = LRU
+        self._katalog = None
+        self._katalog_key = None
 
     # rag.py neu laden, wenn es sich geaendert hat (git pull im gemounteten Clone)
     def _lade_rag(self, v):
@@ -180,6 +227,7 @@ class Pipe:
         rag.CHUNK_SIZE = v.CHUNK_SIZE
         rag.CHUNK_OVERLAP = v.CHUNK_OVERLAP
         rag.RERANK = False  # braucht torch, das im Open-WebUI-Image fehlt
+        rag.HYBRID = v.HYBRID  # nie aus der Container-Umgebung
         return rag
 
     def _lade_index(self, rag, v):
@@ -206,6 +254,87 @@ class Pipe:
             rag = self._lade_rag(v)
             chunks, embs = self._lade_index(rag, v)
             hits = rag.retrieve(frage, chunks, embs, k=v.TOP_K)
+        return rag.baue_nachrichten(frage, hits), hits
+
+    # ---------- Index-Weg (viele Spiele) ----------
+    def _lade_katalog(self, rag, v):
+        """Katalog aller Spiele im Index, neu gelesen, wenn sich die Indexdatei aendert."""
+        key = (self._rag_key, v.INDEX_PATH, datei_stand(v.INDEX_PATH))
+        if key != self._katalog_key:
+            con = rag.oeffne_index(v.INDEX_PATH)
+            try:
+                spiele = rag.spiele_im_index(con)
+            finally:
+                con.close()
+            self._katalog, self._katalog_key = (spiele,) + katalog_aus_index(spiele), key
+        return self._katalog
+
+    def _waehle_spiel(self, anfrage, v):
+        """(spiel_id, None) oder (None, Meldung) -- ohne Suche und ohne LLM."""
+        with self._lock:
+            rag = self._lade_rag(v)
+            spiele, katalog, ids = self._lade_katalog(rag, v)
+        if not spiele:
+            return None, "Im Index ist noch kein Spiel. Erst `python rag.py index --alle` laufen lassen."
+        namen = [s["name"] for s in spiele]
+        verfuegbar = ", ".join(namen) if len(namen) <= 10 else f"{len(namen)} Spiele"
+        if anfrage is None:
+            if v.STANDARD_SPIEL:
+                if v.STANDARD_SPIEL not in ids.values():
+                    return None, f"STANDARD_SPIEL {v.STANDARD_SPIEL!r} ist nicht im Index."
+                return v.STANDARD_SPIEL, None
+            if len(spiele) == 1:
+                return spiele[0]["spiel_id"], None
+            return None, f"Zu welchem Spiel ist die Frage? Im Index: {verfuegbar}."
+        status, ergebnis = ordne_spiel(anfrage, katalog)
+        if status == "treffer":
+            return ids[ergebnis], None
+        vorschlag = f" Meintest du {' oder '.join(ergebnis[:3])}?" if ergebnis else ""
+        return None, f"Zu „{anfrage}“ habe ich kein Regelheft.{vorschlag} Verfuegbar: {verfuegbar}."
+
+    def _lade_spiel(self, rag, v, spiel_id, con):
+        """(chunks, embs) eines Spiels aus dem Index, mit Cache und Veraltet-Pruefung.
+
+        Liegt die knowledge.jsonl des Spiels neben dem Index (data/ gemountet), wird
+        ihr Fingerprint gegen den gespeicherten Stand geprueft: ein veralteter Index
+        ist ein sichtbarer Fehler, keine stille Antwort aus altem Material.
+        """
+        data_dir = os.path.dirname(os.path.abspath(v.INDEX_PATH))
+        wissen = rag.knowledge_pfad(spiel_id, data_dir)
+        stand_wissen = datei_stand(wissen) if os.path.exists(wissen) else None
+        key = (self._rag_key, v.INDEX_PATH, datei_stand(v.INDEX_PATH), spiel_id, stand_wissen,
+               v.DROP_TYPES, v.EMBED_MODEL, v.CHUNK_SIZE, v.CHUNK_OVERLAP)
+        if key in self._spiel_cache:
+            self._spiel_cache[key] = self._spiel_cache.pop(key)   # zuletzt benutzt nach hinten
+            return self._spiel_cache[key]
+        konfig = rag.index_konfig()
+        if stand_wissen is not None:
+            stand = rag.stand_im_index(con, spiel_id, konfig)
+            if stand and stand[0] != rag.fingerprint(wissen, konfig):
+                raise rag.KonfigFehler(
+                    f"Index fuer {spiel_id!r} ist veraltet: {wissen} hat sich seit dem letzten "
+                    f"`rag.py index` geaendert. Auf dem Host `CHUNK_SIZE={v.CHUNK_SIZE} "
+                    f"CHUNK_OVERLAP={v.CHUNK_OVERLAP} EMBED_MODEL={v.EMBED_MODEL} "
+                    f"python rag.py index {spiel_id}` laufen lassen.")
+        drop = rag.lies_drop_types({"SOURCE": "knowledge", "DROP_TYPES": v.DROP_TYPES})
+        chunks, embs = rag.lade_spiel(con, spiel_id, drop, konfig)
+        if not chunks:
+            raise ValueError(f"Index leer: {spiel_id} enthaelt nach DROP_TYPES={v.DROP_TYPES!r} keinen Chunk.")
+        self._spiel_cache[key] = (chunks, embs)
+        while len(self._spiel_cache) > v.CACHE_SPIELE:
+            self._spiel_cache.pop(next(iter(self._spiel_cache)))
+        return chunks, embs
+
+    def _suche_spiel(self, frage, v, spiel_id):
+        # Unter dem Lock aus demselben Grund wie _suche: Modul-Globale gehoeren zu DIESER Anfrage.
+        with self._lock:
+            rag = self._lade_rag(v)
+            con = rag.oeffne_index(v.INDEX_PATH)
+            try:
+                chunks, embs = self._lade_spiel(rag, v, spiel_id, con)
+                hits = rag.retrieve(frage, chunks, embs, k=v.TOP_K, spiel_id=spiel_id, index=con)
+            finally:
+                con.close()
         return rag.baue_nachrichten(frage, hits), hits
 
     async def _stream(self, nachrichten):
@@ -248,6 +377,10 @@ class Pipe:
         #   "regelfrage": {"spiel": "Food Chain Magnate", "sprache": true}
         # Ohne das Feld (Chat in Open WebUI) aendert sich nichts.
         rf = body.get("regelfrage") if isinstance(body.get("regelfrage"), dict) else {}
+        if self.valves.INDEX_PATH:
+            async for stueck in self._antworte_index(messages, rf):
+                yield stueck
+            return
         if rf.get("spiel") is not None:
             v = self.valves
             status, ergebnis = ordne_spiel(rf["spiel"], katalog_aus(v.SPIEL, v.SPIEL_ALIASE))
@@ -265,5 +398,21 @@ class Pipe:
             yield stueck
         # Fuer Sprache keine Fusszeile -- Scores wuerden sonst vorgelesen. Der Prompt
         # bleibt derselbe wie bei der CLI, damit das Golden Set weiter gilt.
+        if not rf.get("sprache"):
+            yield fundstellen(hits)
+
+    async def _antworte_index(self, messages, rf):
+        v = self.valves
+        spiel_id, meldung = await asyncio.to_thread(self._waehle_spiel, rf.get("spiel"), v)
+        if meldung:
+            yield meldung
+            return
+        frage, verlauf = zerlege_verlauf(messages)
+        if not frage:
+            yield "Keine Frage gefunden."
+            return
+        nachrichten, hits = await asyncio.to_thread(self._suche_spiel, frage, v, spiel_id)
+        async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
+            yield stueck
         if not rf.get("sprache"):
             yield fundstellen(hits)

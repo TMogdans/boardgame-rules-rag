@@ -252,6 +252,7 @@ python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins ei
 python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nur bei Aenderung
 python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
 python test_eval_spiele.py   # Eval pro Spiel und --alle
+python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
@@ -381,6 +382,28 @@ Vergleichslauf: `SOURCE=knowledge CHUNK_SIZE=400 DROP_TYPES=flavor,meta python r
 `rag.py` liest `knowledge.jsonl` und `golden_set.json` neben sich selbst -- im Clone also
 dieselbe Datei verlinken, die der Container gemountet bekommt
 (`ln -s ~/rag-lab/knowledge.jsonl .`), sonst vergleicht der Lauf gegen eine andere Basis.
+
+**Viele Spiele (Index-Weg):** Valve `INDEX_PATH` setzen (z.B. `/rag/data/index.sqlite`)
+und statt der Einzeldatei das ganze `data/` read-only mounten:
+
+```ini
+Volume=/var/home/USER/rag-lab/data:/rag/data:ro,z
+```
+
+Den Index baut der Host (`rag.py index --alle`) mit **denselben** `CHUNK_SIZE`,
+`CHUNK_OVERLAP` und `EMBED_MODEL` wie in den Valves; die Pipe liest nur und bettet nur
+noch die Frage ein. Dann gilt:
+
+- `regelfrage.spiel` wird gegen Name, Aliase (aus `spiel.json`) und `spiel_id` **aller**
+  Spiele im Index zugeordnet; `SPIEL`/`SPIEL_ALIASE` gelten nicht mehr. Unbekannt ->
+  "kein Regelheft" wie bisher, ohne Suche und ohne LLM. Mehrdeutig (gemeinsamer Alias,
+  zwei unscharfe Treffer fast gleichauf) -> ebenfalls kein Treffer, mit Vorschlaegen.
+- Ohne `regelfrage.spiel` (Chat): Valve `STANDARD_SPIEL`, sonst das einzige Spiel im
+  Index, sonst die Rueckfrage "Zu welchem Spiel ist die Frage?".
+- Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`
+  seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
+  passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.
+- `HYBRID` gibt es als Valve (Default aus), nie aus der Container-Umgebung.
 
 `knowledge.jsonl` ist als einzelne Datei gemountet. Ein Bind-Mount haengt an der Inode:
 wird die Datei auf dem Host per Rename ersetzt (`mv`, rsync ohne `--inplace`), sieht der
