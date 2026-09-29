@@ -99,7 +99,17 @@ python rag.py ask "Wie verdiene ich Geld?"
 # Testset durchlaufen
 cp golden_set.example.json golden_set.json   # dann an dein Spiel anpassen
 python rag.py eval
+
+# Mehrere Spiele: Golden Set je Spiel unter data/<spiel_id>/golden_set.json
+# (Format wie golden_set.example.json, Feld "spiel_id" = Verzeichnisname)
+DROP_TYPES=flavor,meta CHUNK_SIZE=400 python rag.py eval food-chain-magnate   # SOURCE entfaellt: Quelle ist der Index
+python rag.py eval --alle    # alle Spiele mit Golden Set, plus Gesamtblock; nennt die ohne
 ```
+
+`rag.py eval <spiel_id>` bringt den Index fuer dieses Spiel vorher auf Stand und wertet
+mit derselben Logik wie der Einzeldatei-Weg (Dreiteilung, Keyword-Wortgrenzen,
+Verweigerungsfragen). Mit `--alle` kommt ein Gesamtblock dazu; Spiele ohne Golden Set
+werden ausdruecklich genannt statt still ausgelassen.
 
 ### Stellschrauben (alles per env)
 
@@ -241,6 +251,7 @@ python test_ingest_seite.py  # 'seite'-Feld in ingest.py und vision_ingest.py
 python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins eigene Spielverzeichnis
 python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nur bei Aenderung
 python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
+python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)

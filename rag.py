@@ -10,7 +10,9 @@ Nutzung:
     python rag.py ask "Wie verdiene ich Geld?"   # eine Frage
     python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"
     HYBRID=1 python rag.py ask --spiel ...        # Vektor + BM25 (nur mit Index)
-    python rag.py eval                            # Golden Set durchlaufen
+    python rag.py eval                            # Golden Set durchlaufen (Einzeldatei-Weg)
+    python rag.py eval food-chain-magnate         # Golden Set eines Spiels gegen den Index
+    python rag.py eval --alle                     # alle Spiele mit golden_set.json
     RERANK=1 CHUNK_SIZE=400 python rag.py eval    # mit Reranker + kleineren Chunks
 
 Mehrere Spiele liegen je in einem eigenen Verzeichnis data/<spiel_id>/ (knowledge.jsonl,
@@ -928,20 +930,95 @@ def cmd_ask(query, spiel_id=None):
     print("\nAbgerufen:", [(h["doc"], f"S.{h['seite']}", round(s, 3)) for h, s in hits])
 
 
+def _konfig_zeile(quelle):
+    return (f"Config: chunk={CHUNK_SIZE}/{CHUNK_OVERLAP}  top_k={TOP_K}  rerank={RERANK}"
+            f"{'(' + RERANK_MODEL + ', cand=' + str(CANDIDATES) + ')' if RERANK else ''}"
+            f"  embed={EMBED_MODEL}  llm={LLM_MODEL}  think={THINK}"
+            f"  source={quelle}  drop_types={os.environ.get('DROP_TYPES', '') or '-'}")
+
+
 def cmd_eval(golden_set_pfad=None):
     # Pfad als Parameter, damit der komplette Wertungsdurchlauf mit einem
     # Beispiel-Golden-Set testbar ist (siehe test_wertung.py, TestCmdEval).
     gs = json.load(open(golden_set_pfad
                         or os.path.join(os.path.dirname(__file__), "golden_set.json")))
     chunks, embs = build_index()
-    print(f"Config: chunk={CHUNK_SIZE}/{CHUNK_OVERLAP}  top_k={TOP_K}  rerank={RERANK}"
-          f"{'(' + RERANK_MODEL + ', cand=' + str(CANDIDATES) + ')' if RERANK else ''}"
-          f"  embed={EMBED_MODEL}  llm={LLM_MODEL}  think={THINK}"
-          f"  source={os.environ.get('SOURCE', 'pdf')}  drop_types={os.environ.get('DROP_TYPES', '') or '-'}")
+    print(_konfig_zeile(os.environ.get('SOURCE', 'pdf')))
     print(f"Index: {len(chunks)} Chunks aus {len(set(c['doc'] for c in chunks))} PDF(s)\n")
+    saetze = werte_fragen(gs["fragen"], lambda frage: retrieve(frage, chunks, embs))
+    for zeile in formatiere_zusammenfassung(fasse_zusammen(saetze)):
+        print(zeile)
+
+
+def lade_golden_set(spiel_id, data_dir=None):
+    """data/<spiel_id>/golden_set.json -- muss sich ausdruecklich zu diesem Spiel bekennen.
+
+    Ein Golden Set ohne oder mit fremder spiel_id ist ein Kopierfehler: seine
+    Seitenzahlen wuerden gegen ein anderes Heft gewertet.
+    """
+    pfad = os.path.join(spiel_verzeichnis(spiel_id, data_dir), "golden_set.json")
+    if not os.path.exists(pfad):
+        raise KonfigFehler(f"{pfad} fehlt -- ohne Golden Set keine Eval fuer {spiel_id!r}.")
+    with open(pfad, encoding="utf-8") as f:
+        gs = json.load(f)
+    if gs.get("spiel_id") != spiel_id:
+        raise KonfigFehler(f"{pfad}: Feld 'spiel_id' ist {gs.get('spiel_id')!r}, erwartet {spiel_id!r}.")
+    return gs
+
+
+def cmd_eval_spiel(spiel_id, data_dir=None):
+    """Golden Set eines Spiels gegen den Index -- dieselbe Wertung wie cmd_eval."""
+    gs = lade_golden_set(spiel_id, data_dir)
+    aktualisiere_index([spiel_id], data_dir=data_dir, ausgabe=lambda *_: None)
+    con = oeffne_index()
+    try:
+        chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())
+        name = lies_spiel(spiel_id, data_dir)["name"]
+        print(_konfig_zeile("index") + f"  hybrid={HYBRID}")
+        print(f"Spiel: {name} ({spiel_id})  Index: {len(chunks)} Chunks\n")
+        saetze = werte_fragen(gs["fragen"],
+                              lambda frage: retrieve(frage, chunks, embs, spiel_id=spiel_id, index=con))
+    finally:
+        con.close()
+    for zeile in formatiere_zusammenfassung(fasse_zusammen(saetze)):
+        print(zeile)
+    return saetze
+
+
+def cmd_eval_spiele(args, data_dir=None):
+    """rag.py eval <spiel_id ...> | --alle. Bei mehreren Spielen zusaetzlich ein Gesamtblock.
+
+    --alle nimmt nur Spiele mit golden_set.json und NENNT die uebrigen -- ein
+    stilles Auslassen saehe aus wie Abdeckung, die es nicht gibt.
+    """
+    if "--alle" in args:
+        alle = liste_spiele(data_dir)
+        ids = [s for s in alle
+               if os.path.exists(os.path.join(spiel_verzeichnis(s, data_dir), "golden_set.json"))]
+        ohne = [s for s in alle if s not in ids]
+        if ohne:
+            print(f"Ohne Golden Set, nicht gewertet: {', '.join(ohne)}\n")
+        if not ids:
+            raise KonfigFehler("Kein Spiel unter data/ hat ein golden_set.json.")
+    else:
+        ids = [pruefe_spiel_id(a) for a in args]
+    alle_saetze = []
+    for sid in ids:
+        print(f"==================== {sid} ====================")
+        alle_saetze += cmd_eval_spiel(sid, data_dir)
+        print()
+    if len(ids) > 1:
+        print(f"==================== Gesamt ueber {len(ids)} Spiele ====================")
+        for zeile in formatiere_zusammenfassung(fasse_zusammen(alle_saetze)):
+            print(zeile)
+    return alle_saetze
+
+
+def werte_fragen(fragen, suche):
+    """Frage fuer Frage: suchen, antworten, werten, ausgeben. suche(frage) -> hits."""
     saetze = []
-    for f in gs["fragen"]:
-        hits = retrieve(f["frage"], chunks, embs)
+    for f in fragen:
+        hits = suche(f["frage"])
         ans = answer(f["frage"], hits)
         satz = bewerte_frage(f, [h["seite"] for h, _ in hits], ans)
         saetze.append(satz)
@@ -956,8 +1033,7 @@ def cmd_eval(golden_set_pfad=None):
         print(f"    Keywords : {satz['keywords_getroffen'] or 'KEINE getroffen'}   (Regressionswarner)")
         print(f"    Antwort  : {ans[:280]}")
         print()
-    for zeile in formatiere_zusammenfassung(fasse_zusammen(saetze)):
-        print(zeile)
+    return saetze
 
 
 if __name__ == "__main__":
@@ -971,6 +1047,8 @@ if __name__ == "__main__":
             cmd_ask(" ".join(rest), spiel)
         elif mode == "index":
             cmd_index(sys.argv[2:])
+        elif mode == "eval" and len(sys.argv) > 2:
+            cmd_eval_spiele(sys.argv[2:])
         else:
             cmd_eval()
     except KonfigFehler as e:

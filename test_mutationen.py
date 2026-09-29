@@ -18,7 +18,7 @@ import sys
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
-         "test_spiele.py", "test_index.py", "test_suche.py")
+         "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -260,6 +260,20 @@ MUTATIONEN = [
      "    return query"),
     ("H4 RRF ohne Daempfung (1/rang statt 1/(k+rang))",
      "rag.py", "            score[i] = score.get(i, 0.0) + 1.0 / (k + rang)", "            score[i] = score.get(i, 0.0) + 1.0 / rang"),
+
+    # ---- Eval pro Spiel (test_eval_spiele.py) ----
+    ("E1 Golden Set eines fremden Spiels wird angenommen",
+     "rag.py", '    if gs.get("spiel_id") != spiel_id:', "    if False:"),
+    ("E2 --alle laesst Spiele ohne Golden Set stillschweigend weg",
+     "rag.py", "        if ohne:\n", "        if False:\n"),
+    ("E3 Gesamtblock zaehlt nur das letzte Spiel",
+     "rag.py", "        alle_saetze += cmd_eval_spiel(sid, data_dir)", "        alle_saetze = cmd_eval_spiel(sid, data_dir)"),
+    ("E4 Eval bringt den Index nicht auf Stand",
+     "rag.py", "    aktualisiere_index([spiel_id], data_dir=data_dir, ausgabe=lambda *_: None)\n    con = oeffne_index()\n    try:\n        chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())",
+     "    con = oeffne_index()\n    try:\n        chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())"),
+    ("E5 Eval ignoriert DROP_TYPES auf dem Index-Weg",
+     "rag.py", "        chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())\n        name =",
+     "        chunks, embs = lade_spiel(con, spiel_id)\n        name ="),
 ]
 
 
