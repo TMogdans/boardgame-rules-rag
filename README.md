@@ -294,7 +294,8 @@ python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBR
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
 python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
-python test_chat.py          # Spiel im Chat: exakte Nennung, Wechsel nur explizit
+python test_chat.py          # Spiel im Chat: nur explizite Wahl (Spiel: X)
+python test_pipe_alt.py      # alter Pipe-Weg byte-gleich zu ed36f99 (pipe_referenz.json)
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
@@ -466,24 +467,29 @@ noch die Frage ein. Dann gilt:
   (Fujian/Fuji: 0,67 -> kein Vorschlag; Foodsharing Magnet -> Food Chain Magnate bleibt).
   Mit genau einem Spiel gilt das Verhalten von ed36f99 ("Food Chain Magnate Regeln" trifft).
   Dieselbe Zuordnung (`rag.ordne_spiel`) gilt fuer `--spiel` auf der Kommandozeile.
-- Ohne `regelfrage.spiel` (Chat) gilt `rag.spiel_im_chat`:
-  - Das Spiel des Chats ist das erste, das in einer Nutzer-Nachricht **exakt** genannt wird
-    (Name oder Alias als ganze Wortfolge; Gross/Klein, ae/ä, ss/ß, Satzzeichen, Bindestriche
-    egal; "Go-Phase" ist ein Wort). Keine Unschaerfe im Chat. Enthaelt ein Treffer einen
-    anderen, gilt der laengere ("7 Wonders Duel" vor "7 Wonders"); zwei unabhaengige ->
-    Rueckfrage mit Vorschlaegen.
-  - Gewechselt wird **nur explizit**: mit einer Nachricht, die nur aus dem Namen besteht
-    (davor erlaubt "Spiel:", "Spiel", "Wechsel zu", "Wechsle zu", "zu", "bei", "fuer",
-    danach "bitte"/"danke") -- Antwort "Ok, ab jetzt X." --, oder mit "Spiel: X: <Frage>",
-    "Zu X: <Frage>", "Wechsel zu X: <Frage>". Ein Name irgendwo in einer spaeteren Frage
-    ("Und bei zwei Spielern?", "Go-Phase") wechselt nicht.
-  - Ist die Namensnachricht die Antwort auf unsere Rueckfrage, wird die Frage davor
-    beantwortet (gesucht wird mit ihr); sonst nur bestaetigt, die alte Frage wird nicht
-    im neuen Spiel wiederholt.
-  - Ohne festgelegtes Spiel: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index,
-    sonst die Rueckfrage "Zu welchem Spiel ist die Frage?".
-  - Betrachtet werden hoechstens die letzten 20 Nutzer-Nachrichten; exakte Suche per
-    Woerterbuch: 250 Spiele, 201 Nachrichten -> typisch 1,5 ms, max 1,6 ms.
+- Ohne `regelfrage.spiel` (Chat) wird das Spiel **nur explizit** gewaehlt
+  (`rag.spiel_im_chat`); Spielnamen im Freitext werden nie erkannt, auch nicht in der
+  ersten Nachricht ("Wie endet das Spiel?" ist keine Wahl des Spiels "Das Spiel"):
+  - `Spiel: X`, `Spiel X` oder `Wechsel zu X` -- optional `: <Frage>` dahinter
+    (`Spiel: Azul: Wer beginnt?`). X ist ein Name oder Alias, exakt bis auf Gross/Klein,
+    ae/ä, ss/ß, Satzzeichen. Ohne Frage antwortet die Pipe "Ok, ab jetzt X.".
+  - Oder nur der Name (ggf. "bitte"/"danke") direkt als Antwort auf unsere Rueckfrage:
+    dann wird die Frage davor beantwortet.
+  - Die Wahl gilt fuer den ganzen Chat bis zur naechsten, ohne Fenster. Ein Name in einer
+    Frage ("Und bei Azul?") oder eine Namensnachricht ohne Rueckfrage wechselt nicht --
+    die Fusszeile zeigt, welches Heft geantwortet hat.
+  - Ohne Wahl: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index, sonst die
+    Rueckfrage "Zu welchem Spiel ist die Frage? Schreib zum Beispiel „Spiel: …“".
+  - Laufzeit: ein Praefix-Test je Nutzer-Nachricht; gemessen bei 250 Spielen x 500
+    Nutzer-Nachrichten typisch 0,15 ms (max 0,21), wenn jede Nachricht eine Wahl mit
+    Frage ist typisch 5,0 ms (max 5,3).
+- Die Fusszeile nennt auf dem Index-Weg das Spiel:
+  `Quelle: Food Chain Magnate, Seite 11 -- Abgerufen: S. 11 (0.912)`. Nicht im Sprachmodus;
+  der alte Weg (ohne `INDEX_PATH`) behaelt seine Fusszeile und ist fuer `regelfrage.spiel`
+  byte-gleich zu ed36f99 (`test_pipe_alt.py`, 806 eingefrorene Faelle).
+- Passt das `rag.py` im Mount nicht zur Pipe (zu alte `SCHNITTSTELLE`, fehlende Funktion)
+  oder fehlt `RAG_DIR`, erscheint eine klare Meldung statt eines AttributeError; der alte
+  Weg sagt "kein Regelheft" auch ohne `rag.py`.
 - Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`
   seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
   passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.

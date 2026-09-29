@@ -288,6 +288,22 @@ class TestSpieleImIndex(IndexTest):
         with self.assertRaises(sqlite3.OperationalError):
             con.execute("DELETE FROM chunks")
 
+    def test_sonderzeichen_im_indexpfad(self):
+        # "?", "#", "%" und Leerzeichen duerfen in der file:-URI nicht als URI-Syntax wirken
+        for name in ("mit leer zeichen", "frage?mode=rw", "raute#frag", "prozent%20x", "alles ? # % zu"):
+            with self.subTest(name=name):
+                verz = os.path.join(self.tmp.name, name)
+                pfad = os.path.join(verz, "index.sqlite")
+                with mock.patch.object(rag, "INDEX_PATH", pfad):
+                    rag.aktualisiere_index(ausgabe=lambda *_: None, pfad=pfad)
+                    con = rag.oeffne_index(pfad)
+                    self.addCleanup(con.close)
+                    self.assertEqual([s["spiel_id"] for s in rag.spiele_im_index(con)],
+                                     ["brass-birmingham", "food-chain-magnate"])
+                    with self.assertRaises(sqlite3.OperationalError):
+                        con.execute("DELETE FROM chunks")       # wirklich read-only
+                    self.assertEqual(sorted(os.listdir(verz)), ["index.sqlite"])   # keine Nebendatei
+
     def test_fehlender_index(self):
         with self.assertRaises(rag.KonfigFehler):
             rag.oeffne_index(os.path.join(self.tmp.name, "gibts-nicht.sqlite"))

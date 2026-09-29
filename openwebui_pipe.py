@@ -22,6 +22,7 @@ Modell rechnet. Die requests-basierten rag.py-Funktionen laufen deshalb per
 asyncio.to_thread, die Antwort streamt ueber httpx.
 """
 import asyncio
+import difflib
 import importlib.util
 import json
 import os
@@ -37,6 +38,16 @@ FUSSZEILE_START = "\n\n---\n*Abgerufen: "
 # leerer Modellantwort steht die Fusszeile dann ohne Leerzeilen da.
 _FUSSZEILE = re.compile(r"(?:\n\n)?---\n\*Abgerufen: [^\n]*\*\s*\Z")
 _FEHLERZEILE = re.compile(r"(?:\n\n)?\*\*Fehler in der RAG-Pipe:\*\*.*\Z", re.S)
+# Index-Weg: die Fusszeile nennt das Spiel ("Quelle: Food Chain Magnate, Seite 11 ...").
+# Der alte Weg behaelt seine Fusszeile unveraendert (byte-gleich zu ed36f99).
+_FUSSZEILE_INDEX = re.compile(r"(?:\n\n)?---\n\*Quelle: [^\n]*\*\s*\Z")
+# Mindest-Schnittstelle des geladenen rag.py fuer den Index-Weg (rag.SCHNITTSTELLE).
+# Ein aelterer Clone im Mount ergaebe sonst AttributeError mitten in der Antwort.
+MIN_SCHNITTSTELLE = 5
+_RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten")
+_RAG_INDEX_WEG = _RAG_ALTER_WEG + ("oeffne_index", "spiele_im_index", "katalog_aus_index", "ordne_spiel",
+                                   "chat_woerterbuch", "spiel_im_chat", "RUECKFRAGE", "index_konfig",
+                                   "stand_im_index", "fingerprint", "lade_spiel", "knowledge_pfad", "KonfigFehler")
 
 
 # ---------- reine Helfer (ohne Netz, testbar) ----------
@@ -47,17 +58,19 @@ def text_von(inhalt):
     return inhalt or ""
 
 
-def ohne_fusszeile(text):
+def ohne_fusszeile(text, index_weg=False):
     """Eigene Fundstellen- oder Fehlerzeile vom Ende einer frueheren Antwort entfernen.
 
     Open WebUI speichert sie als Teil der Assistant-Antwort. Ginge die Fusszeile im
     Verlauf mit, saehe das Modell Seitenzahlen ohne deren Text -- der Systemprompt
     verlangt aber, nur bereitgestellte Quellen zu zitieren.
     """
+    if index_weg:
+        text = _FUSSZEILE_INDEX.sub("", text)
     return _FEHLERZEILE.sub("", _FUSSZEILE.sub("", text))
 
 
-def zerlege_verlauf(messages):
+def zerlege_verlauf(messages, index_weg=False):
     """(frage, verlauf): letzte Nutzernachricht und die Wortwechsel davor.
 
     Retrieval laeuft nur auf der letzten Frage. Der Verlauf geht ohne seine alten
@@ -73,7 +86,7 @@ def zerlege_verlauf(messages):
         if m.get("role") == "user":
             verlauf.append({"role": "user", "content": text_von(m.get("content"))})
         elif m.get("role") == "assistant":
-            verlauf.append({"role": "assistant", "content": ohne_fusszeile(text_von(m.get("content")))})
+            verlauf.append({"role": "assistant", "content": ohne_fusszeile(text_von(m.get("content")), index_weg)})
     return text_von(messages[letzte].get("content")).strip(), verlauf
 
 
@@ -86,6 +99,46 @@ def fundstellen(hits):
     """Fusszeile wie bei `rag.py ask`: welche Seiten wirklich im Kontext lagen."""
     teile = [f"S. {h['seite']} ({s:.3f})" for h, s in hits]
     return FUSSZEILE_START + ", ".join(teile) + "*"
+
+
+def fundstellen_spiel(hits, spiel):
+    """Fusszeile des Index-Wegs: welches Spiel, welche Seiten -- sichtbar, welches Heft
+    geantwortet hat (auch bei STANDARD_SPIEL und im Chat ohne Nennung)."""
+    seiten = list(dict.fromkeys(str(h["seite"]) for h, _ in hits))
+    teile = [f"S. {h['seite']} ({s:.3f})" for h, s in hits]
+    wort = "Seite" if len(seiten) == 1 else "Seiten"
+    return f"\n\n---\n*Quelle: {spiel}, {wort} {', '.join(seiten)} -- Abgerufen: {', '.join(teile)}*"
+
+
+# ---------- Spielzuordnung des alten Wegs (Valves SPIEL/SPIEL_ALIASE) ----------
+# Woertlich ed36f99. Der alte Weg hat genau ein Spiel; dort gilt dieses Verhalten
+# (Entscheidung Tobias), und es braucht rag.py nicht: "kein Regelheft" kommt auch,
+# wenn RAG_DIR fehlt. Mehrere Spiele ordnet rag.ordne_spiel zu.
+def normalisiere_valves(name):
+    """Spielname fuer den Vergleich: klein, ohne Satzzeichen und Leerraum."""
+    return re.sub(r"[\W_]+", "", (name or "").casefold())
+
+
+def katalog_aus_valves(name, aliase):
+    """{kanonischer Name: [normalisierte Schreibweisen]} aus den Valves."""
+    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]
+    return {name: sorted({normalisiere_valves(f) for f in formen if normalisiere_valves(f)})}
+
+
+def ordne_spiel_valves(anfrage, katalog, schwelle=0.8):
+    """("treffer", Name) oder ("unbekannt", [Vorschlaege]) -- ed36f99."""
+    n = normalisiere_valves(anfrage)
+    if not n:
+        return "unbekannt", []
+    bewertet = []
+    for kanon, formen in katalog.items():
+        if n in formen:
+            return "treffer", kanon
+        bewertet.append((max(difflib.SequenceMatcher(None, n, f).ratio() for f in formen), kanon))
+    bewertet.sort(reverse=True)
+    if bewertet and bewertet[0][0] >= schwelle:
+        return "treffer", bewertet[0][1]
+    return "unbekannt", [k for r, k in bewertet if r >= 0.5]
 
 
 def ollama_zeile(zeile):
@@ -148,12 +201,24 @@ class Pipe:
     # rag.py neu laden, wenn es sich geaendert hat (git pull im gemounteten Clone)
     def _lade_rag(self, v):
         pfad = os.path.join(v.RAG_DIR, "rag.py")
+        if not os.path.exists(pfad):
+            raise RuntimeError(f"rag.py nicht gefunden unter RAG_DIR={v.RAG_DIR!r} -- Valve RAG_DIR und "
+                               "den Mount des Clones pruefen.")
         key = (pfad, datei_stand(pfad))
         if key != self._rag_key:
             spec = importlib.util.spec_from_file_location("boardgame_rag", pfad)
             modul = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(modul)
             self._rag, self._rag_key, self._index_key = modul, key, None
+        # Deployment-Schutz: passt das rag.py im Mount zu dieser Pipe?
+        noetig = _RAG_INDEX_WEG if v.INDEX_PATH else _RAG_ALTER_WEG
+        fehlt = [n for n in noetig if not hasattr(self._rag, n)]
+        version = getattr(self._rag, "SCHNITTSTELLE", 0)
+        if fehlt or (v.INDEX_PATH and version < MIN_SCHNITTSTELLE):
+            raise RuntimeError(
+                f"rag.py unter {pfad} passt nicht zu dieser Pipe (Schnittstelle {version}, noetig "
+                f"{MIN_SCHNITTSTELLE if v.INDEX_PATH else '-'}; fehlt: {', '.join(fehlt) or '-'}). "
+                "Clone aktualisieren (git pull) oder die Pipe passend installieren.")
         # rag.py liest seine Konfiguration beim Import aus os.environ -- das ist hier
         # die Umgebung von Open WebUI, die CHUNK_SIZE/CHUNK_OVERLAP fuer ihre eigene
         # Dokumentsuche benutzt. Deshalb alles, was wirkt, explizit aus den Valves.
@@ -226,7 +291,7 @@ class Pipe:
                 return v.STANDARD_SPIEL, None
             if len(spiele) == 1:
                 return spiele[0]["spiel_id"], None
-            return None, f"{rag.RUECKFRAGE} Im Index: {verfuegbar}."
+            return None, f"{rag.RUECKFRAGE} Schreib zum Beispiel „Spiel: {namen[0]}“. Im Index: {verfuegbar}."
         status, ergebnis = rag.ordne_spiel(anfrage, katalog)
         if status == "treffer":
             return ids[ergebnis], None
@@ -324,8 +389,7 @@ class Pipe:
             return
         if rf.get("spiel") is not None:
             v = self.valves
-            rag = await asyncio.to_thread(self._rag_fuer, v)
-            status, ergebnis = rag.ordne_spiel(rf["spiel"], rag.katalog_aus(v.SPIEL, v.SPIEL_ALIASE))
+            status, ergebnis = ordne_spiel_valves(rf["spiel"], katalog_aus_valves(v.SPIEL, v.SPIEL_ALIASE))
             if status != "treffer":
                 vorschlag = f" Meintest du {' oder '.join(ergebnis)}?" if ergebnis else ""
                 yield (f"Zu „{rf['spiel']}“ habe ich kein Regelheft.{vorschlag} "
@@ -346,9 +410,9 @@ class Pipe:
     def _spiel_aus_verlauf(self, messages, v):
         """(spiel_id, Nachrichten bis zur eigentlichen Frage, Meldung) fuer den Chat.
 
-        Regeln in rag.spiel_im_chat: nur exakte Namen, das erste genannte Spiel gilt,
-        gewechselt wird nur explizit (Namensnachricht, "Spiel: X", "Zu X: ...").
-        Hoechstens die letzten rag.CHAT_FENSTER Nutzer-Nachrichten.
+        Regeln in rag.spiel_im_chat (Spec D'): das Spiel wird NUR explizit gewaehlt
+        ("Spiel: X", "Spiel X", "Wechsel zu X", optional ": <Frage>"; oder nur der
+        Name als Antwort auf unsere Rueckfrage). Keine Erkennung im Freitext.
         """
         with self._lock:
             rag = self._lade_rag(v)
@@ -357,12 +421,15 @@ class Pipe:
             spiel_id, meldung = self._waehle_spiel(None, v)
             return spiel_id, messages, meldung
         als_text = [{"role": m.get("role"), "content": text_von(m.get("content"))} for m in messages]
-        art, erg, bis = rag.spiel_im_chat(als_text, wb)
+        art, erg, bis, frage = rag.spiel_im_chat(als_text, wb)
         if art == "gewechselt":
             return None, messages, f"Ok, ab jetzt {erg}."
         if art == "mehrdeutig":
-            return None, messages, f"{rag.RUECKFRAGE} Meintest du {' oder '.join(erg[:3])}?"
+            return None, messages, (f"{rag.RUECKFRAGE} Meintest du {' oder '.join(erg[:3])}? "
+                                    f"Schreib zum Beispiel „Spiel: {erg[0]}“.")
         teil = messages if bis is None else messages[:bis + 1]
+        if frage:                   # "Spiel: X: <Frage>" -> gesucht wird mit <Frage>
+            teil = teil[:-1] + [dict(teil[-1], content=frage)]
         if erg is None:
             spiel_id, meldung = self._waehle_spiel(None, v)
             return spiel_id, teil, meldung
@@ -377,7 +444,7 @@ class Pipe:
         if meldung:
             yield meldung
             return
-        frage, verlauf = zerlege_verlauf(messages)
+        frage, verlauf = zerlege_verlauf(messages, index_weg=True)
         if not frage:
             yield "Keine Frage gefunden."
             return
@@ -385,4 +452,5 @@ class Pipe:
         async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
             yield stueck
         if not rf.get("sprache"):
-            yield fundstellen(hits)
+            name = next((s["name"] for s in self._katalog[0] if s["spiel_id"] == spiel_id), spiel_id)
+            yield fundstellen_spiel(hits, name)

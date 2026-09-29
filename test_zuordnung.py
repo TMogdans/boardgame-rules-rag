@@ -52,6 +52,18 @@ class TestStrengeZuordnung(unittest.TestCase):
         self.assertEqual(rag.ordne_spiel("Fujian", rag.katalog_aus("Fuji", "")), ("treffer", "Fuji"))
         self.assertEqual(rag.ordne_spiel("Fudschein Magnat", k1), ("unbekannt", ["Food Chain Magnate"]))
 
+    def test_ein_spiel_grenzbaender(self):
+        # Kritiker-Mutanten C3 (Vorschlaege ab 0,6 statt 0,5) und C5 (Schwelle 0,85): die
+        # Baender [0,5; 0,6) und [0,8; 0,85) muessen bei einem Spiel belegt sein.
+        k1 = rag.katalog_aus("Food Chain Magnate", "Food Chain, FCM")
+        for q in ("Magnate Food", "Chain Food", "Food Truck"):          # 0,519 / 0,556 / 0,556
+            with self.subTest(q=q):
+                self.assertEqual(rag.ordne_spiel(q, k1), ("unbekannt", ["Food Chain Magnate"]))
+        for q in ("Food Magnate", "Fut Chain Magnate", "Food Chain Magnate Magnate"):   # 0,815 / 0,839 / 0,821
+            with self.subTest(q=q):
+                self.assertEqual(rag.ordne_spiel(q, k1), ("treffer", "Food Chain Magnate"))
+        self.assertEqual(rag.ordne_spiel("Magnaten Kette", k1), ("unbekannt", []))   # 0,483
+
     def test_vorschlaege_bei_mehreren_spielen(self):
         tm = {"spiel_id": "terraforming-mars", "name": "Terraforming Mars", "aliase": []}
         k = rag.katalog_aus_index([FCM, FUJI, tm])[0]

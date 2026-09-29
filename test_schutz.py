@@ -67,7 +67,7 @@ class Kopie(unittest.TestCase):
         os.makedirs(self.repo)
         for name in os.listdir(BASE):
             q = os.path.join(BASE, name)
-            if (name.endswith(".py") or name in ("golden_set.example.json", "regression_referenz.json")) \
+            if (name.endswith(".py") or name in ("golden_set.example.json", "regression_referenz.json", "pipe_referenz.json")) \
                     and os.path.isfile(q) and not os.path.islink(q):
                 shutil.copy(q, self.repo)
         os.makedirs(os.path.join(self.repo, "pdfs"))

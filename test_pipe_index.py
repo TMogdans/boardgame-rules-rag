@@ -300,8 +300,8 @@ class TestAktualitaet(PipeIndexBasis):
 
 
 class TestChatVerlauf(PipeIndexBasis):
-    """Chat ohne regelfrage.spiel: exakte Nennung setzt das Spiel, gewechselt wird nur
-    explizit (Regeln und Faelle im Einzelnen: test_chat.py)."""
+    """Chat ohne regelfrage.spiel, Spec D': Spiel nur explizit ("Spiel: X" oder Name als
+    Antwort auf die Rueckfrage); die Fusszeile nennt das Spiel. Einzelregeln: test_chat.py."""
 
     def chat(self, *wechsel, **rf):
         """wechsel: abwechselnd Nutzer-/Assistent-Texte, der letzte ist die neue Nutzernachricht."""
@@ -317,67 +317,129 @@ class TestChatVerlauf(PipeIndexBasis):
 
     def test_frage_rueckfrage_name_antwort_auf_die_frage(self):
         rueckfrage = self.chat("Wie verdiene ich Geld?")
-        self.assertIn("Zu welchem Spiel ist die Frage?", rueckfrage)
+        self.assertTrue(rueckfrage.startswith("Zu welchem Spiel ist die Frage?"), rueckfrage)
+        self.assertIn("„Spiel: ", rueckfrage)                     # nennt die Form als Beispiel
         self.assertEqual(self.llm_bekam, [])
         text = self.chat("Wie verdiene ich Geld?", rueckfrage, "Brass")
         self.assertIn("S. 41 ", text)
+        self.assertIn("*Quelle: Brass: Birmingham, Seite", text)
         # gesucht wurde mit der eigentlichen Frage, nicht mit dem Namen
         self.assertEqual(self.frage_embeds(), [["Wie verdiene ich Geld?"]])
         n = self.llm_bekam[-1]["messages"]
         self.assertTrue(n[-1]["content"].endswith("Frage: Wie verdiene ich Geld?"))
         self.assertEqual(len(n), 2)                     # Rueckfrage-Runde geht nicht in den Verlauf
         self.assertIn("S. 11 ", self.chat("Wie verdiene ich Geld?", rueckfrage, "Food Chain Magnate bitte"))
-        # im Chat keine Unschaerfe: ein Hoerfehler fuehrt erneut zur Rueckfrage
-        self.assertIn("Zu welchem Spiel ist die Frage?", self.chat("Wie verdiene ich Geld?", rueckfrage, "Fudschein Magnat"))
+        # keine Unschaerfe: ein Hoerfehler fuehrt erneut zur Rueckfrage
+        self.assertTrue(self.chat("Wie verdiene ich Geld?", rueckfrage, "Fudschein Magnat").startswith(
+            "Zu welchem Spiel ist die Frage?"))
 
-    def test_spielname_in_der_frage(self):
-        self.assertIn("S. 11 ", self.chat("Wie verdiene ich Geld in Food Chain Magnate?"))
-        self.assertIn("S. 41 ", self.chat("Wie viel Geld gibt es bei Brass Birmingham?"))
-        self.assertIn("S. 11 ", self.chat("Geld bei FCM?"))
-        self.assertEqual(self.frage_embeds()[0], ["Wie verdiene ich Geld in Food Chain Magnate?"])
+    def test_spielname_im_freitext_legt_nichts_fest(self):
+        text = self.chat("Wie verdiene ich Geld in Food Chain Magnate?")
+        self.assertTrue(text.startswith("Zu welchem Spiel ist die Frage?"), text)
+        self.assertEqual(self.llm_bekam, [])
 
-    def test_spielwechsel_nur_explizit(self):
+    def test_spiel_x_frage(self):
+        text = self.chat("Spiel: Brass: Wie viel Geld?")
+        self.assertIn("S. 41 ", text)
+        self.assertEqual(self.frage_embeds(), [["Wie viel Geld?"]])
+        self.assertTrue(self.llm_bekam[-1]["messages"][-1]["content"].endswith("Frage: Wie viel Geld?"))
+
+    def test_wahl_gilt_bis_zur_naechsten(self):
         a1 = "Geld gibt es in Phase 5."
-        start = "Wie verdiene ich Geld bei Food Chain Magnate?"
-        self.assertIn("S. 11 ", self.chat(start))
-        # ein Name in der Folgefrage wechselt NICHT
-        weiter = self.chat(start, a1, "Und bei Brass?")
-        self.assertIn("*Abgerufen:", weiter)
-        self.assertNotIn("S. 41 ", weiter)
-        self.assertNotIn("S. 42 ", weiter)
-        # Namensnachricht: nur Bestaetigung, keine Suche, keine alte Frage im neuen Spiel
+        self.assertEqual(self.chat("Spiel: Food Chain Magnate"), "Ok, ab jetzt Food Chain Magnate.")
+        start = ("Spiel: Food Chain Magnate", "Ok, ab jetzt Food Chain Magnate.")
+        text = self.chat(*start, "Wie verdiene ich Geld?")
+        self.assertIn("S. 11 ", text)
+        self.assertIn("*Quelle: Food Chain Magnate, Seite", text)
+        # Name in der Folgefrage oder reine Namensnachricht wechselt NICHT -- die Fusszeile zeigt FCM
+        for f in ("Und bei Brass?", "Brass", "Wie viel Geld gibt es bei Brass Birmingham?"):
+            with self.subTest(f=f):
+                weiter = self.chat(*start, "Wie verdiene ich Geld?", a1, f)
+                self.assertIn("*Quelle: Food Chain Magnate,", weiter)
+                self.assertNotIn("S. 41 ", weiter)
+        # explizit: nur Bestaetigung, keine Suche
         n_llm = len(self.llm_bekam)
-        self.assertEqual(self.chat(start, a1, "Brass"), "Ok, ab jetzt Brass: Birmingham.")
+        self.assertEqual(self.chat(*start, "Wie verdiene ich Geld?", a1, "Wechsel zu Brass"),
+                         "Ok, ab jetzt Brass: Birmingham.")
         self.assertEqual(len(self.llm_bekam), n_llm)
-        # danach gilt das neue Spiel
-        self.assertIn("S. 41 ", self.chat(start, a1, "Brass", "Ok, ab jetzt Brass: Birmingham.", "Und wieviel Geld?"))
-        # "Zu X: <Frage>" wechselt und fragt
-        self.assertIn("S. 41 ", self.chat(start, a1, "Zu Brass: wieviel Geld?"))
+        text = self.chat(*start, "Wie verdiene ich Geld?", a1, "Spiel Brass", "Ok, ab jetzt Brass: Birmingham.",
+                         "Und wieviel Geld?")
+        self.assertIn("S. 41 ", text)
+        self.assertIn("*Quelle: Brass: Birmingham,", text)
+
+    def test_fusszeile_geht_nicht_in_den_verlauf(self):
+        erste = self.chat("Spiel: Food Chain Magnate: Wie verdiene ich Geld?")
+        self.assertIn("*Quelle: Food Chain Magnate,", erste)
+        self.chat("Spiel: Food Chain Magnate: Wie verdiene ich Geld?", erste, "Und die Kette?")
+        n = self.llm_bekam[-1]["messages"]
+        self.assertEqual(n[2], {"role": "assistant", "content": "Antwort"})
+
+    def test_fusszeile_nicht_im_sprachmodus(self):
+        self.assertEqual(self.frage("Geld", spiel="FCM", sprache=True), "Antwort")
+        self.assertIn("*Quelle: Food Chain Magnate,", self.frage("Geld", spiel="FCM"))
+
+    def test_standard_spiel_steht_in_der_fusszeile(self):
+        self.pipe.valves.STANDARD_SPIEL = B
+        self.assertIn("*Quelle: Brass: Birmingham, Seite", self.chat("Geld"))
 
     def test_mehrdeutig_fragt_nach(self):
         self.lege_an("Brass: Lancashire", [c("brass-lancashire", "Brass: Lancashire", 1, 7, "Geld.")], ["Brass"])
         self.baue()
-        text = self.chat("Wie viel Geld bei Brass?")
+        text = self.chat("Spiel: Brass: Wie viel Geld?")
         self.assertIn("Meintest du Brass: Birmingham oder Brass: Lancashire?", text)
         self.assertEqual(self.llm_bekam, [])
-        self.assertIn("S. 7 ", self.chat("Wie viel Geld bei Brass Lancashire?"))
+        self.assertIn("S. 7 ", self.chat("Spiel: Brass Lancashire: Wie viel Geld?"))
         # Antwort auf die Rueckfrage: die urspruengliche Frage wird im gewaehlten Spiel beantwortet
-        self.assertIn("S. 7 ", self.chat("Wie viel Geld bei Brass?", text, "Brass Lancashire"))
+        text = self.chat("Spiel: Brass: Wie viel Geld?", text, "Brass: Lancashire")
+        self.assertIn("S. 7 ", text)
+        self.assertTrue(self.llm_bekam[-1]["messages"][-1]["content"].endswith("Frage: Wie viel Geld?"))
 
-    def test_nur_ein_name_ohne_frage(self):
-        self.assertEqual(self.chat("Brass"), "Ok, ab jetzt Brass: Birmingham.")
+    def test_nur_ein_name_ohne_rueckfrage(self):
+        # keine Wahl, keine Erkennung -> ohne Spiel die Rueckfrage
+        self.assertTrue(self.chat("Brass").startswith("Zu welchem Spiel ist die Frage?"))
         self.assertEqual(self.llm_bekam, [])
-        self.assertEqual(self.embed_aufrufe(), [])
 
     def test_regelfrage_feld_hat_vorrang(self):
-        self.assertIn("S. 41 ", self.chat("Wie verdiene ich Geld bei Food Chain Magnate?", spiel="Brass"))
+        self.assertIn("S. 41 ", self.chat("Spiel: Food Chain Magnate: Wie verdiene ich Geld?", spiel="Brass"))
 
-    def test_kurzer_name_im_satz_kein_auffangbecken(self):
+    def test_kurzer_name_kein_auffangbecken(self):
         self.lege_an("Fuji", [c("fuji", "Fuji", 1, 3, "Geld am Vulkan.")])
         self.baue()
-        text = self.chat("Wie spielt man Fujian?")
-        self.assertIn("Zu welchem Spiel ist die Frage?", text)
-        self.assertIn("S. 3 ", self.chat("Wie spielt man Fuji?"))
+        self.assertTrue(self.chat("Spiel: Fujian").startswith("Zu welchem Spiel ist die Frage?"))
+        self.assertIn("S. 3 ", self.chat("Spiel: Fuji: Wie spielt man?"))
+
+
+class TestDeployment(PipeIndexBasis):
+    """Passt das rag.py im Mount nicht zur Pipe, kommt eine klare Meldung statt AttributeError."""
+
+    def clone_mit(self, alt, neu):
+        verz = os.path.join(self.tmp.name, "clone")
+        os.makedirs(verz, exist_ok=True)
+        with open(os.path.join(BASE, "rag.py"), encoding="utf-8") as f:
+            quelle = f.read()
+        self.assertEqual(quelle.count(alt), 1)
+        with open(os.path.join(verz, "rag.py"), "w", encoding="utf-8") as f:
+            f.write(quelle.replace(alt, neu))
+        self.pipe.valves.RAG_DIR = verz
+
+    def test_zu_alte_schnittstelle(self):
+        self.clone_mit("SCHNITTSTELLE = 5", "SCHNITTSTELLE = 4")
+        text = self.frage("Geld", spiel="FCM")
+        self.assertIn("passt nicht zu dieser Pipe", text)
+        self.assertIn("Schnittstelle 4", text)
+        self.assertNotIn("AttributeError", text)
+
+    def test_fehlende_funktion(self):
+        self.clone_mit("def spiel_im_chat(nachrichten, wb):", "def _weg(nachrichten, wb):")
+        text = self.frage("Geld")
+        self.assertIn("fehlt: spiel_im_chat", text)
+        self.assertNotIn("AttributeError", text)
+
+    def test_fehlendes_rag_dir(self):
+        self.pipe.valves.RAG_DIR = os.path.join(self.tmp.name, "gibt-es-nicht")
+        text = self.frage("Geld", spiel="FCM")
+        self.assertIn("rag.py nicht gefunden", text)
+        self.assertNotIn("FileNotFoundError", text)
 
 
 class TestKatalog(unittest.TestCase):

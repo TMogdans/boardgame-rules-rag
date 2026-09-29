@@ -26,7 +26,7 @@ import tempfile
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 # Was in die Laufkopie gehoert: Code und die eingecheckten Testdaten -- nie echte Daten.
-KOPIEREN = ("*.py", "golden_set.example.json", "regression_referenz.json")
+KOPIEREN = ("*.py", "golden_set.example.json", "regression_referenz.json", "pipe_referenz.json")
 
 
 def laufkopie():
@@ -41,7 +41,8 @@ def laufkopie():
     return ziel
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
-         "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py")
+         "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py",
+         "test_pipe_alt.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -205,7 +206,7 @@ MUTATIONEN = [
     ("P25 Vorschlaege werden nicht genannt",
      "rag.py", '        return "unbekannt", [k for r, k in roh if r >= 0.5]', '        return "unbekannt", []'),
     ("P26 Katalog kommt nicht aus den Valves",
-     "openwebui_pipe.py", "rag.ordne_spiel(rf[\"spiel\"], rag.katalog_aus(v.SPIEL, v.SPIEL_ALIASE))", "rag.ordne_spiel(rf[\"spiel\"], rag.katalog_aus(\"Food Chain Magnate\", \"Food Chain, FCM\"))"),
+     "openwebui_pipe.py", "ordne_spiel_valves(rf[\"spiel\"], katalog_aus_valves(v.SPIEL, v.SPIEL_ALIASE))", "ordne_spiel_valves(rf[\"spiel\"], katalog_aus_valves(\"Food Chain Magnate\", \"Food Chain, FCM\"))"),
 
     # ---- Spiel als Dimension (test_spiele.py) ----
     ("S1 auto_ingest.py schreibt wieder in die gemeinsame knowledge.jsonl",
@@ -380,41 +381,68 @@ MUTATIONEN = [
     ("K16 spiel_id zaehlt nicht als Schreibweise",
      "rag.py", '        formen = [s["name"], s["spiel_id"]] + list(s.get("aliase") or [])',
      '        formen = [s["name"]] + list(s.get("aliase") or [])'),
-    # ---- Chat: Spiel im Chat, abgenommene Regeln (test_chat.py, test_pipe_index.py) ----
-    ("CH1 Namensnachricht unscharf (Tippfehler setzt das Spiel)",
-     "rag.py", "    return sorted(wb[folge]) if folge in wb else None",
-     "    k = {n: [chat_norm(n)] for w in wb.values() for n in w}\n"
-     "    st, e = ordne_spiel(folge, k)\n"
-     "    return sorted(wb[folge]) if folge in wb else ([e] if st == 'treffer' else None)"),
-    ("CH2 Name in spaeterer Frage wechselt das Spiel",
-     "rag.py", "        elif spiel is None:\n            genannt = exakte_nennungen(text(i), wb)",
-     "        else:\n            genannt = exakte_nennungen(text(i), wb)"),
-    ("CH2b Name in der letzten Nachricht ueberschreibt das Chat-Spiel",
-     "rag.py", "    if spiel is None:\n        genannt = exakte_nennungen(text(letzte), wb)",
-     "    if True:\n        genannt = exakte_nennungen(text(letzte), wb)"),
-    ("CH3 laengerer Treffer verdraengt den enthaltenen nicht (7 Wonders Duel mehrdeutig)",
-     "rag.py", "    offen = [s for s in spannen\n             if not any(o[0] <= s[0] and s[1] <= o[1] and (o[0], o[1]) != (s[0], s[1]) for o in spannen)]\n    return sorted(set().union(*(s[2] for s in offen))) if offen else []\n\n\ndef namens_nachricht",
-     "    offen = spannen\n    return sorted(set().union(*(s[2] for s in offen))) if offen else []\n\n\ndef namens_nachricht"),
-    ("CH4 kein Fenster (alle Nachrichten statt der letzten 20)",
-     "rag.py", '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"][-CHAT_FENSTER:]',
-     '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]'),
-    ("CH5 Namensnachricht nach beantworteter Frage wiederholt die alte Frage (MUSS-2)",
-     "rag.py", '        if vorher.get("role") == "assistant" and str(vorher.get("content") or "").startswith(RUECKFRAGE):',
-     "        if True:"),
-    ("CH10 Namensnachricht vor der Rueckfrage gilt als Frage (Kritiker-M15)",
-     "rag.py", "            if davor and namens_nachricht(text(davor[-1]), wb) is None:", "            if davor:"),
-    ("CH6 Rahmung der Namensnachricht ('Spiel:', 'Bei X', ...) ignoriert",
-     "rag.py", '_VORN_NAME = (("wechsel", "zu"), ("wechsle", "zu"), ("spiel",), ("zu",), ("bei",), ("fuer",))',
-     "_VORN_NAME = ()"),
-    ("CH7 'Zu X: <Frage>' wechselt nicht",
-     "rag.py", '        if folge in wb and woerter[j - 1].endswith(":") and j < len(tok):',
-     "        if False:"),
-    ("CH8 Umlaut-Schreibung im Chat nicht vereinheitlicht",
-     "rag.py", '    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue")):\n        s = s.replace(alt, neu)\n    return "".join(ch for ch in unicodedata.normalize("NFKD", s)',
-     '    return "".join(ch for ch in unicodedata.normalize("NFKD", s)'),
-    ("CH9 Bindestrich trennt Woerter ('Go-Phase' nennt Go)",
-     "rag.py", "    woerter = (text or \"\").split()\n    return woerter, [chat_norm(w) for w in woerter]",
-     "    woerter = re.findall(r\"\\w+\", text or \"\")\n    return woerter, [chat_norm(w) for w in woerter]"),
+    # ---- Chat, Spec D' (test_chat.py, test_pipe_index.py) ----
+    ("DW1 automatische Erkennung von Spielnamen im Freitext wieder an",
+     "rag.py", '    return "frage", spiel, letzte, None\n',
+     '    if spiel is None:\n'
+     '        for w in text(letzte).split():\n'
+     '            if chat_norm(w) in wb:\n'
+     '                spiel = sorted(wb[chat_norm(w)])[0]\n'
+     '                break\n'
+     '    return "frage", spiel, letzte, None\n'),
+    ("DW2 Fenster wieder da (nur die letzten 20 Nutzer-Nachrichten)",
+     "rag.py", '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]\n    if not nutzer:\n        return "frage", None, None, None',
+     '    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"][-20:]\n    if not nutzer:\n        return "frage", None, None, None'),
+    ("DW3 Namensnachricht ohne Rueckfrage wechselt",
+     "rag.py", "    if antwortet_auf_rueckfrage(letzte):", "    if True:"),
+    ("DW4 Fusszeile des Index-Wegs nennt das Spiel nicht",
+     "openwebui_pipe.py", "            yield fundstellen_spiel(hits, name)", "            yield fundstellen(hits)"),
+    ("DW5 Spiel-Fusszeile auch auf dem alten Weg",
+     "openwebui_pipe.py", '        if not rf.get("sprache"):\n            yield fundstellen(hits)',
+     '        if not rf.get("sprache"):\n            yield fundstellen_spiel(hits, self.valves.SPIEL)'),
+    ("DW6 Fusszeile auch im Sprachmodus (Index-Weg)",
+     "openwebui_pipe.py", '        if not rf.get("sprache"):\n            name = next(', '        if True:\n            name = next('),
+    ("DW7 Rueckfrage ohne Beispiel 'Spiel: X'",
+     "openwebui_pipe.py", 'Schreib zum Beispiel „Spiel: {namen[0]}“. Im Index', 'Im Index'),
+    ("DW8 'Spiel: X: <Frage>' sucht mit der ganzen Nachricht",
+     "openwebui_pipe.py", "            teil = teil[:-1] + [dict(teil[-1], content=frage)]", "            pass"),
+    ("DW9 Index-Fusszeile geht in den Verlauf",
+     "openwebui_pipe.py", '        text = _FUSSZEILE_INDEX.sub("", text)', "        pass"),
+    ("D4 zweite Rueckfrage beantwortet die aelteste statt die juengste Frage",
+     "rag.py", "                q = davor[-1]", "                q = davor[0]"),
+    ("D5 mehrdeutige Wahl im Verlauf nimmt das erste Spiel",
+     "rag.py", "            if len(wahl[0]) == 1:            # mehrdeutig", "            if wahl[0]:            # mehrdeutig"),
+    ("D6 Wahl ohne Doppelpunkt nach dem Namen",
+     "rag.py", '        if folge in wb and (j == len(woerter) or woerter[j - 1].endswith(":")):', "        if folge in wb:"),
+    ("D8 'danke' hinter dem Namen nicht erlaubt",
+     "rag.py", '_HINTEN = ("bitte", "danke")', '_HINTEN = ("bitte",)'),
+    # ---- Deployment-Schutz, URI (test_pipe_index.py, test_pipe_alt.py, test_index.py) ----
+    ("DP1 Schnittstellenpruefung des geladenen rag.py aus",
+     "openwebui_pipe.py", "        if fehlt or (v.INDEX_PATH and version < MIN_SCHNITTSTELLE):", "        if False:"),
+    ("DP2 alter Weg braucht fuer 'kein Regelheft' wieder rag.py",
+     "openwebui_pipe.py", "            status, ergebnis = ordne_spiel_valves(",
+     "            self._rag_fuer(v)\n            status, ergebnis = ordne_spiel_valves("),
+    ("DP3 fehlendes RAG_DIR ohne klare Meldung",
+     "openwebui_pipe.py", '        if not os.path.exists(pfad):\n            raise RuntimeError(f"rag.py nicht gefunden',
+     '        if False:\n            raise RuntimeError(f"rag.py nicht gefunden'),
+    ("UR1 Indexpfad unmaskiert in die file:-URI",
+     "rag.py", 'pathlib.Path(os.path.abspath(pfad)).as_uri() + "?mode=ro"', 'f"file:{pfad}?mode=ro"'),
+    # ---- Einspiel-Zuordnung = ed36f99 (Kritiker C3/C5), rag.py und Pipe-Kopie ----
+    ("C3a Einspiel-Vorschlaege ab 0.6 statt 0.5 (rag.py)",
+     "rag.py", '        return "unbekannt", [k for r, k in roh if r >= 0.5]', '        return "unbekannt", [k for r, k in roh if r >= 0.6]'),
+    ("C3b Einspiel-Vorschlaege ab 0.6 statt 0.5 (Pipe, alter Weg)",
+     "openwebui_pipe.py", '    return "unbekannt", [k for r, k in bewertet if r >= 0.5]', '    return "unbekannt", [k for r, k in bewertet if r >= 0.6]'),
+    ("C5a Schwelle 0.85 (rag.py)",
+     "rag.py", "def ordne_spiel(anfrage, katalog, schwelle=0.8):", "def ordne_spiel(anfrage, katalog, schwelle=0.85):"),
+    ("C5b Schwelle 0.85 (Pipe, alter Weg)",
+     "openwebui_pipe.py", "def ordne_spiel_valves(anfrage, katalog, schwelle=0.8):", "def ordne_spiel_valves(anfrage, katalog, schwelle=0.85):"),
+    ("P20b alter Weg ohne Unschaerfe",
+     "openwebui_pipe.py", '    if bewertet and bewertet[0][0] >= schwelle:\n        return "treffer", bewertet[0][1]\n    return "unbekannt", [k for r, k in bewertet if r >= 0.5]',
+     '    if False:\n        return "treffer", bewertet[0][1]\n    return "unbekannt", [k for r, k in bewertet if r >= 0.5]'),
+    ("P22b alter Weg: Normalisierung ohne Satzzeichen-Entfernung",
+     "openwebui_pipe.py", '    return re.sub(r"[\\W_]+", "", (name or "").casefold())', '    return (name or "").casefold()'),
+    ("P23b alter Weg ignoriert SPIEL_ALIASE",
+     "openwebui_pipe.py", '    formen = [name] + [a for a in (aliase or "").split(",") if a.strip()]', "    formen = [name]"),
     # ---- Laengenregel/Vorschlaege (test_zuordnung.py) ----
     ("L0 Laengengrenze 0.8 -> 0.7 (Kritiker-M8)",
      "rag.py", "MIN_LAENGENVERHAELTNIS = 0.8", "MIN_LAENGENVERHAELTNIS = 0.7"),

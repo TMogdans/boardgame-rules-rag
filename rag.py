@@ -487,23 +487,21 @@ def ordne_spiel(anfrage, katalog, schwelle=0.8):
 
 
 # ---------- Spiel im Chat (Index-Weg der Pipe, ohne regelfrage.spiel) ----------
-# Entscheidung Tobias: "es sollte explizit gesagt werden, wenn man zu einem anderen
-# Spiel Informationen haben will". Deshalb im Chat:
-#   - nur EXAKTE Namen/Aliase als ganze Wortfolge (Gross/Klein, Umlaut-/ss-Schreibung,
-#     Satzzeichen und Bindestriche egal), keine Unschaerfe. Das Spiel des Chats ist das
-#     erste, das so genannt wird; enthaelt ein Treffer einen anderen, gilt der laengere
-#     ("7 Wonders Duel" schlaegt "7 Wonders"); zwei unabhaengige -> Rueckfrage.
-#   - WECHSEL nur explizit: eine Namensnachricht (nur der Name, ggf. "Spiel:", "Spiel",
-#     "Wechsel zu", "Wechsle zu", "zu", "bei", "fuer" davor und "bitte"/"danke" danach)
-#     oder "Spiel: X: <Frage>" / "Zu X: <Frage>" / "Wechsel zu X: <Frage>". Ein Name
-#     irgendwo in einer spaeteren Frage wechselt NICHT ("Und bei zwei Spielern?").
-#   - Antwortet eine Namensnachricht auf unsere Rueckfrage, wird die Frage davor
-#     beantwortet; sonst nur bestaetigt ("Ok, ab jetzt X.").
-CHAT_FENSTER = 20            # hoechstens die letzten 20 Nutzer-Nachrichten
-CHAT_MAX_WOERTER = 8         # laengste Wortfolge eines Namens
+# Entscheidung Tobias (Spec D'): Im Chat wird das Spiel NUR explizit gewaehlt --
+# keine Erkennung von Spielnamen im Freitext, auch nicht in der ersten Nachricht.
+# Gemessen am vorigen Stand ("erste exakte Nennung"): 59/100 erste Fragen setzten ein
+# Spiel, ~43 davon falsch ("Wie endet das Spiel?" -> "Das Spiel", "wie bei Skat").
+#   (a) Wahl per Nachricht:   Spiel: X    |  Spiel X    |  Wechsel zu X
+#       jeweils optional mit ": <Frage>" dahinter (dann wird <Frage> beantwortet)
+#   (b) nur der Spielname (ggf. "bitte"/"danke") DIREKT als Antwort auf unsere
+#       Rueckfrage -> Spiel gewaehlt, die urspruengliche Frage wird beantwortet
+# X ist ein Name oder Alias exakt (chat_norm). Die Wahl gilt fuer den ganzen Chat bis
+# zur naechsten Wahl -- kein Fenster. Eine reine Namensnachricht ohne Rueckfrage ist
+# eine gewoehnliche Frage im aktuellen Spiel (die Fusszeile zeigt das Spiel).
+SCHNITTSTELLE = 5            # Version der Funktionen, die openwebui_pipe.py braucht
 RUECKFRAGE = "Zu welchem Spiel ist die Frage?"
-_VORN_NAME = (("wechsel", "zu"), ("wechsle", "zu"), ("spiel",), ("zu",), ("bei",), ("fuer",))
-_VORN_FRAGE = (("wechsel", "zu"), ("wechsle", "zu"), ("spiel",), ("zu",))
+CHAT_MAX_WOERTER = 8         # laengste Wortfolge eines Namens
+_WAHL_VORN = (("spiel",), ("wechsel", "zu"))
 _HINTEN = ("bitte", "danke")
 
 
@@ -517,7 +515,7 @@ def chat_norm(s):
 
 
 def chat_woerterbuch(katalog):
-    """{chat_norm(Schreibweise): {Name}} -- exakte Suche per Dict statt difflib."""
+    """{chat_norm(Schreibweise): {Name}} -- exakte Suche per Dict."""
     wb = {}
     for kanon, formen in katalog.items():
         for f in formen:
@@ -525,49 +523,19 @@ def chat_woerterbuch(katalog):
     return wb
 
 
-def _chat_tokens(text):
-    """Woerter an Leerraum getrennt, je Wort normalisiert: "Go-Phase" bleibt EIN Wort."""
-    woerter = (text or "").split()
-    return woerter, [chat_norm(w) for w in woerter]
+def explizite_wahl(text, wb):
+    """([Namen], Frage) fuer "Spiel: X[: Frage]", "Spiel X[: Frage]", "Wechsel zu X[: Frage]".
 
-
-def exakte_nennungen(text, wb):
-    """Sortierte Namen der Spiele, die text exakt als ganze Wortfolge nennt.
-
-    Liegt ein Treffer in einem laengeren (andere Wortfolge, die ihn enthaelt), zaehlt
-    nur der laengere. Mehr als ein Name im Ergebnis = zwei unabhaengige Nennungen.
+    Nach dem Namen folgt das Nachrichtenende oder ein Doppelpunkt; sonst ist es keine
+    Wahl (dann bliebe unklar, wo der Name endet). None, wenn keine Wahl.
     """
-    _, tok = _chat_tokens(text)
-    spannen = []
-    for i in range(len(tok)):
-        folge = ""
-        for j in range(i, min(len(tok), i + CHAT_MAX_WOERTER)):
-            folge += tok[j]
-            if folge and folge in wb:
-                spannen.append((i, j + 1, wb[folge]))
-    offen = [s for s in spannen
-             if not any(o[0] <= s[0] and s[1] <= o[1] and (o[0], o[1]) != (s[0], s[1]) for o in spannen)]
-    return sorted(set().union(*(s[2] for s in offen))) if offen else []
-
-
-def namens_nachricht(text, wb):
-    """Namen, wenn der Text NUR ein Spielname ist (mit kleiner Rahmung, s. oben), sonst None."""
-    _, tok = _chat_tokens(text)
-    tok = [t for t in tok if t]
-    for vorn in _VORN_NAME:
-        if tuple(tok[:len(vorn)]) == vorn and len(tok) > len(vorn):
-            tok = tok[len(vorn):]
-            break
-    if len(tok) > 1 and tok[-1] in _HINTEN:
-        tok = tok[:-1]
-    folge = "".join(tok)
-    return sorted(wb[folge]) if folge in wb else None
-
-
-def wechsel_mit_frage(text, wb):
-    """Namen fuer "Spiel: X: <Frage>" / "Zu X: <Frage>" / "Wechsel zu X: <Frage>", sonst None."""
-    woerter, tok = _chat_tokens(text)
-    for vorn in _VORN_FRAGE:
+    kopf = (text or "").lstrip()[:8].casefold()
+    if not (kopf.startswith("spiel") or kopf.startswith("wechsel")):
+        return None                     # Praefix-Test zuerst: die meisten Nachrichten enden hier
+    text = re.sub(r"^\s*spiel\s*:\s*", "Spiel ", text, flags=re.I)
+    woerter = text.split()
+    tok = [chat_norm(w) for w in woerter[:2 + CHAT_MAX_WOERTER]]   # nur, wo der Name stehen kann
+    for vorn in _WAHL_VORN:
         if tuple(tok[:len(vorn)]) == vorn:
             start = len(vorn)
             break
@@ -575,58 +543,75 @@ def wechsel_mit_frage(text, wb):
         return None
     for j in range(min(len(tok), start + CHAT_MAX_WOERTER), start, -1):
         folge = "".join(tok[start:j])
-        if folge in wb and woerter[j - 1].endswith(":") and j < len(tok):
-            return sorted(wb[folge])
+        if folge in wb and (j == len(woerter) or woerter[j - 1].endswith(":")):
+            return sorted(wb[folge]), " ".join(woerter[j:]).strip()
     return None
+
+
+def namens_nachricht(text, wb):
+    """Namen, wenn der Text NUR ein Spielname ist (ggf. "bitte"/"danke"), sonst None."""
+    tok = [t for t in (chat_norm(w) for w in (text or "").split()) if t]
+    while len(tok) > 1 and tok[-1] in _HINTEN:
+        tok = tok[:-1]
+    folge = "".join(tok)
+    return sorted(wb[folge]) if folge in wb else None
 
 
 def spiel_im_chat(nachrichten, wb):
     """Entscheidung fuer einen Chat ohne regelfrage.spiel. nachrichten: role/content (Text).
 
-    Rueckgabe:
-      ("frage", Name oder None, bis)  -- beantworte nachrichten[:bis+1] in diesem Spiel
-                                         (None: noch kein Spiel festgelegt)
-      ("gewechselt", Name, None)      -- nur bestaetigen, keine Suche
-      ("mehrdeutig", [Namen], None)   -- Rueckfrage mit Vorschlaegen
+    Rueckgabe (art, Name(n), bis, Frage):
+      ("frage", Name oder None, bis, Frage oder None) -- beantworte nachrichten[:bis+1];
+          Frage ersetzt den Text der Nachricht bis (bei "Spiel: X: <Frage>")
+      ("gewechselt", Name, None, None)  -- nur bestaetigen, keine Suche
+      ("mehrdeutig", [Namen], None, None) -- Rueckfrage mit Vorschlaegen
     """
     def text(i):
         c = nachrichten[i].get("content")
         return c if isinstance(c, str) else ""
-    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"][-CHAT_FENSTER:]
+
+    def antwortet_auf_rueckfrage(i):
+        return i > 0 and nachrichten[i - 1].get("role") == "assistant" \
+            and str(nachrichten[i - 1].get("content") or "").startswith(RUECKFRAGE)
+
+    nutzer = [i for i, m in enumerate(nachrichten) if m.get("role") == "user"]
     if not nutzer:
-        return "frage", None, None
+        return "frage", None, None, None
     spiel = None
     for i in nutzer[:-1]:
-        namen = namens_nachricht(text(i), wb) or wechsel_mit_frage(text(i), wb)
-        if namen and len(namen) == 1:
-            spiel = namen[0]
-        elif spiel is None:
-            genannt = exakte_nennungen(text(i), wb)
-            if len(genannt) == 1:
-                spiel = genannt[0]
+        wahl = explizite_wahl(text(i), wb)
+        if wahl:
+            if len(wahl[0]) == 1:            # mehrdeutig -> keine Wahl, das alte Spiel bleibt
+                spiel = wahl[0][0]
+            continue
+        if antwortet_auf_rueckfrage(i):
+            namen = namens_nachricht(text(i), wb)
+            if namen and len(namen) == 1:
+                spiel = namen[0]
     letzte = nutzer[-1]
-    namen = namens_nachricht(text(letzte), wb)
-    if namen:
+    wahl = explizite_wahl(text(letzte), wb)
+    if wahl:
+        namen, frage = wahl
         if len(namen) > 1:
-            return "mehrdeutig", namen, None
-        vorher = nachrichten[letzte - 1] if letzte > 0 else {}
-        if vorher.get("role") == "assistant" and str(vorher.get("content") or "").startswith(RUECKFRAGE):
-            # Die unbeantwortete Frage direkt vor der Rueckfrage -- aber nie eine
-            # Namensnachricht (sonst wuerde "Brass" -> Rueckfrage -> "Brass Birmingham"
-            # den Namen selbst als Frage beantworten).
+            return "mehrdeutig", namen, None, None
+        return ("frage", namen[0], letzte, frage) if frage else ("gewechselt", namen[0], None, None)
+    if antwortet_auf_rueckfrage(letzte):
+        namen = namens_nachricht(text(letzte), wb)
+        if namen:
+            if len(namen) > 1:
+                return "mehrdeutig", namen, None, None
+            # die Frage, die unsere Rueckfrage ausgeloest hat: die letzte Nutzer-
+            # Nachricht VOR der Rueckfrage (bei F1, R, F2, R, Name also F2)
             davor = [i for i in nutzer if i < letzte - 1]
-            if davor and namens_nachricht(text(davor[-1]), wb) is None:
-                return "frage", namen[0], davor[-1]
-        return "gewechselt", namen[0], None
-    namen = wechsel_mit_frage(text(letzte), wb)
-    if namen:
-        return ("mehrdeutig", namen, None) if len(namen) > 1 else ("frage", namen[0], letzte)
-    if spiel is None:
-        genannt = exakte_nennungen(text(letzte), wb)
-        if len(genannt) > 1:
-            return "mehrdeutig", genannt, None
-        spiel = genannt[0] if genannt else None
-    return "frage", spiel, letzte
+            if davor:
+                q = davor[-1]
+                wahl_q = explizite_wahl(text(q), wb)
+                if wahl_q is None:
+                    return "frage", namen[0], q, None
+                if wahl_q[1]:
+                    return "frage", namen[0], q, wahl_q[1]
+            return "gewechselt", namen[0], None, None
+    return "frage", spiel, letzte, None
 
 
 def katalog_aus_index(spiele):
@@ -843,7 +828,10 @@ def oeffne_index(pfad=None, schreibend=False):
     if len(kopf) == 20 and kopf[18] == 2 and kopf[19] == 2:
         raise KonfigFehler(f"Index {pfad} ist im WAL-Modus; read-only (Pipe-Mount) geht das nicht. "
                            f"Auf dem Host: sqlite3 {pfad} 'PRAGMA journal_mode=DELETE'")
-    return sqlite3.connect(f"file:{pfad}?mode=ro", uri=True, timeout=30)
+    # Pfad fuer die URI maskieren: "?", "#", "%" oder Leerzeichen im Pfad wuerden sonst als
+    # URI-Syntax gelesen (Query, Fragment, Escape) und eine andere Datei oeffnen oder scheitern.
+    import pathlib
+    return sqlite3.connect(pathlib.Path(os.path.abspath(pfad)).as_uri() + "?mode=ro", uri=True, timeout=30)
 
 
 def _hat_fts(con):

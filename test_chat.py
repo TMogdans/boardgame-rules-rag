@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Spiel im Chat (rag.spiel_im_chat) -- abgenommene Regeln (Tobias):
+Spiel im Chat (rag.spiel_im_chat) -- abgenommene Spec D' (Tobias):
 
-  - Das Spiel des Chats ist das erste, das in einer Nutzer-Nachricht EXAKT genannt
-    wird (Name oder Alias als ganze Wortfolge; Gross/Klein, Umlaut-/ss-Schreibung,
-    Satzzeichen, Bindestriche egal). Keine Unschaerfe im Chat. Enthaelt ein Treffer
-    einen anderen, gilt der laengere; zwei unabhaengige -> Rueckfrage.
-  - Gewechselt wird NUR explizit: Namensnachricht (auch "Spiel: X", "Wechsel zu X",
-    "X bitte", "Bei X.", "Fuer X") oder "Zu X: <Frage>". Ein Name in einer spaeteren
-    Frage wechselt nicht.
-  - Namensnachricht als Antwort auf die Rueckfrage -> die Frage davor wird
-    beantwortet; sonst nur Bestaetigung.
+  Das Spiel wird NUR explizit gewaehlt:
+    (a) "Spiel: X", "Spiel X", "Wechsel zu X" -- optional mit ": <Frage>" dahinter
+    (b) nur der Spielname (ggf. "bitte"/"danke") DIREKT als Antwort auf unsere
+        Rueckfrage -> die urspruengliche Frage wird beantwortet
+  X exakt (Name oder Alias, chat_norm). Die Wahl gilt fuer den ganzen Chat bis zur
+  naechsten Wahl, ohne Fenster. KEINE Erkennung von Spielnamen im Freitext -- auch
+  nicht in der ersten Nachricht. Eine reine Namensnachricht ohne Rueckfrage ist eine
+  gewoehnliche Frage im aktuellen Spiel.
 
     python test_chat.py
 
-Katalog und Fragen stammen vom Kritiker (kritik-index-2/exp: katalog.py, fp.py,
-satz.py, e2e.py).
+Katalog (52 Titel) und die 100 Folgefragen stammen vom dritten Kritiker
+(kritik-index-3/exp: katalog.py, fragen.py); gemessen hatte er beim vorigen Stand
+59/100 Festlegungen aus der ersten Frage, ~43 davon falsch.
 """
-import os
-import sys
 import time
 import unittest
 
@@ -27,40 +25,125 @@ import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skript
 import rag  # noqa: E402
 
 SPIELE = [
-    ("Food Chain Magnate", ["Food Chain", "FCM"]),
-    ("Go", []), ("Root", []), ("Azul", []), ("Fuji", []), ("Hive", []),
-    ("Arche Nova", ["Ark Nova"]), ("7 Wonders", ["Sieben Wunder"]), ("7 Wonders Duel", ["Duel"]),
-    ("Terraforming Mars", ["TM", "Terraforming"]), ("Flügelschlag", ["Wingspan"]),
-    ("Brass: Birmingham", ["Brass"]), ("Brass: Lancashire", []),
-    ("Die Siedler von Catan", ["Catan", "Siedler"]), ("Carcassonne", []), ("Agricola", []),
-    ("Codenames", ["Codenames"]), ("Dominion", []), ("Everdell", []), ("Gloomhaven", []),
-    ("Spirit Island", []), ("Scythe", []), ("Twilight Imperium", ["TI4"]), ("Cascadia", []),
-    ("Heat", ["Heat: Pedal to the Metal"]), ("Kingdomino", []), ("Patchwork", []),
-    ("Die Crew", ["The Crew"]), ("Great Western Trail", ["GWT"]), ("Concordia", []),
-    ("Paleo", []), ("Hanabi", []), ("Mysterium", []), ("Istanbul", []),
+ ("Food Chain Magnate", ["FCM", "Food Chain"]), ("Die Crew", ["The Crew", "Crew"]), ("Root", []), ("Go", []),
+ ("Die Siedler von Catan", ["Siedler", "Catan"]), ("Hive", []), ("Azul", []), ("Everdell", []),
+ ("Flügelschlag", ["Wingspan"]), ("Brass: Birmingham", ["Brass"]), ("Brass: Lancashire", []),
+ ("7 Wonders", []), ("7 Wonders: Duel", ["Duel"]), ("Café International", []), ("Die Burgen von Burgund", ["Burgen von Burgund"]),
+ ("Burgund", []), ("Carcassonne", []), ("Agricola", []), ("Dominion", []), ("Spirit Island", []),
+ ("Scythe", []), ("Terraforming Mars", ["Terraforming"]), ("Arche Nova", ["Ark Nova"]), ("Cascadia", []),
+ ("Heat", []), ("Kingdomino", []), ("Patchwork", []), ("Concordia", []), ("Hanabi", []), ("Istanbul", []),
+ ("Paleo", []), ("Mysterium", []), ("Codenames", []), ("Just One", []), ("Wizard", []), ("Skat", []),
+ ("Schach", []), ("Tichu", []), ("Qwixx", []), ("Kniffel", []), ("Mensch ärgere Dich nicht", []),
+ ("Die Quacksalber von Quedlinburg", ["Quacksalber"]), ("Zug um Zug", ["Ticket to Ride"]), ("Fuji", []),
+ ("Mars", []), ("Everdell: Pearlbrook", ["Pearlbrook"]), ("Uno", []), ("Das Spiel", []), ("Nova Luna", []),
+ ("Village", []), ("Ganz schön clever", []), ("Die Macher", []),
 ]
 KATALOG, IDS = rag.katalog_aus_index([{"spiel_id": rag.spiel_slug(n), "name": n, "aliase": a} for n, a in SPIELE])
 WB = rag.chat_woerterbuch(KATALOG)
+R = rag.RUECKFRAGE + " Schreib zum Beispiel „Spiel: Azul“. Im Index: 52 Spiele."
 
-# fp.py: 50 gewoehnliche Regelfragen -- viele enthalten Spielnamen als Wort
-FRAGEN = ["Wie gehe ich an die Wurzel (root) des Baums?", "Was passiert in der Go-Phase?", "Wann darf ich go sagen?",
-          "Wie viele Spieler dürfen mitspielen?", "Was kostet eine Ware?", "Darf ich in meiner Runde zweimal bauen?",
-          "Wie funktioniert die Wertung am Spielende?", "Was passiert bei Gleichstand?", "Wie viele Karten ziehe ich?",
-          "Wer beginnt das Spiel?", "Kann ich meine Route ändern?", "Wie weit fährt die Crew?",
-          "Was bringt die Hitze (heat)?", "Wie baue ich einen Bienenstock (hive)?",
-          "Welche Farbe hat das blaue Plättchen (azul)?", "Darf ich den Berg Fuji besteigen?",
-          "Was ist ein Duell?", "Was mache ich im Duel?", "Wie lege ich ein Domino an?", "Was zählt als Patchwork?",
-          "Wie viele Wunder kann ich bauen?", "Ist das ein Code Name?", "Gibt es eine Arche?",
-          "Wann ist Concorde erlaubt?", "Wie funktioniert Handel mit den Nachbarn?",
-          "Wer hat die Mehrheit im Mars-Gebiet?", "Wie heißt die Phase nach dem Essen?", "Kann ich Rohstoffe tauschen?",
-          "Was ist ein Siedler?", "Wie bewege ich die Siedler?", "Was mache ich mit der Sense (scythe)?",
-          "Kann man eine Insel (island) verlassen?", "Wo ist der Trail?", "Darf ich in den Hafen (haven)?",
-          "Was macht der Magnat?", "Wieviel Geld gibt es in Phase 4?", "Was bedeutet Heat im Rennen?",
-          "Wie spiele ich die Karte Root aus?", "Muss ich 7 Karten auf der Hand haben?", "Wie funktioniert Go?",
-          "Und bei zwei Spielern?", "Was ist mit Hive-Steinen?", "Kann ich mit dem Truck Driver fahren?",
-          "Wer darf zuerst?", "Gilt das auch für Heißluftballons?", "Darf ich passen?",
-          "Was passiert, wenn der Stapel leer ist?", "Wie viele Punkte bringt ein Kloster?",
-          "Wie viele Punkte gibt die Straße?", "Darf ich Arbeiter wieder einsetzen?"]
+FRAGEN = [
+    'Wie endet das Spiel?',
+    'Wer gewinnt das Spiel bei Gleichstand?',
+    'Wann ist das Spiel vorbei?',
+    'Wie viele Runden dauert das Spiel?',
+    'Darf ich die Crew austauschen?',
+    'Was ist die Wurzel des Problems, wenn niemand bauen kann?',
+    'Wann darf ich go sagen?',
+    'Muss ich bei Go warten?',
+    'Wie viele Siedler bekomme ich?',
+    'Was macht der Mars-Marker?',
+    'Wie funktioniert das Duel am Ende?',
+    'Gibt es ein Duel zwischen zwei Spielern?',
+    'Ist das wie beim Skat?',
+    'Spielt man das ähnlich wie Schach?',
+    'Das ist ja wie Uno, oder?',
+    'Wie bei Kniffel?',
+    'Kann ich wie bei Tichu passen?',
+    'Wer ist der Wizard?',
+    'Welche Karte ist die Heat-Karte?',
+    'Wie viel Heat bekomme ich?',
+    'Was ist ein Village?',
+    'Kann ich mein Village erweitern?',
+    'Brass oder Holz, was ist wertvoller?',
+    'Wann darf ich Brass einsetzen?',
+    'Wieviele Punkte bringt Burgund?',
+    'Liegt die Provinz Burgund am Rand?',
+    'Was ist Fuji auf der Karte?',
+    'Wie funktioniert die Go-Phase?',
+    'Die Macher der Erweiterung sagen was?',
+    'Was sagen die Macher dazu?',
+    'Ist Patchwork erlaubt beim Legen?',
+    'Darf ich eine Patchwork-Decke bauen?',
+    'Was bedeutet Paleo als Symbol?',
+    'Welche Rolle spielt Istanbul?',
+    'Was passiert in Istanbul?',
+    'Ich spiele sonst Catan, ist das ähnlich?',
+    'Wie in Carcassonne, oder?',
+    'Kann ich wie in Dominion Karten kaufen?',
+    'Und bei zwei Spielern?',
+    'Und zu dritt?',
+    'Wie viele Karten auf der Hand?',
+    'Was kostet ein Haus?',
+    'Wann bekomme ich Geld?',
+    'Wie viel Geld gibt es?',
+    'Darf ich tauschen?',
+    'Was ist das Spielziel?',
+    'Wie baue ich?',
+    'Wer fängt an?',
+    'Wie wird gewertet?',
+    'Was ist mit dem Bonus?',
+    'Darf ich Karten abwerfen?',
+    'Wie viele Aktionen habe ich?',
+    'Kann ich passen?',
+    'Was passiert am Rundenende?',
+    'Was mache ich mit Uno-Karten?',
+    'Wie gewinnt man Hanabi-mäßig ohne Hinweise?',
+    'Was ist die Mysterium-Karte?',
+    'Hat das was mit Codenames zu tun?',
+    'Ist das Just One-artig?',
+    'Gibt es hier eine Everdell-Variante?',
+    'Ist Azul ein anderes Spiel?',
+    'Wie im Spiel Azul?',
+    'Das Spiel ist neu für mich, wie fange ich an?',
+    'Erklär mir das Spiel kurz.',
+    'Was ist der beste Zug im Spiel?',
+    'Wie schnell ist das Spiel?',
+    'Gibt es eine Solo-Variante für das Spiel?',
+    'Die Crew hat gewonnen, oder?',
+    'Wie viele Hive-Steine gibt es?',
+    'Wie viele Wonders darf ich bauen?',
+    'Wie funktionieren die 7 Wonders?',
+    'Zug um Zug: wie ziehe ich eine Karte?',
+    'Wie viel kostet Zug um Zug eine Route?',
+    'Zug um Zug gebaut, dann?',
+    'Was mache ich im Zug um Zug-Modus?',
+    'Qwixx-Regel: wann kreuze ich?',
+    'Darf ich Root spielen?',
+    'Was ist Root?',
+    'Wo ist mein Root-Marker?',
+    'Heat?',
+    'Go?',
+    'Mars?',
+    'Burgund?',
+    'Die Crew?',
+    'Das Spiel?',
+    'Village?',
+    'Uno!',
+    'Skat.',
+    'Wie funktioniert Heat im Detail?',
+    'Zu zweit, wie läuft das?',
+    'Bei vier Spielern?',
+    'Für Anfänger?',
+    'Spiel: wie viele Karten?',
+    'Zu Beginn: wie viel Geld?',
+    'Bei Gleichstand: wer gewinnt?',
+    'Zu Mars: wie viele Punkte?',
+    'Bei Mars: wie viele Punkte?',
+    'Zu dem Café: was kostet der Kaffee?',
+    'Bitte',
+    'Danke',
+]
 
 
 def U(t):
@@ -75,130 +158,130 @@ def chat(*wechsel):
     return [U(t) if i % 2 == 0 else A(t) for i, t in enumerate(wechsel)]
 
 
-class TestErsteNennung(unittest.TestCase):
-    def test_saetze_des_kritikers(self):
-        for satz, soll in (("Wie funktioniert bei 7 Wonders die Wertung?", ["7 Wonders"]),
-                           ("Wie läuft bei 7 Wonders der Handel?", ["7 Wonders"]),
-                           ("7 Wonders: dürfen Nachbarn tauschen?", ["7 Wonders"]),
-                           ("Bei Root die Vögel: wie bauen die?", ["Root"]),
-                           ("Wie spielt man Azul mit zwei Spielern?", ["Azul"]),
-                           ("Bei Brass Birmingham die Kanalphase?", ["Brass: Birmingham"]),
-                           ("Bei Arche Nova die Pausekarte?", ["Arche Nova"]),
-                           ("Bei Fuji die Würfel?", ["Fuji"]),
-                           ("Was passiert in der Go-Phase bei Terraforming Mars?", ["Terraforming Mars"])):
-            with self.subTest(satz=satz):
-                self.assertEqual(rag.exakte_nennungen(satz, WB), soll)
-
-    def test_laengerer_treffer_enthaelt_kuerzeren(self):
-        self.assertEqual(rag.exakte_nennungen("Wie geht bei 7 Wonders Duel die Wertung?", WB), ["7 Wonders Duel"])
-        self.assertEqual(rag.exakte_nennungen("Wie geht 7 Wonders die Wertung?", WB), ["7 Wonders"])
-
-    def test_zwei_unabhaengige_sind_mehrdeutig(self):
-        self.assertEqual(rag.exakte_nennungen("Ist Carcassonne leichter als Agricola?", WB), ["Agricola", "Carcassonne"])
-        self.assertEqual(rag.spiel_im_chat(chat("Ist Carcassonne leichter als Agricola?"), WB)[0], "mehrdeutig")
-
-    def test_schreibweisen(self):
-        for satz in ("Wie fliegt man bei Flügelschlag?", "Wie fliegt man bei Fluegelschlag?",
-                     "Wie fliegt man bei FLÜGEL-SCHLAG?", "Wie fliegt man bei flügelschlag!"):
-            with self.subTest(satz=satz):
-                self.assertEqual(rag.exakte_nennungen(satz, WB), ["Flügelschlag"])
-        self.assertEqual(rag.exakte_nennungen("Food-Chain-Magnate: was kostet Bier?", WB), ["Food Chain Magnate"])
-
-    def test_keine_unschaerfe_im_chat(self):
-        for satz in ("Wie geht Fudschein Magnat?", "Wie spielt man Fujian?", "Carcasonne Kloster?", "Carcasonne"):
-            with self.subTest(satz=satz):
-                self.assertEqual(rag.exakte_nennungen(satz, WB), [])
-                self.assertEqual(rag.spiel_im_chat(chat(satz), WB), ("frage", None, 0))
+def wahl(*wechsel):
+    return rag.spiel_im_chat(chat(*wechsel), WB)
 
 
-class TestLaufenderChat(unittest.TestCase):
-    def test_fp_keine_faelschlichen_wechsel(self):
-        # fp.py: 50 Regelfragen im laufenden Carcassonne-Chat -> 0 Wechsel
-        falsch = []
-        for q in FRAGEN:
-            erg = rag.spiel_im_chat(chat("Carcassonne: Wie viele Punkte bringt ein Kloster?", "5 Punkte.", q), WB)
-            if erg != ("frage", "Carcassonne", 2):
-                falsch.append((q, erg))
+class TestKeineErkennungImFreitext(unittest.TestCase):
+    def test_erste_frage_legt_nie_ein_spiel_fest(self):
+        falsch = [(q, wahl(q)) for q in FRAGEN if wahl(q) != ("frage", None, 0, None)]
         self.assertEqual(falsch, [])
-
-    def test_name_in_spaeterer_frage_wechselt_nicht(self):
-        # auch nicht, wenn die Nennung in einer mittleren Nachricht steht
-        self.assertEqual(rag.spiel_im_chat(chat("Carcassonne: Kloster?", "5", "Und bei Agricola?", "...",
-                                                "Wie viele Punkte?"), WB), ("frage", "Carcassonne", 4))
-        for q in ("Und wie ist das bei Agricola?", "Und bei zwei Spielern?", "Was ist mit Brass?",
-                  "Wie läuft das bei Agricola und Catan?"):
+        for q in ("Wie punktet man in Food Chain Magnate?", "Wie endet Das Spiel?", "Azul: wer beginnt?",
+                  "Wie funktioniert bei 7 Wonders die Wertung?", "Azul"):
             with self.subTest(q=q):
-                self.assertEqual(rag.spiel_im_chat(chat("Carcassonne: Kloster?", "5", q), WB),
-                                 ("frage", "Carcassonne", 2))
+                self.assertEqual(wahl(q), ("frage", None, 0, None))
 
-    def test_explizite_wechsel(self):
-        for q in ("Agricola", "Spiel: Agricola", "Spiel Agricola", "Wechsel zu Agricola", "Wechsle zu Agricola",
-                  "zu Agricola", "Agricola bitte", "Bei Agricola.", "Für Agricola", "agricola!"):
-            with self.subTest(q=q):
-                self.assertEqual(rag.spiel_im_chat(chat("Carcassonne: Kloster?", "5", q), WB),
-                                 ("gewechselt", "Agricola", None))
-        for q in ("Zu Agricola: wie viele Felder?", "Spiel: Agricola: wie viele Felder?",
-                  "Wechsel zu Agricola: wie viele Felder?"):
-            with self.subTest(q=q):
-                self.assertEqual(rag.spiel_im_chat(chat("Carcassonne: Kloster?", "5", q), WB),
-                                 ("frage", "Agricola", 2))
-        # nach dem Wechsel gilt das neue Spiel fuer Folgefragen
-        self.assertEqual(rag.spiel_im_chat(chat("Carcassonne: Kloster?", "5", "Agricola", "Ok, ab jetzt Agricola.",
-                                                "Wie viele Felder?"), WB), ("frage", "Agricola", 4))
+    def test_laufender_chat_wechselt_nie_ueber_freitext(self):
+        for start in ("Spiel: Food Chain Magnate", "Spiel: Azul", "Wechsel zu Everdell"):
+            soll = rag.explizite_wahl(start, WB)[0][0]
+            falsch = [(q, r) for q in FRAGEN if (r := wahl(start, "Ok.", q)) != ("frage", soll, 2, None)]
+            with self.subTest(start=start):
+                self.assertEqual(falsch, [])
 
-    def test_nur_die_letzten_20_nutzer_nachrichten(self):
-        verlauf = ["Carcassonne: Kloster?", "5"]
-        for i in range(20):
-            verlauf += [f"Frage {i}?", "Antwort."]
-        verlauf.append("Und noch eine Frage?")
-        self.assertEqual(rag.spiel_im_chat(chat(*verlauf), WB)[1], None)       # Nennung liegt vor dem Fenster
-        self.assertEqual(rag.spiel_im_chat(chat(*verlauf[2:]), WB)[1], None)
-        self.assertEqual(rag.spiel_im_chat(chat(*verlauf[4:]), WB)[1], None)
-        kurz = ["Carcassonne: Kloster?", "5"] + ["x?", "y."] * 18 + ["Und?"]
-        self.assertEqual(rag.spiel_im_chat(chat(*kurz), WB)[1], "Carcassonne")  # 20 Nutzer-Nachrichten: noch drin
+    def test_natuerliche_wechselformen_sind_keine_wahl(self):
+        # Kritiker exp_w.py: alles ausser den drei Formen bleibt beim alten Spiel -- sichtbar
+        # in der Fusszeile ("Quelle: Food Chain Magnate ...")
+        for w in ("Und jetzt eine Frage zu Azul: wie viele Fliesen?", "Bei Root: wer beginnt?", "Wechseln wir zu Hive",
+                  "Jetzt Azul", "Nun zu Azul: wer beginnt?", "Neues Spiel: Azul", "Zu Azul", "Bei Azul", "Für Azul",
+                  "Wechsle zu Azul", "Wechsel auf Azul", "Azul: wer beginnt?", "Zu Azul: wer beginnt?", "OK, Azul",
+                  "Und Azul?", "Azul", "Azul bitte", "Spiel: Azul wer beginnt?"):
+            with self.subTest(w=w):
+                self.assertEqual(wahl("Spiel: Food Chain Magnate", "Ok.", w), ("frage", "Food Chain Magnate", 2, None))
+
+
+class TestExpliziteWahl(unittest.TestCase):
+    def test_die_drei_formen(self):
+        for w in ("Spiel: Azul", "Spiel Azul", "Wechsel zu Azul", "spiel:Azul", "SPIEL : azul", "Spiel: Azul!",
+                  "Spiel: AZUL"):
+            with self.subTest(w=w):
+                self.assertEqual(wahl(w), ("gewechselt", "Azul", None, None))
+                self.assertEqual(wahl("Spiel: Root", "Ok.", w), ("gewechselt", "Azul", None, None))
+
+    def test_mit_frage(self):
+        for w in ("Spiel: Azul: wer beginnt?", "Spiel Azul: wer beginnt?", "Wechsel zu Azul: wer beginnt?"):
+            with self.subTest(w=w):
+                self.assertEqual(wahl(w), ("frage", "Azul", 0, "wer beginnt?"))
+        self.assertEqual(wahl("Spiel: 7 Wonders: Duel"), ("gewechselt", "7 Wonders: Duel", None, None))
+        self.assertEqual(wahl("Spiel: 7 Wonders: Duel: wer beginnt?"), ("frage", "7 Wonders: Duel", 0, "wer beginnt?"))
+        self.assertEqual(wahl("Spiel: 7 Wonders: wer beginnt?"), ("frage", "7 Wonders", 0, "wer beginnt?"))
+        self.assertEqual(wahl("Spiel: Fluegelschlag: wie fliegt man?"), ("frage", "Flügelschlag", 0, "wie fliegt man?"))
+
+    def test_ohne_doppelpunkt_nach_dem_namen_keine_wahl(self):
+        self.assertEqual(wahl("Spiel: Azul wer beginnt?"), ("frage", None, 0, None))
+
+    def test_wahl_gilt_ohne_fenster(self):
+        v = ["Spiel: Azul", "Ok, ab jetzt Azul."]
+        v += ["Ist das wie bei Root?", "A.", "Wie bei Brass Birmingham?", "A."]
+        for i in range(250):
+            v += [f"Folgefrage {i}?", "A."]
+        v.append("Und noch eine?")
+        self.assertEqual(wahl(*v)[1], "Azul")
+
+    def test_letzte_wahl_gilt(self):
+        self.assertEqual(wahl("Spiel: Azul", "Ok.", "Spiel: Root", "Ok.", "Wer beginnt?"), ("frage", "Root", 4, None))
+
+    def test_mehrdeutige_wahl(self):
+        k, _ = rag.katalog_aus_index([{"spiel_id": "brass-birmingham", "name": "Brass: Birmingham", "aliase": ["Brass"]},
+                                      {"spiel_id": "brass-lancashire", "name": "Brass: Lancashire", "aliase": ["Brass"]},
+                                      {"spiel_id": "azul", "name": "Azul", "aliase": []}])
+        wb = rag.chat_woerterbuch(k)
+        self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass"), wb)[0], "mehrdeutig")
+        # im Verlauf setzt eine mehrdeutige Wahl kein Spiel -- das alte bleibt (D5)
+        self.assertEqual(rag.spiel_im_chat(chat("Spiel: Azul", "Ok.", "Spiel: Brass", "Meintest du ...?",
+                                                "Wer beginnt?"), wb), ("frage", "Azul", 4, None))
+        self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass", "Meintest du ...?", "Wer beginnt?"), wb),
+                         ("frage", None, 2, None))
 
 
 class TestRueckfrage(unittest.TestCase):
-    R = rag.RUECKFRAGE + " Im Index: 34 Spiele."
-
-    def test_antwort_auf_rueckfrage_beantwortet_die_frage(self):
-        for antwort in ("Carcassonne", "Carcassonne bitte", "Bei Carcassonne.", "Für Carcassonne", "Spiel: Carcassonne"):
+    def test_name_auf_rueckfrage_beantwortet_die_frage(self):
+        for antwort in ("Azul", "Azul bitte", "Azul danke", "azul!", "Spiel: Azul"):
             with self.subTest(antwort=antwort):
-                self.assertEqual(rag.spiel_im_chat(chat("Wie viele Punkte bringt ein Kloster?", self.R, antwort), WB),
-                                 ("frage", "Carcassonne", 0))
+                erg = wahl("Wer beginnt?", R, antwort)
+                self.assertEqual(erg, ("frage", "Azul", 0, None) if not antwort.startswith("Spiel")
+                                 else ("gewechselt", "Azul", None, None))
 
-    def test_name_nach_beantworteter_frage_nur_bestaetigung(self):
-        # MUSS-2: wiederholt NICHT die alte Frage im neuen Spiel
-        v = chat("Wie viele Punkte bringt ein Kloster?", self.R, "Carcassonne", "5 Punkte.", "Agricola")
-        self.assertEqual(rag.spiel_im_chat(v, WB), ("gewechselt", "Agricola", None))
+    def test_zweite_rueckfrage_beantwortet_die_juengste_frage(self):
+        # D4: F1, Rueckfrage, F2, Rueckfrage, Name -> F2
+        self.assertEqual(wahl("Frage eins?", R, "Frage zwei?", R, "Azul"), ("frage", "Azul", 2, None))
 
-    def test_namensnachricht_vor_der_rueckfrage_ist_keine_frage(self):
+    def test_andere_antwort_ist_keine_wahl(self):
+        for antwort in ("Bei Azul", "Zu Azul", "Fudschein Magnat", "Azulx"):
+            with self.subTest(antwort=antwort):
+                self.assertEqual(wahl("Wer beginnt?", R, antwort), ("frage", None, 2, None))
+
+    def test_name_ohne_rueckfrage_ist_eine_frage(self):
+        self.assertEqual(wahl("Spiel: Azul", "Ok, ab jetzt Azul.", "Root"), ("frage", "Azul", 2, None))
+        self.assertEqual(wahl("Azul"), ("frage", None, 0, None))
+
+    def test_rueckfrage_nach_mehrdeutiger_wahl_mit_frage(self):
         k, _ = rag.katalog_aus_index([{"spiel_id": "brass-birmingham", "name": "Brass: Birmingham", "aliase": ["Brass"]},
                                       {"spiel_id": "brass-lancashire", "name": "Brass: Lancashire", "aliase": ["Brass"]}])
         wb = rag.chat_woerterbuch(k)
-        self.assertEqual(rag.spiel_im_chat(chat("Brass"), wb)[0], "mehrdeutig")
-        v = chat("Brass", rag.RUECKFRAGE + " Meintest du Brass: Birmingham oder Brass: Lancashire?", "Brass Birmingham")
-        self.assertEqual(rag.spiel_im_chat(v, wb), ("gewechselt", "Brass: Birmingham", None))
+        r = rag.RUECKFRAGE + " Meintest du Brass: Birmingham oder Brass: Lancashire?"
+        self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass: wieviel Geld?", r, "Brass: Birmingham"), wb),
+                         ("frage", "Brass: Birmingham", 0, "wieviel Geld?"))
+        self.assertEqual(rag.spiel_im_chat(chat("Spiel: Brass", r, "Brass: Lancashire"), wb),
+                         ("gewechselt", "Brass: Lancashire", None, None))
 
-    def test_ohne_rueckfrage_davor_ist_name_ein_wechsel(self):
-        self.assertEqual(rag.spiel_im_chat(chat("Carcassonne"), WB), ("gewechselt", "Carcassonne", None))
-        self.assertEqual(rag.spiel_im_chat(chat("Wie viele Punkte?", "Keine Angaben.", "Carcassonne"), WB),
-                         ("gewechselt", "Carcassonne", None))
+    def test_gewaehltes_spiel_bleibt_nach_rueckfrage(self):
+        self.assertEqual(wahl("Wer beginnt?", R, "Azul", "Spieler 1.", "Und dann?"), ("frage", "Azul", 4, None))
 
 
 class TestLaufzeit(unittest.TestCase):
-    def test_250_spiele_200_nachrichten(self):
+    def test_250_spiele_500_nachrichten(self):
         spiele = [{"spiel_id": f"s{i}", "name": f"Spiel Nummer {i} Deluxe Edition", "aliase": [f"SN{i}"]}
                   for i in range(250)]
         wb = rag.chat_woerterbuch(rag.katalog_aus_index(spiele)[0])
         satz = ("Wie viel Geld bekomme ich eigentlich in der dritten Runde wenn ich vorher zwei Karten "
                 "gespielt habe und der Marker auf dem Feld neben der Stadt liegt oder nicht")
-        verlauf = chat(*([satz, "Antwort."] * 100 + [satz]))
+        verlauf = chat(*(["Spiel: SN7", "Ok."] + [satz, "Antwort."] * 249 + [satz]))
         zeiten = []
         for _ in range(5):
             t = time.perf_counter()
-            rag.spiel_im_chat(verlauf, wb)
+            erg = rag.spiel_im_chat(verlauf, wb)
             zeiten.append(time.perf_counter() - t)
+        self.assertEqual(erg[1], "Spiel Nummer 7 Deluxe Edition")
         self.assertLess(max(zeiten), 0.05, f"max {max(zeiten)*1000:.1f} ms")
 
 
