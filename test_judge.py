@@ -394,5 +394,406 @@ class TestEichlaufEndeZuEnde(unittest.TestCase):
                          {"s1": {1: FRAGE}}, "frei", "m", bewerter=None)
 
 
+# ---------------------------------------------------------------------------
+# kern/zusatz, falsch nicht erkannt, Tokens, Overrides
+# ---------------------------------------------------------------------------
+# Der Prompt fuer Fragen OHNE kern, so wie er vor der kern/zusatz-Aenderung war.
+# Bewusst als Wortlaut hier hinterlegt (nicht aus judge.py abgeleitet).
+ALTER_PROMPT_FREI = """\
+Du bist Prüfer für ein Brettspiel-Regel-Assistenzsystem. Du bewertest eine Antwort des Systems gegen die Musterlösung aus dem Golden Set. Die Seitenangabe prüfst du nicht.
+
+Klassen:
+- richtig: inhaltlich korrekt und vollständig genug für den Spieltisch (Umformulierung, andere Sprache für Spielbegriffe, Zahlwort statt Ziffer ok). Ist laut Golden Set Verweigern richtig (erwartet_verweigerung: true), ist eine ehrliche Aussage „steht nicht im Heft“ richtig.
+- teilweise: korrekt, lässt aber einen für die Entscheidung wesentlichen Teil weg (z. B. Ausnahme), ohne Falsches zu behaupten.
+- falsch: enthält eine falsche Regelaussage (auch neben richtigen Teilen) oder erfindet bei einer Leerstelle eine Regel/Zahl. Vorsichtig formuliert, aber inhaltlich falsch = falsch.
+- unsicher: sagt ehrlich, dass es die Antwort nicht sicher weiß/gefunden hat, ohne Falsches zu behaupten.
+
+Frage: Was kostet eine Ware?
+Erwartet (Musterlösung): 10 Dollar
+Beleg aus dem Regelheft: Seite 11: Stueckpreis 10 Dollar
+Verweigern ist laut Golden Set die richtige Antwort (erwartet_verweigerung): nein
+
+Antwort des Systems:
+\"\"\"
+Zehn Dollar.
+\"\"\"
+
+Begründe dein Urteil kurz (höchstens fünf Sätze) und schreibe als letzte Zeile genau:
+URTEIL: <klasse>
+wobei <klasse> eines von richtig, teilweise, falsch, unsicher ist."""
+
+FRAGE_KERN = dict(FRAGE, kern="10 Dollar je Ware", zusatz=["gilt nur im Basisspiel", "Rabatt ab 5 Stück"])
+
+
+class TestKernZusatzPrompt(unittest.TestCase):
+    def test_ohne_kern_bleibt_der_prompt_exakt_der_alte(self):
+        self.assertEqual(judge.baue_prompt(FRAGE, "Zehn Dollar.", "frei"), ALTER_PROMPT_FREI)
+
+    def test_ohne_kern_auch_mit_leerem_kern_oder_stray_zusatz(self):
+        # zusatz ohne kern darf den Prompt nicht veraendern; kern="" zaehlt als nicht vorhanden
+        for f in (dict(FRAGE, zusatz=["x"]), dict(FRAGE, kern=""), dict(FRAGE, kern=None, zusatz=["x"])):
+            with self.subTest(f=f):
+                self.assertEqual(judge.baue_prompt(f, "Zehn Dollar.", "frei"), ALTER_PROMPT_FREI)
+
+    def test_ohne_kern_logprob_endet_wie_bisher(self):
+        p = judge.baue_prompt(FRAGE, "Zehn Dollar.", "logprob")
+        self.assertIn("Erwartet (Musterlösung): 10 Dollar", p)
+        self.assertNotIn("Kern (", p)
+        self.assertNotIn("Zusatz (", p)
+
+    def test_mit_kern_ersetzt_erwartet_zeile(self):
+        p = judge.baue_prompt(FRAGE_KERN, "Zehn Dollar.", "frei")
+        self.assertNotIn("Erwartet (Musterlösung)", p)
+        self.assertNotIn("Erwartet", p)
+        self.assertIn("Kern (muss in der Antwort stehen, sonst höchstens teilweise): 10 Dollar je Ware\n", p)
+        self.assertIn("Zusatz (darf fehlen, ohne Abzug; falsch wiedergegeben = falsch):\n"
+                      "- gilt nur im Basisspiel\n- Rabatt ab 5 Stück\n", p)
+
+    def test_zusatz_leer_oder_fehlend_ergibt_keiner(self):
+        for f in (dict(FRAGE, kern="k", zusatz=[]), dict(FRAGE, kern="k")):
+            with self.subTest(f=f):
+                p = judge.baue_prompt(f, "x", "frei")
+                self.assertIn("falsch wiedergegeben = falsch): (keiner)\n", p)
+
+    def test_klassendefinitionen_praezisiert(self):
+        p = judge.baue_prompt(FRAGE_KERN, "x", "frei")
+        self.assertIn("Fehlende Zusätze sind KEIN Grund für teilweise", p)
+        self.assertIn("ein falsch wiedergegebener Zusatz", p)
+        self.assertIn("Der Kern steht nur unvollständig", p)
+        # und die alten Definitionen sind dort NICHT mehr
+        self.assertNotIn("inhaltlich korrekt und vollständig genug", p)
+        self.assertNotIn("Fehlende Zusätze", judge.baue_prompt(FRAGE, "x", "frei"))
+
+    def test_kern_prompt_behaelt_rest_und_enden(self):
+        pl = judge.baue_prompt(FRAGE_KERN, "Antwort-Text", "logprob")
+        pf = judge.baue_prompt(FRAGE_KERN, "Antwort-Text", "frei")
+        for p in (pl, pf):
+            self.assertIn(FRAGE["frage"], p)
+            self.assertIn(FRAGE["beleg"], p)
+            self.assertIn("Antwort-Text", p)
+            self.assertIn("(erwartet_verweigerung): nein", p)
+        self.assertTrue(pl.endswith("antworte nur mit dem Buchstaben"))
+        self.assertIn("URTEIL: <klasse>", pf)
+
+
+class TestGoldenSuffix(unittest.TestCase):
+    def _golden_dir(self, d):
+        gd = os.path.join(d, "golden")
+        os.mkdir(gd)
+        with open(os.path.join(gd, "s1.korrigiert.json"), "w") as f:
+            json.dump({"fragen": [dict(FRAGE, erwartet="ALT")]}, f)
+        with open(os.path.join(gd, "s1.v2.json"), "w") as f:
+            json.dump({"fragen": [FRAGE_KERN]}, f)
+        return gd
+
+    def test_default_ist_korrigiert_und_suffix_waehlt_andere_datei(self):
+        with tempfile.TemporaryDirectory() as d:
+            gd = self._golden_dir(d)
+            self.assertEqual(judge.lade_golden(gd, ["s1"])["s1"][1]["erwartet"], "ALT")
+            self.assertEqual(judge.lade_golden(gd, ["s1"], ".v2.json")["s1"][1]["kern"],
+                             "10 Dollar je Ware")
+            with self.assertRaises(judge.JudgeAbbruch):
+                judge.lade_golden(gd, ["s1"], ".gibtsnicht.json")
+
+    def test_cli_golden_suffix_bringt_kern_in_den_gesendeten_prompt(self):
+        with tempfile.TemporaryDirectory() as d:
+            gd = self._golden_dir(d)
+            eich = os.path.join(d, "eich.jsonl")
+            with open(eich, "w") as f:
+                f.write(json.dumps({"spiel_id": "s1", "frage_id": 1, "antwort": "Zehn.",
+                                    "label": "richtig"}) + "\n")
+            for suffix, erwartet_kern in ((None, False), (".v2.json", True)):
+                http = FakeHTTP(ollama={"message": {"content": "URTEIL: richtig"}})
+                argv = ["eichen", "--eichmenge", eich, "--golden-dir", gd, "--modus", "frei",
+                        "--modell", "m", "--ausgabe", os.path.join(d, "aus.json")]
+                if suffix:
+                    argv += ["--golden-suffix", suffix]
+                with mock.patch.object(judge.requests, "post", http), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(judge.main(argv), 0)
+                prompt = http.aufrufe[0][1]["json"]["messages"][0]["content"]
+                with self.subTest(suffix=suffix):
+                    self.assertEqual("Kern (muss in der Antwort stehen" in prompt, erwartet_kern)
+                    self.assertEqual("Erwartet (Musterlösung): ALT" in prompt, not erwartet_kern)
+
+
+# Falsch/richtig nicht erkannt: von Hand ausgezaehlt.
+#   s1: falsch/erfunden->teilweise, falsch/erfunden->falsch, falsch/halb->richtig,
+#       falsch/halb->unsicher, richtig->richtig
+#   s2: falsch/halb->falsch, falsch/erfunden->unparsebar, richtig->richtig,
+#       richtig->teilweise, richtig->falsch, richtig->unsicher
+#   strittig (s2): falsch/erfunden->teilweise -- in keiner Hauptzahl
+#   falsch nicht erkannt: 4/6 (s1 3/4, s2 1/2; erfunden 2/3, halbwahrheit 2/3)
+#   durchgewunken (nur ->richtig): 1/6
+#   richtig nicht erkannt: 3/5 (s1 0/1, s2 3/4); abgelehnt (->falsch): 1/5
+NE = [
+    eintrag("s1", "falsch", "teilweise", "erfunden"),
+    eintrag("s1", "falsch", "falsch", "erfunden"),
+    eintrag("s1", "falsch", "richtig", "halbwahrheit"),
+    eintrag("s1", "falsch", "unsicher", "halbwahrheit"),
+    eintrag("s1", "richtig", "richtig"),
+    eintrag("s2", "falsch", "falsch", "halbwahrheit"),
+    eintrag("s2", "falsch", "unparsebar", "erfunden"),
+    eintrag("s2", "richtig", "richtig"),
+    eintrag("s2", "richtig", "teilweise"),
+    eintrag("s2", "richtig", "falsch"),
+    eintrag("s2", "richtig", "unsicher"),
+    eintrag("s2", "falsch", "teilweise", "erfunden", strittig=True),
+]
+
+
+class TestNichtErkannt(unittest.TestCase):
+    def setUp(self):
+        self.m = judge.berechne_metriken(NE)
+
+    @staticmethod
+    def z(q):
+        return (q["zaehler"], q["nenner"])
+
+    def test_falsch_nicht_erkannt_gesamt_art_spiel(self):
+        d = self.m["falsch_nicht_erkannt"]
+        self.assertEqual(self.z(d["gesamt"]), (4, 6))
+        self.assertEqual(self.z(d["je_fehlerart"]["erfunden"]), (2, 3))
+        self.assertEqual(self.z(d["je_fehlerart"]["halbwahrheit"]), (2, 3))
+        self.assertEqual(self.z(d["je_spiel"]["s1"]), (3, 4))
+        self.assertEqual(self.z(d["je_spiel"]["s2"]), (1, 2))
+        self.assertEqual(d["schlechtestes_spiel"]["spiel_id"], "s1")
+        self.assertAlmostEqual(d["schlechtestes_spiel"]["quote"], 0.75)
+
+    def test_unterscheidet_sich_von_durchgewunken(self):
+        # Der Sinn der Kennzahl: teilweise/unsicher/unparsebar mildern ab, ohne durchzuwinken.
+        self.assertEqual(self.z(self.m["durchgewunken"]["gesamt"]), (1, 6))
+        self.assertEqual(self.z(self.m["falsch_nicht_erkannt"]["gesamt"]), (4, 6))
+
+    def test_richtig_nicht_erkannt(self):
+        d = self.m["richtig_nicht_erkannt"]
+        self.assertEqual(self.z(d["gesamt"]), (3, 5))
+        self.assertEqual(self.z(d["je_spiel"]["s1"]), (0, 1))
+        self.assertEqual(self.z(d["je_spiel"]["s2"]), (3, 4))
+        self.assertEqual(d["schlechtestes_spiel"]["spiel_id"], "s2")
+        self.assertEqual(self.z(self.m["abgelehnt"]["gesamt"]), (1, 5))
+
+    def test_strittig_zaehlt_nicht_mit(self):
+        self.assertEqual(self.m["falsch_nicht_erkannt"]["gesamt"]["nenner"], 6)
+
+    def test_leerer_nenner_und_ausgabe(self):
+        m = judge.berechne_metriken([eintrag("s1", "unsicher", "unsicher")])
+        self.assertIsNone(m["falsch_nicht_erkannt"]["gesamt"]["quote"])
+        self.assertIsNone(m["richtig_nicht_erkannt"]["schlechtestes_spiel"])
+        text = judge.formatiere(self.m, "frei", "m")
+        self.assertIn("Falsch nicht erkannt (falsch, Urteil != falsch): 66.7% (4/6)", text)
+        self.assertIn("Richtig nicht erkannt (richtig, Urteil != richtig): 60.0% (3/5)", text)
+        self.assertIn("Durchgewunken (falsch als richtig): 16.7% (1/6)", text)
+
+
+# Tokens: Eingabe 1000/2000/6000, Ausgabe 10/20/90
+#   Summe 9000 / 120; typisch (Median) 2000 / 20; Maximum 6000 / 90
+#   Kosten je Aufruf (1 $/MTok ein, 5 $/MTok aus): 0.00105, 0.0021, 0.00645; Summe 0.0096
+def tok(spiel, i, o, label="richtig", urteil="richtig"):
+    return dict(eintrag(spiel, label, urteil), input_tokens=i, output_tokens=o)
+
+
+TOK = [tok("s1", 1000, 10), tok("s1", 2000, 20), tok("s2", 6000, 90, "falsch", "falsch")]
+
+
+class TestTokens(unittest.TestCase):
+    def test_summen_typisch_maximum(self):
+        t = judge.berechne_metriken(TOK)["tokens"]
+        self.assertEqual((t["input_summe"], t["output_summe"]), (9000, 120))
+        self.assertEqual((t["input_typisch"], t["output_typisch"]), (2000, 20))
+        self.assertEqual((t["input_max"], t["output_max"]), (6000, 90))
+        self.assertEqual((t["n"], t["aufrufe_gesamt"]), (3, 3))
+
+    def test_kosten_aus_konstanten(self):
+        self.assertEqual((judge.PREIS_INPUT_USD_MTOK, judge.PREIS_OUTPUT_USD_MTOK), (1.0, 5.0))
+        t = judge.berechne_metriken(TOK)["tokens"]
+        self.assertAlmostEqual(t["kosten_usd_summe"], 0.0096)
+        self.assertAlmostEqual(t["kosten_usd_typisch"], 0.0021)
+        self.assertAlmostEqual(t["kosten_usd_max"], 0.00645)
+        with mock.patch.object(judge, "PREIS_INPUT_USD_MTOK", 3.0), \
+             mock.patch.object(judge, "PREIS_OUTPUT_USD_MTOK", 15.0):
+            self.assertAlmostEqual(judge.berechne_metriken(TOK)["tokens"]["kosten_usd_summe"], 0.0288)
+
+    def test_strittige_aufrufe_kosten_trotzdem(self):
+        # Kosten fallen an, auch wenn der Eintrag aus den Hauptzahlen faellt
+        einzel = TOK + [dict(tok("s1", 4000, 40), strittig=True)]
+        t = judge.berechne_metriken(einzel)["tokens"]
+        self.assertEqual(t["input_summe"], 13000)
+
+    def test_ohne_usage_kein_tokenblock(self):
+        self.assertNotIn("tokens", judge.berechne_metriken(EICH))
+        self.assertNotIn("tokens", judge.berechne_metriken(LP))
+
+    def test_teilweise_fehlende_usage_wird_offen_ausgewiesen(self):
+        einzel = TOK + [eintrag("s1", "richtig", "richtig")]
+        t = judge.berechne_metriken(einzel)["tokens"]
+        self.assertEqual((t["n"], t["aufrufe_gesamt"]), (3, 4))
+        self.assertEqual(t["input_summe"], 9000)
+
+    def test_ausgabe_nennt_typisch_maximum_summe_und_preise(self):
+        text = judge.formatiere(judge.berechne_metriken(TOK), "anthropic", "m")
+        self.assertIn("Input 9000, Output 120", text)
+        self.assertIn("typisch (Median) 2000, Maximum 6000", text)
+        self.assertIn("typisch (Median) 20, Maximum 90", text)
+        self.assertIn("Stand 2026-09", text)
+        self.assertIn("Summe $0.0096", text)
+        self.assertNotIn("Tokens (", judge.formatiere(judge.berechne_metriken(EICH), "frei", "m"))
+
+    def test_anthropic_aufruf_liefert_usage(self):
+        with tempfile.TemporaryDirectory() as d:
+            kp = os.path.join(d, "api_key")
+            with open(kp, "w") as f:
+                f.write("sk-test\n")
+            http = FakeHTTP(anthropic={"content": [{"type": "text", "text": "URTEIL: falsch"}],
+                                       "usage": {"input_tokens": 812, "output_tokens": 37}})
+            with mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", kp), \
+                 mock.patch.object(judge.requests, "post", http):
+                r = judge.bewerte("anthropic", judge.ANTHROPIC_DEFAULT, FRAME_OK(), "x")
+        self.assertEqual((r["input_tokens"], r["output_tokens"]), (812, 37))
+
+    def test_ollama_modi_haben_keine_tokens(self):
+        http = FakeHTTP(ollama={"message": {"content": "URTEIL: richtig"}})
+        with mock.patch.object(judge.requests, "post", http):
+            r = judge.bewerte("frei", "m", FRAME_OK(), "x")
+        self.assertIsNone(r.get("input_tokens"))
+
+    def test_cli_anthropic_lauf_summiert_tokens_in_datei(self):
+        with tempfile.TemporaryDirectory() as d:
+            kp = os.path.join(d, "api_key")
+            with open(kp, "w") as f:
+                f.write("sk-test\n")
+            gd = os.path.join(d, "golden")
+            os.mkdir(gd)
+            with open(os.path.join(gd, "s1.korrigiert.json"), "w") as f:
+                json.dump({"fragen": [FRAGE]}, f)
+            eich = os.path.join(d, "eich.jsonl")
+            with open(eich, "w") as f:
+                for _ in range(3):
+                    f.write(json.dumps({"spiel_id": "s1", "frage_id": 1, "antwort": "x",
+                                        "label": "richtig"}) + "\n")
+            usages = iter([(1000, 10), (2000, 20), (6000, 90)])
+
+            def anthropic(kw):
+                i, o = next(usages)
+                return {"content": [{"type": "text", "text": "URTEIL: richtig"}],
+                        "usage": {"input_tokens": i, "output_tokens": o}}
+            aus = os.path.join(d, "aus.json")
+            out = io.StringIO()
+            with mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", kp), \
+                 mock.patch.object(judge.requests, "post", FakeHTTP(anthropic=anthropic)), \
+                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                rc = judge.main(["eichen", "--eichmenge", eich, "--golden-dir", gd,
+                                 "--modus", "anthropic", "--ausgabe", aus])
+            self.assertEqual(rc, 0)
+            with open(aus) as f:
+                daten = json.load(f)
+            self.assertEqual([(e["input_tokens"], e["output_tokens"]) for e in daten["einzelurteile"]],
+                             [(1000, 10), (2000, 20), (6000, 90)])
+            t = daten["metriken"]["tokens"]
+            self.assertEqual((t["input_summe"], t["output_summe"]), (9000, 120))
+            self.assertAlmostEqual(t["kosten_usd_summe"], 0.0096)
+            self.assertIn("Kosten", out.getvalue())
+
+
+class TestOverrides(unittest.TestCase):
+    BASIS = [
+        {"spiel_id": "s1", "frage_id": 1, "antwort": "a0", "label": "falsch", "fehlerart": "erfunden"},
+        {"spiel_id": "s1", "frage_id": 1, "antwort": "a1", "label": "falsch", "fehlerart": "halbwahrheit"},
+        {"spiel_id": "s1", "frage_id": 1, "antwort": "a2", "label": "richtig", "fehlerart": None},
+    ]
+
+    def test_ueberschreibt_genau_die_genannte_zeile_null_basiert(self):
+        neu = judge.wende_overrides(self.BASIS, [{"zeile": 1, "neu": "teilweise"}])
+        self.assertEqual([e["label"] for e in neu], ["falsch", "teilweise", "richtig"])
+        self.assertEqual(neu[1]["label_original"], "falsch")
+        self.assertTrue(neu[1]["override"])
+        for i in (0, 2):
+            self.assertNotIn("override", neu[i])
+            self.assertNotIn("label_original", neu[i])
+
+    def test_eingabe_bleibt_unveraendert(self):
+        vorher = json.dumps(self.BASIS)
+        judge.wende_overrides(self.BASIS, [{"zeile": 0, "neu": "richtig"}])
+        self.assertEqual(json.dumps(self.BASIS), vorher)
+
+    def test_fehlerart_entfaellt_wenn_neues_label_nicht_falsch(self):
+        neu = judge.wende_overrides(self.BASIS, [{"zeile": 0, "neu": "richtig"},
+                                                 {"zeile": 2, "neu": "falsch", "fehlerart": "erfunden"}])
+        self.assertIsNone(neu[0]["fehlerart"])
+        self.assertEqual(neu[2]["fehlerart"], "erfunden")
+
+    def test_ungueltige_overrides_brechen_ab(self):
+        for ov in ([{"zeile": 3, "neu": "falsch"}], [{"zeile": -1, "neu": "falsch"}],
+                   [{"zeile": 0, "neu": "falsch"}, {"zeile": 0, "neu": "richtig"}]):
+            with self.subTest(ov=ov), self.assertRaises(judge.JudgeAbbruch):
+                judge.wende_overrides(self.BASIS, ov)
+
+    def test_lade_overrides_prueft_label_und_zeile(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "ov.jsonl")
+            for inhalt in ('{"zeile": 0, "neu": "vielleicht"}\n', '{"zeile": "0", "neu": "falsch"}\n'):
+                with open(p, "w") as f:
+                    f.write(inhalt)
+                with self.subTest(inhalt=inhalt), self.assertRaises(judge.JudgeAbbruch):
+                    judge.lade_overrides(p)
+            with open(p, "w") as f:
+                f.write('{"zeile": 2, "neu": "teilweise"}\n\n')
+            self.assertEqual(judge.lade_overrides(p), [{"zeile": 2, "neu": "teilweise"}])
+
+    def _lauf(self, d, overrides, extra=()):
+        gd = os.path.join(d, "golden")
+        os.makedirs(gd, exist_ok=True)
+        with open(os.path.join(gd, "s1.korrigiert.json"), "w") as f:
+            json.dump({"fragen": [FRAGE]}, f)
+        eich = os.path.join(d, "eich.jsonl")
+        with open(eich, "w") as f:
+            for e in self.BASIS:
+                f.write(json.dumps(e) + "\n")
+        ov = os.path.join(d, "ov.jsonl")
+        with open(ov, "w") as f:
+            for o in overrides:
+                f.write(json.dumps(o) + "\n")
+        aus = os.path.join(d, "aus.json")
+        http = FakeHTTP(ollama={"message": {"content": "URTEIL: richtig"}})
+        out = io.StringIO()
+        with mock.patch.object(judge.requests, "post", http), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = judge.main(["eichen", "--eichmenge", eich, "--golden-dir", gd, "--modus", "frei",
+                             "--modell", "m", "--ausgabe", aus, "--eichmenge-overrides", ov, *extra])
+        with open(eich) as f:
+            eich_danach = f.read()
+        with open(aus) as f:
+            return rc, json.load(f), out.getvalue(), eich_danach, [json.dumps(e) + "\n" for e in self.BASIS]
+
+    def test_cli_override_wirkt_im_lauf_und_wird_vermerkt(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, daten, out, eich_danach, eich_vorher = self._lauf(d, [{"zeile": 1, "neu": "richtig"}])
+        self.assertEqual(rc, 0)
+        e = daten["einzelurteile"]
+        self.assertEqual([x["label"] for x in e], ["falsch", "richtig", "richtig"])
+        self.assertTrue(e[1]["override"])
+        self.assertEqual(e[1]["label_original"], "falsch")
+        self.assertNotIn("override", e[0])
+        self.assertEqual(daten["overrides"], [{"zeile": 1, "neu": "richtig"}])
+        # Fake-Judge sagt immer richtig: falsch-Labels = nur noch Zeile 0
+        self.assertEqual(daten["metriken"]["durchgewunken"]["gesamt"]["nenner"], 1)
+        self.assertIn("Overrides: 1 Label(s)", out)
+        self.assertEqual(eich_danach, "".join(eich_vorher))   # Eichmenge unangetastet
+
+    def test_cli_zeilennummer_gilt_fuer_die_datei_auch_mit_limit(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, daten, _, _, _ = self._lauf(d, [{"zeile": 0, "neu": "unsicher"}], extra=("--limit", "2"))
+        self.assertEqual(rc, 0)
+        self.assertEqual([x["label"] for x in daten["einzelurteile"]], ["unsicher", "falsch"])
+
+    def test_cli_override_hinter_dem_limit_ist_gueltig(self):
+        # Zeile 2 existiert in der Datei; --limit schneidet erst danach ab (kein Abbruch)
+        with tempfile.TemporaryDirectory() as d:
+            rc, daten, _, _, _ = self._lauf(d, [{"zeile": 2, "neu": "falsch"}], extra=("--limit", "2"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(daten["einzelurteile"]), 2)
+
+
+
 if __name__ == "__main__":
     unittest.main()
