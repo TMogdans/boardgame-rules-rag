@@ -67,8 +67,8 @@ KLASSEN_TEXT_KERN = """\
 Klassen:
 - richtig: Der Kern steht korrekt in der Antwort (Umformulierung, andere Sprache für Spielbegriffe, Zahlwort statt Ziffer ok) und kein Zusatz ist falsch wiedergegeben. Fehlende Zusätze sind kein Mangel. Ist laut Golden Set Verweigern richtig (erwartet_verweigerung: true), ist eine ehrliche Aussage „steht nicht im Heft“ richtig.
 - teilweise: Der Kern steht nur unvollständig in der Antwort (z. B. ohne eine für die Entscheidung wesentliche Ausnahme), ohne Falsches zu behaupten. Fehlende Zusätze sind KEIN Grund für teilweise.
-- falsch: enthält eine falsche Regelaussage (auch neben richtigen Teilen, auch ein falsch wiedergegebener Zusatz) oder erfindet bei einer Leerstelle eine Regel/Zahl. Vorsichtig formuliert, aber inhaltlich falsch = falsch.
-- unsicher: sagt ehrlich, dass es die Antwort nicht sicher weiß/gefunden hat, ohne Falsches zu behaupten."""
+- falsch: enthält eine falsche Regelaussage (auch neben richtigen Teilen, auch ein falsch wiedergegebener Zusatz) oder erfindet bei einer Leerstelle eine Regel/Zahl. Vorsichtig formuliert, aber inhaltlich falsch = falsch. Eine falsche Anzahl, Aufzählung mit behaupteter Vollständigkeit („es gibt drei …“, wenn es vier sind) oder eine falsche Einschränkung („sofort“, „nur“, „immer“), die dem Kern widerspricht, ist falsch, nicht teilweise.
+- unsicher: sagt ehrlich, dass es die Antwort nicht sicher weiß/gefunden hat, ohne Falsches zu behaupten. Das ist KEIN Fehler, auch wenn die Antwort im Regelheft steht: ob sie gefunden wurde, wird getrennt gemessen. Werte eine ehrlich unsichere Antwort ohne falsche Aussage immer als unsicher, nie als falsch."""
 
 _PROMPT_EINLEITUNG = """\
 Du bist Prüfer für ein Brettspiel-Regel-Assistenzsystem. Du bewertest eine Antwort des Systems gegen die Musterlösung aus dem Golden Set. Die Seitenangabe prüfst du nicht.
