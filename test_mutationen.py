@@ -314,6 +314,13 @@ MUTATIONEN = [
      "rag.py", '+ "\\n" for c in roh)', '+ "\\n" for c in sorted(roh, key=lambda c: c["seite"]))'),
     ("R5 Index zerteilt anders als der alte Weg",
      "rag.py", '        for stueck in zerteile(c["text"], size, overlap):', '        for stueck in zerteile(c["text"].strip(), size, overlap):'),
+    # Aus dem Review: beide Wege teilen die Rangfolge-Zeile. Solange der Test HEAD
+    # gegen HEAD verglich, blieb K2 gruen; jetzt Referenz ed36f99 (regression_referenz.json).
+    ("K2 Gleichstand in der gemeinsamen Rangfolge-Zeile umgedreht",
+     "rag.py", "    order = np.argsort(-sims)[:k]\n", "    order = np.lexsort((-np.arange(len(sims)), -sims))[:k]\n"),
+    ("K3 Gleichstand kippt nur im Index-Weg",
+     "rag.py", "    order = np.argsort(-sims)[:k]\n",
+     "    order = np.argsort(-sims)[:k] if spiel_id is None else np.lexsort((-np.arange(len(sims)), -sims))[:k]\n"),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]

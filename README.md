@@ -281,7 +281,9 @@ python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nu
 python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
-python test_regression.py    # alter Weg == neuer Weg (gleiche Top-k inkl. Gleichstaende), Migration
+python test_regression.py    # alter UND neuer Weg == eingefrorene Ausgabe von ed36f99 (regression_referenz.json)
+# Referenz neu erzeugen (braucht git, nur bei gewollter Aenderung der Testdaten):
+# python regression_referenz.py --erzeuge
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
 NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)

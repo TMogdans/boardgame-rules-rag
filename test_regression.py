@@ -1,25 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Regression alter Weg -> neuer Weg, modellfrei.
+Regression gegen den Stand VOR dem Umbau (ed36f99), modellfrei.
 
     python test_regression.py
 
-Alter Weg: SOURCE=knowledge mit einer knowledge.jsonl neben rag.py (build_index,
-In-Memory). Neuer Weg: `rag.py migriere` nach data/food-chain-magnate/, Index in
-SQLite, retrieve(spiel_id=...). Mit gleichen Chunks und gleichen (gefakten,
-deterministischen) Embeddings muessen beide dieselben Top-k liefern -- gleiche
-Chunks, gleiche Reihenfolge, gleiche Scores.
+Referenz ist regression_referenz.json: Top-k, Reranker-Folge und eval-Ausgabe,
+erzeugt mit dem rag.py von ed36f99 (`python regression_referenz.py --erzeuge`).
+Gegen sie laufen BEIDE heutigen Wege:
+  - alter Weg: SOURCE=knowledge, knowledge.jsonl neben rag.py (build_index, In-Memory)
+  - neuer Weg: `rag.py migriere` -> data/food-chain-magnate/, Index in SQLite,
+    retrieve(spiel_id=...)
+
+Die erste Fassung verglich HEAD gegen HEAD. Eine Aenderung an der gemeinsamen
+Rangfolge-Zeile (Mutation K2: Gleichstaende umdrehen) zog dann beide Seiten mit
+und alles blieb gruen, obwohl sich die Top-k gegenueber ed36f99 aenderten. Die
+Referenz haengt jetzt an keinem Code dieses Branches.
 
 Die Daten sind absichtlich voller Gleichstaende (Duplikat-Chunks, ganzzahlige
-Themenachsen): genau dort unterschied sich sqlite-vec (umgekehrte rowid-Folge),
-und genau dort faellt eine veraenderte Speicherreihenfolge auf.
+Themenachsen): genau dort unterschied sich sqlite-vec, genau dort faellt eine
+veraenderte Reihenfolge auf. Verglichen werden Position, Seite, Text-Hash exakt
+und der Score auf 1e-6 (BLAS-Rundung kann zwischen Maschinen um ein ulp abweichen).
 
 Was dieser Test NICHT zeigt: ob Ollama batch-unabhaengig einbettet. Das misst
 `python rag.py vergleiche <spiel_id>` auf der Zielmaschine mit echten Embeddings.
 """
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -34,58 +40,11 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
 import rag  # noqa: E402
+import regression_referenz as ref  # noqa: E402
+from regression_referenz import WISSEN, GOLDEN, FRAGEN, RASTER, achsen_embed, hash_embed  # noqa: E402
 
-with open(os.path.join(BASE, "golden_set.example.json"), encoding="utf-8") as _f:
-    GOLDEN = json.load(_f)
-
-# FCM-aehnliche Wissensbasis: Seiten wie im Golden Set, Duplikate, lange Texte
-# (werden zerteilt), flavor/meta-Typen und ein Eintrag ohne typ. Die Vision-Chunks
-# von Seite 6 stehen am ENDE, wie vision_ingest.py sie anhaengt -- die Datei ist
-# also nicht nach Seiten sortiert, und ein Umsortieren faellt auf.
-WISSEN = [
-    {"id": 1, "seite": 1, "typ": "meta", "route": "text-roh", "text": "Food Chain Magnate Regelheft Inhaltsverzeichnis"},
-    {"id": 2, "seite": 2, "typ": "flavor", "route": "text-roh",
-     "text": "Gleicher Mist, doppelter Preis! Werbung fuer die beste Kette der Stadt."},
-    {"id": 3, "seite": 5, "typ": "regel", "route": "table",
-     "text": "Bei 2 Spielern werden die Reklametafeln 12, 15 und 16 entfernt. Bei 4 Spielern ist der Spielplan 4x4 gross. " * 6},
-    {"id": 4, "seite": 10, "typ": "regel", "route": "text-roh", "text": "Die Reichweite zaehlt Strassenfelder. " * 12},
-    {"id": 5, "seite": 11, "typ": "regel", "route": "text-roh",
-     "text": "In Phase 4, der Essenszeit, wird Geld verdient. Eine Ware kostet 10 Dollar. Der CFO bringt 50 % Bonus. " * 5},
-    {"id": 6, "seite": 11, "route": "text-roh", "text": "Eine Waitress bringt 3 Dollar Geld."},       # ohne typ
-    {"id": 7, "seite": 14, "typ": "regel", "route": "table", "text": "Meilenstein First waitress played: 5 Dollar Geld."},
-    {"id": 8, "seite": 14, "typ": "regel", "route": "table", "text": "Meilenstein First waitress played: 5 Dollar Geld."},
-    {"id": 9, "seite": 15, "typ": "meta", "route": "text-roh", "text": "Impressum und Credits"},
-    {"id": 10, "seite": 6, "typ": "regel", "quelle": "vision:seite_6.png", "text": "Truck Driver: Reichweite 3"},
-    {"id": 11, "seite": 6, "typ": "regel", "quelle": "vision:seite_6.png", "text": "Campaign Manager: Kampagne maximale Dauer 3"},
-    {"id": 12, "seite": 6, "typ": "regel", "quelle": "vision:seite_6.png", "text": "Truck Driver: Reichweite 3"},  # Duplikat
-]
-
-ACHSEN = ("geld", "reichweite", "kampagne", "dauer", "phase", "spieler", "waitress", "reklametafel", "dollar")
-
-
-def achsen_embed(texte):
-    """Ganzzahlige Themenachsen -> sehr viele exakte Gleichstaende."""
-    out = []
-    for t in texte:
-        t = t.lower()
-        v = [float(t.count(a)) for a in ACHSEN]
-        out.append(v + [0.1 if any(v) else 1.0])
-    return np.array(out, dtype=np.float32)
-
-
-def hash_embed(texte):
-    """Pseudozufaellig, gleiche Texte -> gleiche Vektoren (Gleichstand nur bei Duplikaten)."""
-    return np.array([[b / 255.0 - 0.5 for b in hashlib.sha256(t.encode()).digest()[:16]] for t in texte],
-                    dtype=np.float32)
-
-
-def fake_rerank_predict(paare):
-    """Deterministischer 'Cross-Encoder': gemeinsame Woerter, dann Laenge."""
-    out = []
-    for frage, text in paare:
-        gemeinsam = len(set(frage.lower().split()) & set(text.lower().split()))
-        out.append(gemeinsam + 1.0 / (1 + len(text)))
-    return np.array(out)
+with open(ref.JSON_PFAD, encoding="utf-8") as _f:
+    SOLL = json.load(_f)
 
 
 class RegressionsTest(unittest.TestCase):
@@ -113,63 +72,95 @@ class RegressionsTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             rag.cmd_migriere(["--spiel", "Food Chain Magnate", "--aliase", "Food Chain,FCM"])
 
-    def alter_weg(self, drop_types):
-        with mock.patch.dict(os.environ, {"SOURCE": "knowledge", "DROP_TYPES": drop_types}):
-            return rag.build_index()
+    def stellschrauben(self, embed_name, size, overlap, drop, rerank=False):
+        return [mock.patch.object(rag, "embed", ref.EMBEDS[embed_name]),
+                mock.patch.multiple(rag, CHUNK_SIZE=size, CHUNK_OVERLAP=overlap, EMBED_MODEL=embed_name,
+                                    RERANK=rerank, CANDIDATES=6, get_reranker=lambda: ref._FakeReranker,
+                                    answer=ref.fake_answer),
+                mock.patch.dict(os.environ, {"SOURCE": "knowledge", "DROP_TYPES": drop})]
 
-    def neuer_weg(self, drop_types):
-        rag.aktualisiere_index(["food-chain-magnate"], ausgabe=lambda *_: None)
-        con = rag.oeffne_index()
-        self.addCleanup(con.close)
-        with mock.patch.dict(os.environ, {"DROP_TYPES": drop_types}):
+    def mit(self, *args, **kw):
+        st = contextlib.ExitStack()
+        for p in self.stellschrauben(*args, **kw):
+            st.enter_context(p)
+        return st
+
+    # Beide heutigen Wege in der Form, die regression_referenz.berechne erwartet.
+    # Jede Attrappe unter eigenem Modellnamen: der Fingerprint kennt nur den NAMEN.
+    def alter_weg(self, embed_name, size, overlap, drop, rerank):
+        with self.mit(embed_name, size, overlap, drop, rerank):
+            chunks, embs = rag.build_index()
+
+        def finde(frage, k):
+            with self.mit(embed_name, size, overlap, drop, rerank):
+                return rag.retrieve(frage, chunks, embs, k=k)
+        return chunks, finde
+
+    def neuer_weg(self, embed_name, size, overlap, drop, rerank):
+        with self.mit(embed_name, size, overlap, drop, rerank):
+            rag.aktualisiere_index(["food-chain-magnate"], ausgabe=lambda *_: None)
+            con = rag.oeffne_index()
+            self.addCleanup(con.close)
             chunks, embs = rag.lade_spiel(con, "food-chain-magnate", rag.drop_fuer_index())
-        return chunks, embs, con
 
-    @staticmethod
-    def signatur(hits):
-        return [(h["seite"], h["text"], s) for h, s in hits]
+        def finde(frage, k):
+            with self.mit(embed_name, size, overlap, drop, rerank):
+                return rag.retrieve(frage, chunks, embs, k=k, spiel_id="food-chain-magnate", index=con)
+        return chunks, finde
+
+    def eval_alt(self, embed_name, size, overlap, drop):
+        puffer = io.StringIO()
+        with self.mit(embed_name, size, overlap, drop), contextlib.redirect_stdout(puffer):
+            rag.cmd_eval()
+        return puffer.getvalue()
+
+    def eval_neu(self, embed_name, size, overlap, drop):
+        puffer = io.StringIO()
+        with self.mit(embed_name, size, overlap, drop), contextlib.redirect_stdout(puffer):
+            rag.cmd_eval_spiele(["food-chain-magnate"])
+        return puffer.getvalue()
+
+    def vergleiche_mit_soll(self, ist, soll, wo):
+        self.assertEqual(sorted(ist), sorted(soll), f"{wo}: andere Faelle als in der Referenz")
+        abweichend = []
+        for key in soll:
+            a, b = ist[key], soll[key]
+            gleich = len(a) == len(b) and all(x[:3] == y[:3] and abs(x[3] - y[3]) < 1e-6 for x, y in zip(a, b))
+            if not gleich:
+                abweichend.append(key)
+        self.assertEqual(abweichend[:5], [], f"{wo}: {len(abweichend)} von {len(soll)} Faellen weichen von "
+                                             f"{ref.REFERENZ_COMMIT} ab, z.B. {abweichend[:1]}: "
+                                             f"ist {ist[abweichend[0]] if abweichend else ''} "
+                                             f"soll {soll[abweichend[0]] if abweichend else ''}")
 
 
-FRAGEN = [f["frage"] for f in GOLDEN["fragen"]] + ["Geld", "Reichweite", "Waitress Dollar", "xyz"]
-RASTER = [(size, overlap, drop) for size, overlap in ((800, 150), (400, 150), (60, 10))
-          for drop in ("", "flavor", "flavor,meta")]
+class TestGegenEd36f99(RegressionsTest):
+    def test_alter_weg_gleich_ed36f99(self):
+        ist = ref.berechne(self.alter_weg, self.eval_alt)
+        self.vergleiche_mit_soll(ist["topk"], SOLL["topk"], "alter Weg, Top-k")
+        self.vergleiche_mit_soll(ist["rerank"], SOLL["rerank"], "alter Weg, Reranker")
+        self.assertEqual(ist["eval"], SOLL["eval"])
 
-
-class TestGleicheTopK(RegressionsTest):
-    def test_gleiche_top_k_ueber_alle_stellschrauben(self):
+    def test_neuer_weg_gleich_ed36f99(self):
         self.migriere()
-        verglichen = 0
-        # Jede Attrappe unter eigenem Modellnamen: der Fingerprint kennt nur den
-        # NAMEN. Zwei Funktionen unter einem Namen waeren fuer den Index dasselbe
-        # Modell (im Betrieb: `ollama pull` mit neuen Gewichten unter altem Tag).
-        for embed_name, embed in (("fake-achsen", achsen_embed), ("fake-hash", hash_embed)):
-            for size, overlap, drop in RASTER:
-                with mock.patch.object(rag, "embed", embed), \
-                     mock.patch.multiple(rag, CHUNK_SIZE=size, CHUNK_OVERLAP=overlap, EMBED_MODEL=embed_name):
-                    alt_c, alt_e = self.alter_weg(drop)
-                    neu_c, neu_e, con = self.neuer_weg(drop)
-                    np.testing.assert_array_equal(alt_e, neu_e)
-                    for k in (1, 4, 8, len(alt_c)):
-                        for frage in FRAGEN:
-                            with self.subTest(embed=embed_name, chunk=(size, overlap), drop=drop, k=k, frage=frage):
-                                alt = rag.retrieve(frage, alt_c, alt_e, k=k)
-                                neu = rag.retrieve(frage, neu_c, neu_e, k=k, spiel_id="food-chain-magnate", index=con)
-                                self.assertEqual(self.signatur(alt), self.signatur(neu))
-                                # und direkt aus dem Index geladen (Pipe-/ask-Weg)
-                                with mock.patch.dict(os.environ, {"DROP_TYPES": drop}):
-                                    direkt = rag.retrieve(frage, k=k, spiel_id="food-chain-magnate", index=con)
-                                self.assertEqual(self.signatur(alt), self.signatur(direkt))
-                                verglichen += 1
-        self.assertEqual(verglichen, 2 * len(RASTER) * 4 * len(FRAGEN))
+        ist = ref.berechne(self.neuer_weg, self.eval_neu)
+        self.vergleiche_mit_soll(ist["topk"], SOLL["topk"], "Index-Weg, Top-k")
+        self.vergleiche_mit_soll(ist["rerank"], SOLL["rerank"], "Index-Weg, Reranker")
+        self.assertEqual(ist["eval"], SOLL["eval"])
+
+    def test_referenz_ist_vollstaendig(self):
+        self.assertEqual(len(SOLL["topk"]), len(ref.EMBEDS) * len(RASTER) * len(ref.KS) * len(FRAGEN))
+        self.assertEqual(len(SOLL["rerank"]), len(FRAGEN))
+        self.assertTrue(all(any("getroffen :" in z for z in v) for v in SOLL["eval"].values()))
+        self.assertIn(ref.REFERENZ_COMMIT, SOLL["_erzeugt_mit"])
 
     def test_gleichstaende_sind_wirklich_da(self):
         # Gegenprobe zur Konstruktion: ohne Gleichstand an einer k-Grenze bewiese der
-        # Test oben nichts ueber die Reihenfolge bei Gleichstand. Gemessen je
+        # Vergleich nichts ueber die Reihenfolge bei Gleichstand. Gemessen je
         # Konfiguration 10 bis 35 Faelle (Frage, k) mit Gleichstand genau an der Grenze.
         for size, overlap, drop in RASTER:
-            with self.subTest(chunk=(size, overlap), drop=drop), mock.patch.object(rag, "embed", achsen_embed), \
-                 mock.patch.multiple(rag, CHUNK_SIZE=size, CHUNK_OVERLAP=overlap):
-                _, embs = self.alter_weg(drop)
+            with self.subTest(chunk=(size, overlap), drop=drop), self.mit("fake-achsen", size, overlap, drop):
+                _, embs = rag.build_index()
                 grenze = 0
                 for frage in FRAGEN:
                     sims = embs @ rag.l2norm(achsen_embed([frage]))[0]
@@ -177,44 +168,18 @@ class TestGleicheTopK(RegressionsTest):
                     grenze += sum(1 for k in (1, 4, 8) if k < len(o) and sims[o[k - 1]] == sims[o[k]])
                 self.assertGreaterEqual(grenze, 10)
 
-    def test_mit_reranker_ebenso(self):
+    def test_indexweg_direkt_geladen_wie_vorab_geladen(self):
+        # Pipe-/ask-Weg (retrieve laedt selbst) == eval-Weg (vorab geladen)
         self.migriere()
-
-        class FakeRR:
-            predict = staticmethod(fake_rerank_predict)
-        with mock.patch.object(rag, "embed", achsen_embed), mock.patch.object(rag, "get_reranker", lambda: FakeRR), \
-             mock.patch.multiple(rag, CHUNK_SIZE=400, CHUNK_OVERLAP=150, RERANK=True, CANDIDATES=6):
-            alt_c, alt_e = self.alter_weg("flavor,meta")
-            neu_c, neu_e, con = self.neuer_weg("flavor,meta")
-            for f in GOLDEN["fragen"]:
-                with self.subTest(frage=f["id"]):
-                    self.assertEqual(self.signatur(rag.retrieve(f["frage"], alt_c, alt_e, k=4)),
-                                     self.signatur(rag.retrieve(f["frage"], neu_c, neu_e, k=4,
-                                                                spiel_id="food-chain-magnate", index=con)))
-
-
-class TestEvalGleich(RegressionsTest):
-    def test_eval_alter_und_neuer_weg_gleich(self):
-        """`SOURCE=knowledge DROP_TYPES=flavor rag.py eval` gegen `rag.py eval food-chain-magnate`."""
-        self.migriere()
-
-        def answer(frage, hits):
-            return "Antwort: " + " | ".join(h["text"][:40] for h, _ in hits)
-
-        def ausgabe(lauf):
-            puffer = io.StringIO()
-            with mock.patch.object(rag, "embed", achsen_embed), mock.patch.object(rag, "answer", answer), \
-                 mock.patch.multiple(rag, CHUNK_SIZE=400, CHUNK_OVERLAP=150), \
-                 mock.patch.dict(os.environ, {"SOURCE": "knowledge", "DROP_TYPES": "flavor"}), \
-                 contextlib.redirect_stdout(puffer):
-                lauf()
-            # Kopfzeilen (Config/Index/Spiel) unterscheiden sich gewollt, der Rest nicht
-            return [z for z in puffer.getvalue().splitlines()
-                    if not z.startswith(("Config:", "Index:", "Spiel:", "===="))]
-        alt = ausgabe(lambda: rag.cmd_eval())
-        neu = ausgabe(lambda: rag.cmd_eval_spiele(["food-chain-magnate"]))
-        self.assertEqual([z for z in alt if z.strip()], [z for z in neu if z.strip()])
-        self.assertTrue(any("getroffen :" in z for z in alt))
+        with self.mit("fake-achsen", 400, 150, "flavor"):
+            rag.aktualisiere_index(["food-chain-magnate"], ausgabe=lambda *_: None)
+            con = rag.oeffne_index()
+            self.addCleanup(con.close)
+            chunks, embs = rag.lade_spiel(con, "food-chain-magnate", rag.drop_fuer_index())
+            for frage in FRAGEN:
+                a = rag.retrieve(frage, chunks, embs, k=4, spiel_id="food-chain-magnate", index=con)
+                b = rag.retrieve(frage, k=4, spiel_id="food-chain-magnate", index=con)
+                self.assertEqual([(h["chunk_id"], s) for h, s in a], [(h["chunk_id"], s) for h, s in b])
 
 
 class TestMigration(RegressionsTest):
@@ -236,8 +201,8 @@ class TestMigration(RegressionsTest):
         self.migriere()
         with open(os.path.join(self.basis, "knowledge.jsonl"), "rb") as f:
             self.assertEqual(f.read(), vorher)
-        with mock.patch.object(rag, "embed", hash_embed), mock.patch.multiple(rag, CHUNK_SIZE=400, CHUNK_OVERLAP=150):
-            chunks, _ = self.alter_weg("flavor")
+        with self.mit("fake-hash", 400, 150, "flavor"):
+            chunks, _ = rag.build_index()
         self.assertTrue(chunks)
 
     def test_zweimal_migrieren_ist_harmlos_abweichung_wird_nicht_ueberschrieben(self):
