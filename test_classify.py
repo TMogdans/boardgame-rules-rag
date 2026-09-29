@@ -13,6 +13,7 @@ den Katalog spaeter unbemerkt entschaerft.
 """
 import unittest
 
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import classify
 
 # (Modellantwort, korrekte Kategorie)

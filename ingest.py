@@ -15,19 +15,28 @@ Bloecke werden deshalb PRO SEITE gebildet und laufen nicht ueber Seitengrenzen.
 Laeuft in einer SEPARATEN venv (requirements-ingest.txt), nicht zusammen mit
 sentence-transformers -- sonst kollidieren die transformers-Versionen.
 
-    python ingest.py pdfs/mein-spiel.pdf
+    python ingest.py pdfs/mein-spiel.pdf --spiel "Mein Spiel" [--sprache en]
+                                             # -> data/mein-spiel/knowledge.jsonl
+    python ingest.py pdfs/mein-spiel.pdf     # alter Ein-Spiel-Weg (OUT, Default knowledge.jsonl),
+                                             # verweigert das Ueberschreiben einer vorhandenen Datei
 """
 import os, sys, json, requests
 from collections import defaultdict
 from docling.document_converter import DocumentConverter
 
+_BASE = os.path.dirname(os.path.abspath(__file__))
+if _BASE not in sys.path:
+    sys.path.insert(0, _BASE)
+import rag  # noqa: E402  (Spiel-Layout)
+
 OLLAMA = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 LLM    = os.environ.get("LLM_MODEL", "qwen3:14b")
 TARGET = int(os.environ.get("BLOCK_SIZE", 1200))
 OUT    = os.environ.get("OUT", "knowledge.jsonl")
+SPRACHE = "de"   # Sprache des Regelhefts; main() setzt sie aus spiel.json
 
 VERB_PROMPT = """Du bekommst einen Ausschnitt aus einem Brettspiel-Regelheft (teils als Markdown-Tabelle oder als zerrissener Textausschnitt).
-Formuliere ihn in vollstaendige, eigenstaendige deutsche Saetze um, sodass jede Information auch ohne die urspruengliche Struktur verstaendlich ist.
+Formuliere ihn in vollstaendige, eigenstaendige {satzsprache} Saetze um, sodass jede Information auch ohne die urspruengliche Struktur verstaendlich ist.
 
 REGELN:
 - Uebernimm ALLE Zahlen, Namen und Werte EXAKT aus der Vorlage. Erfinde nichts. Lass nichts weg.
@@ -37,10 +46,15 @@ REGELN:
 - Antworte NUR mit dem umformulierten Text, ohne Einleitung, ohne Kommentar."""
 
 
+def verb_prompt(sprache="de"):
+    """Sprache des Regelhefts, nicht der Antwort: Namen und Werte bleiben so woertlich."""
+    return VERB_PROMPT.replace("{satzsprache}", rag.SPRACHEN[sprache][0])
+
+
 def verbalize(text):
     r = requests.post(f"{OLLAMA}/api/chat", json={
         "model": LLM,
-        "messages": [{"role": "system", "content": VERB_PROMPT},
+        "messages": [{"role": "system", "content": verb_prompt(SPRACHE)},
                      {"role": "user", "content": text}],
         "think": False, "stream": False,
     }, timeout=600)
@@ -105,22 +119,51 @@ def eintrag(cid, seite, roh, text):
     return {"id": cid, "seite": seite, "roh": roh, "text": text}
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Nutzung: python ingest.py <pfad/zum/regelheft.pdf>")
+def ziel(argv):
+    """(pdf, Zieldatei, Zusatzfelder je Chunk, Sprache).
+
+    Mit --spiel: data/<spiel_id>/knowledge.jsonl -- andere Spiele bleiben unberuehrt.
+    Ohne: der alte Weg ueber OUT, aber nie ueber eine vorhandene Datei hinweg.
+    """
+    rest, opt = rag.spiel_argumente(argv)
+    ueberschreiben = "--ueberschreiben" in rest
+    rest = [a for a in rest if a != "--ueberschreiben"]
+    if not rest:
+        print("Nutzung: python ingest.py <pfad/zum/regelheft.pdf> [--spiel NAME] [--sprache de|en]")
         sys.exit(1)
-    pdf = sys.argv[1]
+    pdf = rest[0]
+    if opt is None:
+        if os.path.exists(OUT):
+            raise rag.KonfigFehler(
+                f"{OUT} existiert schon und wuerde ueberschrieben. Mit --spiel NAME einlesen "
+                "(eigenes Verzeichnis je Spiel) oder die Datei vorher selbst entfernen.")
+        return pdf, OUT, {}, "de"
+    ziel_pfad = rag.knowledge_pfad(opt.get("spiel_id") or rag.spiel_slug(opt["name"]))
+    if os.path.exists(ziel_pfad) and not ueberschreiben:
+        raise rag.KonfigFehler(f"{ziel_pfad} existiert schon -- mit --ueberschreiben bestaetigen.")
+    meta, pfad = rag.bereite_spiel_vor(opt, quelle_pdf=pdf)
+    return pdf, pfad, rag.spiel_felder(meta), meta["sprache"]
+
+
+def main():
+    global SPRACHE
+    pdf, out, felder, SPRACHE = ziel(sys.argv[1:])
     print(f"Docling parst {pdf} ...")
     doc = DocumentConverter().convert(pdf).document
     blocks = blocks_mit_seite(sammle_seiten(doc))
     print(f"{len(blocks)} Bloecke, verbalisiere mit {LLM} ...")
-    with open(OUT, "w") as f:
+    with open(rag.pruefe_schreibziel(out), "w", encoding="utf-8") as f:
         for i, (seite, b) in enumerate(blocks, 1):
             v = verbalize(b)
-            f.write(json.dumps(eintrag(i, seite, b, v), ensure_ascii=False) + "\n")
+            e = eintrag(i, seite, b, v)
+            e.update(felder)
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
             print(f"  Block {i}/{len(blocks)} (Seite {seite}): {len(b)} -> {len(v)} Zeichen")
-    print(f"{OUT} geschrieben.")
+    print(f"{out} geschrieben.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except rag.KonfigFehler as e:
+        sys.exit(f"ABBRUCH: {e}")

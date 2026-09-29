@@ -8,6 +8,9 @@ __pycache__/
 pdfs/*.pdf
 *_docling.md
 knowledge.jsonl
+# ein Verzeichnis pro Spiel (knowledge.jsonl, spiel.json, golden_set.json) und der
+# persistente Index data/index.sqlite -- alles aus Regelheften abgeleitet
+data/
 
 # dein angepasstes Golden Set (aus golden_set.example.json erstellt)
 golden_set.json

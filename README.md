@@ -99,7 +99,17 @@ python rag.py ask "Wie verdiene ich Geld?"
 # Testset durchlaufen
 cp golden_set.example.json golden_set.json   # dann an dein Spiel anpassen
 python rag.py eval
+
+# Mehrere Spiele: Golden Set je Spiel unter data/<spiel_id>/golden_set.json
+# (Format wie golden_set.example.json, Feld "spiel_id" = Verzeichnisname)
+DROP_TYPES=flavor,meta CHUNK_SIZE=400 python rag.py eval food-chain-magnate   # SOURCE entfaellt: Quelle ist der Index
+python rag.py eval --alle    # alle Spiele mit Golden Set, plus Gesamtblock; nennt die ohne
 ```
+
+`rag.py eval <spiel_id>` bringt den Index fuer dieses Spiel vorher auf Stand und wertet
+mit derselben Logik wie der Einzeldatei-Weg (Dreiteilung, Keyword-Wortgrenzen,
+Verweigerungsfragen). Mit `--alle` kommt ein Gesamtblock dazu; Spiele ohne Golden Set
+werden ausdruecklich genannt statt still ausgelassen.
 
 ### Stellschrauben (alles per env)
 
@@ -112,6 +122,8 @@ CANDIDATES=40 RERANK=1 python rag.py eval # Kandidatenfeld vor dem Reranking, De
 SOURCE=knowledge python rag.py eval       # knowledge.jsonl statt roher PDF-Extraktion
 DROP_TYPES=flavor,meta python rag.py eval # Ballast aus dem Index werfen (nur mit SOURCE=knowledge)
 THINK=1 python rag.py eval                # Reasoning des LLM anschalten
+HYBRID=1 python rag.py eval food-chain-magnate  # Vektor + BM25 (FTS5) per Reciprocal Rank Fusion, nur mit Index
+RRF_K=60                                  # Daempfung der Rangfusion, Default 60
 ```
 
 `FRAGMENT_THRESHOLD=50` (in `auto_ingest.py`) entscheidet, ab wie vielen Text-Fragmenten
@@ -153,6 +165,80 @@ Zwei Dinge, die dabei herauskommen und die vorherige Aussage "beste Kombination
 Und ein Hinweis auf die Grenze der Messlatte selbst: "erwartete Seite unter top_k" ist
 binaer und hat in allen vier Konfigurationen 7/8 gemeldet. Erst Precision@4 und MRR zeigen
 ueberhaupt einen Unterschied. Wer nur die Quote ansieht, sieht keine Stellschraube wirken.
+
+### Mehrere Spiele: persistenter Index
+
+Fuer die Spiele unter `data/` gibt es einen Index in einer SQLite-Datei
+(`data/index.sqlite`, per `INDEX_PATH` verlegbar). Vektoren liegen dort als float32-BLOB,
+Volltext (BM25) in einer FTS5-Tabelle. Eingebettet wird nur, was sich geaendert hat:
+Der Fingerprint je Spiel ist SHA-256 der `knowledge.jsonl` plus `EMBED_MODEL`,
+`CHUNK_SIZE`, `CHUNK_OVERLAP` und eine Schema-Version. Jede Konfiguration ist ein eigener
+Stand -- ein Lauf mit `CHUNK_SIZE=800` ersetzt nicht den 400er-Stand der Pipe.
+`DROP_TYPES` wirkt beim Laden und braucht kein neues Embedding.
+
+```bash
+CHUNK_SIZE=400 python rag.py index --alle            # alle Spiele unter data/, entfernt verschwundene
+CHUNK_SIZE=400 python rag.py index brass-birmingham  # nur dieses Spiel
+```
+
+**Umstieg von der Einzeldatei** (einmalig, die alte Datei bleibt liegen und der alte Weg
+funktioniert weiter):
+
+```bash
+python rag.py migriere --spiel "Food Chain Magnate" --aliase "Food Chain,FCM" --sprache de \
+    --pdf FCM_Rules_DE_v3.pdf            # knowledge.jsonl + golden_set.json -> data/food-chain-magnate/
+CHUNK_SIZE=400 python rag.py index food-chain-magnate
+SOURCE=knowledge DROP_TYPES=flavor,meta CHUNK_SIZE=400 python rag.py vergleiche food-chain-magnate
+```
+
+`migriere` uebernimmt jeden Eintrag unveraendert und in derselben Reihenfolge, ergaenzt nur
+`spiel`/`spiel_id` und ueberschreibt nie eine abweichende Datei im Spielverzeichnis.
+`vergleiche` rechnet fuer jede Frage des Golden Sets die Top-k ueber den alten In-Memory-Weg
+und ueber den Index -- mit echten Embeddings, ohne LLM -- und endet mit Exit-Code 1 bei
+jeder Abweichung. Das ist der Test, den `test_regression.py` modellfrei nicht leisten kann:
+ob Ollama batch-unabhaengig einbettet (der Index bettet in Stuecken von `EMBED_BATCH`,
+Default 64, und inklusive `flavor`/`meta` ein, der alte Weg alles in einem Aufruf).
+Eine leere oder nach `DROP_TYPES` leere Quelle, ein kaputter Symlink oder zu wenige
+Embeddings von Ollama brechen mit Klartext ab (Pfad samt aufgeloestem Symlink und Zaehlern).
+
+**Gleichstand:** Beide Wege ranken in `rag.rangfolge` stabil -- bei exakt gleichem Score
+kommt die niedrigere Chunk-Position zuerst, auch fuer Reranker-Kandidaten und die
+Hybrid-Vektorliste. ed36f99 sortierte mit `np.argsort` (quicksort, nicht stabil); dort
+hing die Reihenfolge gleichauf liegender Chunks und an der top_k-Grenze die Auswahl von
+der Plattform ab (Linux/x86_64 und macOS/arm64 lieferten in 487 von 1008 Testfaellen
+andere, gleich bewertete Chunks). "Zahlengleich zu ed36f99" heisst deshalb: gleich bis auf
+die Reihenfolge innerhalb exakter Gleichstaende, die dort nicht definiert war.
+
+**Suche pro Spiel:** `retrieve(frage, spiel_id=...)` laedt nur die Zeilen dieses Spiels
+und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine Treffer
+verdraengen. `python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"`
+(`--spiel` und die Spielangaben von `eval`/`index`/`vergleiche` nehmen spiel_id, Name,
+Alias oder Hoerfehler -- dieselbe Zuordnung wie die Pipe)
+bringt den Index vorher auf Stand. `HYBRID=1` fusioniert die Vektor-Rangfolge mit BM25
+(beide auf `CANDIDATES` begrenzt, mit `RERANK=1` danach Cross-Encoder); Default ist aus,
+damit der Standardweg unveraendert bleibt. Der Spielfilter steht im MATCH-Ausdruck (ein
+Token je Spiel und Stand), nicht als `rowid IN (...)` -- das wuchs gemessen mit
+(Treffer gesamt) x (Chunks des Spiels) in den Sekundenbereich. Die IDF-Gewichte von FTS5
+sind tabellenweit (alle Spiele und Staende) -- sie gewichten Woerter, waehlen aber keine
+fremden Chunks aus.
+
+Gemessen mit dem Indexcode bei 250 Spielen (ein Spiel mit 2000 Chunks, 1024 Dimensionen,
+Embedding gefakt): Indexbau ohne Embedding 1,9 s, Lauf ohne Aenderung 0,16 s; ein Spiel
+laden typisch 0,8 ms (181 Chunks) bzw. 9,1 ms (2000 Chunks, max 13,5); Vektorsuche in
+2000 Chunks typisch 0,33 ms (max 0,64), hybrid 7,1 ms (max 7,6); BM25 allein bei 47.691
+Zeilen typisch 3,4 ms (max 7,1). Platz: 4,6 KB je Zeile (4 KB Vektor + Text), bei 47k
+Zeilen also rund 220 MB plus FTS.
+
+**Warum kein sqlite-vec**, obwohl es auf der Zielmaschine laedt (Wheel 0.1.9 fuer
+Python 3.14/manylinux, `enable_load_extension` vorhanden): Gesucht wird immer innerhalb
+eines Spiels, also ueber hunderte bis wenige tausend Vektoren. Gemessen bei 47k x 1024
+Vektoren in 250 Spielen (k=4, 200 Fragen): pro Spiel numpy typisch 0,07 ms (max 0,12),
+sqlite-vec 0,29 ms (max 0,37). Entscheidend ist aber die Reihenfolge bei Gleichstand:
+Bei identischen Vektoren liefert `vec0` die umgekehrte rowid-Folge wie `np.argsort`
+(`[6,4,3,1]` statt `[1,3,4,6]`). An der top_k-Grenze aendert das, *welche* Chunks
+zurueckkommen, und der bisherige Weg waere fuer FCM nicht mehr zahlengleich. Dazu kaeme
+eine Abhaengigkeit mehr im Open-WebUI-Container. Das BLOB-Format ist das `vec_f32` von
+sqlite-vec; ein spaeterer Wechsel kostet eine Abfrage, kein Neu-Embedden.
 
 ### Was die Eval misst -- und was nicht
 
@@ -202,7 +288,23 @@ Die Auswertungslogik ist ohne Ollama, ohne Modelle und ohne PDF pruefbar:
 python test_wertung.py       # Dreiteilung, DROP_TYPES-Entkopplung, Keywords, Guards
 python test_classify.py      # Klassifikator-Auswertung, 17 Antwortvarianten
 python test_ingest_seite.py  # 'seite'-Feld in ingest.py und vision_ingest.py
+python test_spiele.py        # Mehr-Spiele-Layout: Ingestion schreibt nur ins eigene Spielverzeichnis
+python test_index.py         # persistenter Index: Fingerprint, Neu-Embedding nur bei Aenderung
+python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBRID
+python test_eval_spiele.py   # Eval pro Spiel und --alle
+python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
+python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
+python test_chat.py          # Spiel im Chat: nur explizite Wahl (Spiel: X)
+python test_pipe_alt.py      # alter Pipe-Weg wie ed36f99 (pipe_referenz.json, pipe_verlauf_referenz.json)
+python test_judge.py         # Bewertungsmodell (judge.py)
+python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
+python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
+                             # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
+# Referenz neu erzeugen (braucht git), oder eine plattformeigene gegenpruefen:
+# python regression_referenz.py --erzeuge [--ziel /tmp/ref.json] [--gleichstand-umgekehrt]
+# REGRESSION_REFERENZ=/tmp/ref.json python test_regression.py
 python test_mutationen.py    # Mutationsprobe: verfaelscht die Fixes und prueft, dass Tests rot werden
+NUR=F,S python test_mutationen.py  # nur die Mutationen mit diesen Praefixen
 python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die CLI (braucht pydantic + httpx)
 # test_mutationen.py faehrt auch die Pipe-Mutationen (P1-P26)
 ```
@@ -210,6 +312,31 @@ python test_openwebui_pipe.py  # Pipe: gleiche Chunks, gleicher Prompt wie die C
 ### Ingestion nach Inhaltstyp
 
 Es gibt keine eine beste Methode -- es haengt davon ab, was auf der Seite steht.
+
+**Mehrere Spiele:** Jedes Spiel bekommt ein eigenes Verzeichnis `data/<spiel_id>/`
+(gitignored) mit `knowledge.jsonl`, `spiel.json` (Name, Aliase, Sprache, Quell-PDF) und
+optional `golden_set.json`. Alle Ingestion-Skripte nehmen dafuer dieselben Optionen und
+schreiben nur in das Verzeichnis dieses einen Spiels; jeder Chunk traegt `spiel` und
+`spiel_id`. Die `spiel_id` ist ein Slug aus dem Namen ("Brass: Birmingham" ->
+`brass-birmingham`), `--sprache` (de/en) ist die Sprache des Hefts und steuert die
+Verbalisierung; der Vision-Prompt nennt das Spiel beim Namen.
+
+```bash
+python auto_ingest.py pdfs/brass.pdf --spiel "Brass: Birmingham" --sprache en --aliase "Brass"
+python vision_ingest.py seite_6.png --spiel-id brass-birmingham   # Spiel existiert schon
+python classify.py brass-birmingham
+```
+
+Ohne `--spiel` bleibt es beim alten Ein-Spiel-Weg (`knowledge.jsonl` neben den Skripten).
+`auto_ingest.py` und `ingest.py` verweigern dort aber das Ueberschreiben einer vorhandenen
+Datei -- frueher hat genau das ein Heft durch das naechste ersetzt. `vision_ingest.py`
+ersetzt nur noch die Chunks desselben Bildes (vorher fiel jede fruehere Grafikseite weg).
+Auch mit `--spiel` ersetzen `auto_ingest.py`/`ingest.py` eine vorhandene
+`data/<spiel_id>/knowledge.jsonl` nur mit `--ueberschreiben` (dort stecken ggf. Vision-Chunks
+und Typ-Tags). Die `spiel_id` transliteriert ("Café Łódź" -> `cafe-lodz`); ergeben zwei
+verschiedene Namen dieselbe id, bricht das Anlegen ab -- dann `--spiel-id` selbst waehlen.
+
+Beispiele unten zeigen den Ein-Spiel-Weg; mit `--spiel`/`--spiel-id` gilt dasselbe pro Spiel.
 
 **Alles automatisch** (Auto-Router -- der bequemste Weg): entscheidet pro Seite selbst,
 welcher der folgenden Wege genommen wird.
@@ -305,10 +432,101 @@ Die Stellschrauben (`CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `DROP_TYPES`, `LLM_M
 `EMBED_MODEL`, `THINK`, Pfade, `OLLAMA_URL` aus Sicht des Containers) stehen als *Valves*
 unter Admin → Funktionen. Die Defaults sind die oben gemessene Konfiguration:
 `CHUNK_SIZE=400`, `CHUNK_OVERLAP=150`, `TOP_K=4`, `DROP_TYPES=flavor,meta`. Der passende
-Vergleichslauf: `SOURCE=knowledge CHUNK_SIZE=400 DROP_TYPES=flavor,meta python rag.py eval`.
-`rag.py` liest `knowledge.jsonl` und `golden_set.json` neben sich selbst -- im Clone also
-dieselbe Datei verlinken, die der Container gemountet bekommt
-(`ln -s ~/rag-lab/knowledge.jsonl .`), sonst vergleicht der Lauf gegen eine andere Basis.
+Vergleichslauf gegen dieselbe Datei, die der Container gemountet bekommt -- per Pfad,
+**nicht per Symlink** neben `rag.py`:
+
+```bash
+KNOWLEDGE_JSONL=~/rag-lab/knowledge.jsonl GOLDEN_SET=~/rag-lab/golden_set.json \
+  SOURCE=knowledge CHUNK_SIZE=400 DROP_TYPES=flavor,meta python rag.py eval
+```
+
+> **Keine Symlinks auf Live-Daten neben den Code legen.** Frueher stand hier
+> `ln -s ~/rag-lab/knowledge.jsonl .`. Ein Testlauf (Mutationstreiber) hat darueber die
+> Live-Wissensbasis der Pipe ueberschrieben: 79 Eintraege `flavor`, 8 Minuten keine
+> Chunks. Seitdem schreibt kein Skript mehr durch einen Symlink (Abbruch mit Hinweis),
+> alle Tests biegen ihre Pfade ueber `testumgebung.py` in ein Temp-Verzeichnis, und
+> `test_mutationen.py` mutiert nur in einer Temp-Kopie. `test_schutz.py` prueft das.
+> Beide setzen ausserdem `HOME` und `XDG_CONFIG_HOME` auf ein Temp-Verzeichnis: kein
+> Test kann den echten Anthropic-Key (`~/.config/anthropic/api_key`) lesen, auch nicht
+> unter einer Mutation, die den Pfad schon beim Import festhaelt.
+
+**Viele Spiele (Index-Weg):** Valve `INDEX_PATH` setzen (z.B. `/rag/data/index.sqlite`)
+und statt der Einzeldatei das ganze `data/` read-only mounten:
+
+```ini
+Volume=/var/home/USER/rag-lab/data:/rag/data:ro,z
+```
+
+Den Index baut der Host (`rag.py index --alle`) mit **denselben** `CHUNK_SIZE`,
+`CHUNK_OVERLAP` und `EMBED_MODEL` wie in den Valves; die Pipe liest nur und bettet nur
+noch die Frage ein. Dann gilt:
+
+- `regelfrage.spiel` wird gegen Name, Aliase (aus `spiel.json`) und `spiel_id` **aller**
+  Spiele im Index zugeordnet; `SPIEL`/`SPIEL_ALIASE` gelten nicht mehr. Unbekannt ->
+  "kein Regelheft" wie bisher, ohne Suche und ohne LLM. Mehrdeutig (gemeinsamer Alias,
+  zwei unscharfe Treffer fast gleichauf) -> ebenfalls kein Treffer, mit Vorschlaegen.
+  Bei mehr als einem Spiel trifft unscharf nur, was ungefaehr gleich lang ist
+  (Laengenverhaeltnis >= 0,8): sonst wird ein kurzer Name zum Auffangbecken ("Fujian" traf
+  "Fuji" genau auf der Schwelle). Vorgeschlagen wird dann nur ab Ratio 0,6 und Laenge 0,7
+  (Fujian/Fuji: 0,67 -> kein Vorschlag; Foodsharing Magnet -> Food Chain Magnate bleibt).
+  Mit genau einem Spiel gilt das Verhalten von ed36f99 ("Food Chain Magnate Regeln" trifft).
+  Dieselbe Zuordnung (`rag.ordne_spiel`) gilt fuer `--spiel` auf der Kommandozeile.
+- Ohne `regelfrage.spiel` (Chat) wird das Spiel **nur explizit** gewaehlt
+  (`rag.spiel_im_chat`); Spielnamen im Freitext werden nie erkannt, auch nicht in der
+  ersten Nachricht ("Wie endet das Spiel?" ist keine Wahl des Spiels "Das Spiel"):
+  - `Spiel: X` (auch `Spiel:X`, `spiel: x`) oder `Wechsel zu X` -- optional `:<Frage>`
+    dahinter (`Spiel: Azul: Wer beginnt?`, `Spiel: Azul:wer beginnt?`). `Spiel X` ohne
+    Doppelpunkt ist keine Wahl ("Spiel solo", "Spiel nochmal"). X ist ein Name oder Alias,
+    exakt bis auf Gross/Klein, ae/ä, ss/ß, Satzzeichen. Ohne Frage: "Ok, ab jetzt X.".
+    "bitte"/"danke" hinter dem Namen stoeren nicht, auch vor dem Doppelpunkt
+    (`Spiel: FCM bitte: Wer beginnt?`).
+  - Gibt es X nicht ("Spiel: Azull"), antwortet die Pipe "Kein Regelheft zu „X“ im
+    Index." mit Vorschlaegen und dem Hinweis auf `Spiel: …` -- nie still im alten Spiel;
+    das bisherige Spiel bleibt gewaehlt, die Frage bleibt unbeantwortet.
+  - Die Nachricht direkt nach unserer Rueckfrage ("Zu welchem Spiel ist die Frage?" oder
+    "Kein Regelheft zu „…") ist ein Wahl-Versuch:
+    (a) dort gelten zusaetzlich `X`, `fuer X`, `bei X`, `Spiel X`, `Das Spiel heisst X`,
+    jeweils ggf. mit "bitte"/"danke", X exakt; (b) ein ungenauer Name mit Vorschlag
+    ("Fod Chain", "Azull", "Wechsle zu Azul", "Food Chain") ergibt "Kein Regelheft zu „…“
+    im Index. Meintest du X? …" -- gewaehlt wird dabei nie, die Frage bleibt gemerkt;
+    (c) ohne Vorschlag ist die Nachricht eine neue Frage (auch eine Frage mit "?" oder
+    mehr als 3 Woertern neben einem Namen: "Wer beginnt bei Azul?").
+    (d) Beantwortet wird immer die letzte Nutzer-Nachricht vor der ersten Rueckfrage der
+    Kette, ueber beliebig viele Runden -- nie eine Antwort auf eine Rueckfrage
+    ("Wann verdient man Geld?" -> Rueckfrage -> "Fod Chain" -> Vorschlag -> "FCM":
+    gesucht wird mit "Wann verdient man Geld?"). Nach (c) beginnt eine neue Kette; eine
+    Wahl mit eigener Frage (`Spiel: X: <Frage>`) beantwortet ihre Frage.
+    Als Rueckfrage zaehlt nur eine Assistant-Nachricht, die mit einem der beiden Texte
+    beginnt.
+  - Die Wahl gilt fuer den ganzen Chat bis zur naechsten, ohne Fenster. Ein Name in einer
+    Frage ("Und bei Azul?") oder eine Namensnachricht ohne Rueckfrage wechselt nicht --
+    die Fusszeile zeigt, welches Heft geantwortet hat.
+  - Ohne Wahl: Valve `STANDARD_SPIEL`, sonst das einzige Spiel im Index, sonst die
+    Rueckfrage "Zu welchem Spiel ist die Frage? Schreib zum Beispiel „Spiel: …“".
+  - Laufzeit: gemessen bei 250 Spielen x 500 Nutzer-Nachrichten typisch 0,1 ms
+    (max 0,1), wenn jede Nachricht eine Wahl mit Frage ist typisch 3,5 ms (max 3,6),
+    wenn jede Nachricht eine Antwort auf eine Rueckfrage ist (Vorschlagssuche) typisch
+    133 ms (max 137).
+- Die Fusszeile nennt auf dem Index-Weg das Spiel:
+  `Quelle: Food Chain Magnate, Seite 11 -- Abgerufen: S. 11 (0.912)`. Nicht im Sprachmodus;
+  der alte Weg (ohne `INDEX_PATH`) behaelt seine Fusszeile und ist fuer `regelfrage.spiel`
+  gleich zu ed36f99 bis auf die Reihenfolge innerhalb exakter Gleichstaende
+  (`test_pipe_alt.py`: 806 Werte von `regelfrage.spiel` und 600 Verlaeufe mit Fusszeilen,
+  Fehlerzeilen, Listen, System-Nachrichten, task, sprache -- Soll aus ed36f99 mit stabiler
+  Sortierung, `pipe_referenz.py --erzeuge`). Bricht die Antwort mitten im Stream ab, nennt
+  die Fusszeile trotzdem das Spiel: `Quelle: Azul -- Antwort unvollstaendig: <Fehler>`;
+  faellt schon die Suche aus (Embedding-Server), steht unter der Fehlermeldung
+  `Quelle: Azul -- keine Antwort`.
+- Passt das `rag.py` im Mount nicht zur Pipe (zu alte `SCHNITTSTELLE`, fehlende Funktion)
+  oder fehlt `RAG_DIR`, erscheint eine klare Meldung statt eines AttributeError; der alte
+  Weg sagt "kein Regelheft" auch ohne `rag.py`. Liegt neben dem read-only Index ein
+  unvollstaendiges `-journal` (abgebrochener `rag.py index`), nennt die Meldung den
+  Handlungsschritt (`python rag.py index --alle` auf dem Host) statt
+  "attempt to write a readonly database".
+- Passen die Valves nicht zu einem Stand im Index oder hat sich eine `knowledge.jsonl`
+  seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
+  passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.
+- `HYBRID` gibt es als Valve (Default aus), nie aus der Container-Umgebung.
 
 `knowledge.jsonl` ist als einzelne Datei gemountet. Ein Bind-Mount haengt an der Inode:
 wird die Datei auf dem Host per Rename ersetzt (`mv`, rsync ohne `--inplace`), sieht der

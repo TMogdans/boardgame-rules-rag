@@ -12,6 +12,7 @@ import contextlib, io, json, math, os, sys, tempfile, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import judge
 
 
@@ -352,6 +353,34 @@ class TestAnthropic(unittest.TestCase):
         self.assertEqual(kw["headers"]["x-api-key"], geheim)   # gesendet ...
         self.assertEqual(kw["json"]["model"], "claude-haiku-4-5-20251001")
         self.assertNotIn(geheim, json.dumps(r))                # ... aber nicht im Ergebnis
+
+    def test_key_nicht_in_fehlermeldungen(self):
+        # Kritiker J2/J3: Netz- und HTTP-Fehler duerfen die Header (x-api-key) nicht zeigen
+        geheim = "sk-ant-GEHEIMER-TESTWERT"
+        with open(self.key_pfad, "w") as f:
+            f.write(geheim)
+
+        def netzfehler(url, **kw):
+            raise judge.requests.ConnectionError(f"weg {kw}")
+
+        for post in (netzfehler, lambda url, **kw: FakeAntwort({"error": "invalid x-api-key"}, status=401)):
+            with self.subTest(post=post), mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", self.key_pfad), \
+                    mock.patch.object(judge.requests, "post", post):
+                with self.assertRaises(judge.JudgeAbbruch) as cm:
+                    judge.bewerte("anthropic", judge.ANTHROPIC_DEFAULT, FRAME_OK(), "x")
+                self.assertNotIn(geheim, str(cm.exception))
+                self.assertIn(judge.ANTHROPIC_URL, str(cm.exception))
+
+    def test_key_nur_aus_der_datei(self):
+        # Kritiker J4: ein ANTHROPIC_API_KEY in der Umgebung wird nie gelesen -- weder statt
+        # der fehlenden noch statt der vorhandenen Key-Datei
+        with mock.patch.dict(os.environ, ANTHROPIC_API_KEY="sk-ant-AUS-DER-UMGEBUNG"), \
+                mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", self.key_pfad):
+            with self.assertRaises(judge.ModusNichtVerfuegbar):
+                judge.lies_anthropic_key()
+            with open(self.key_pfad, "w") as f:
+                f.write("sk-ant-AUS-DER-DATEI")
+            self.assertEqual(judge.lies_anthropic_key(), "sk-ant-AUS-DER-DATEI")
 
 
 class TestEichlaufEndeZuEnde(unittest.TestCase):

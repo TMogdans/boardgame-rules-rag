@@ -27,6 +27,7 @@ if BASE not in sys.path:
     sys.path.insert(0, BASE)
 
 # docling gehoert in die separate Ingest-venv und ist hier meist nicht da.
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 try:  # pragma: no cover
     import docling.document_converter  # noqa: F401
 except ImportError:
