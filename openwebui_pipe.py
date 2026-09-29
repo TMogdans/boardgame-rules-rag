@@ -176,6 +176,7 @@ class Pipe:
         TOP_K: int = Field(4, ge=1)
         DROP_TYPES: str = Field("flavor,meta", description="Chunk-Typen, die nicht in den Index gehen (regel, flavor, meta)")
         THINK: bool = False
+        PROMPT_VERSION: str = Field("v1", description="Systemprompt: v1 (Bestand) oder v2 (Regel 6 ersetzt, Regel 9 neu); wie PROMPT_VERSION bei rag.py")
         # Welches Spiel knowledge.jsonl beschreibt -- fuer Anfragen mit "regelfrage.spiel"
         # (Home Assistant). Solange es eine Wissensbasis gibt, ist das ein Eintrag.
         SPIEL: str = "Food Chain Magnate"
@@ -229,6 +230,12 @@ class Pipe:
         rag.CHUNK_OVERLAP = v.CHUNK_OVERLAP
         rag.RERANK = False  # braucht torch, das im Open-WebUI-Image fehlt
         rag.HYBRID = v.HYBRID  # nie aus der Container-Umgebung
+        # Prompt-Version: das Valve gilt immer, auch ueber eine PROMPT_VERSION in der Container-
+        # Umgebung. Ein rag.py ohne SYSTEM_PROMPTS wuerde v2 still ignorieren -> laut abbrechen.
+        if v.PROMPT_VERSION != "v1" and not hasattr(rag, "SYSTEM_PROMPTS"):
+            raise RuntimeError(f"rag.py unter {pfad} kennt keine Prompt-Versionen, Valve PROMPT_VERSION="
+                               f"{v.PROMPT_VERSION!r} waere wirkungslos. Clone aktualisieren.")
+        rag.PROMPT_VERSION = v.PROMPT_VERSION
         return rag
 
     def _lade_index(self, rag, v):

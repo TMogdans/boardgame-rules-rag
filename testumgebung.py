@@ -47,7 +47,7 @@ os.environ["XDG_CONFIG_HOME"] = os.path.join(HOME, ".config")
 DATA = os.path.join(TMP, "data")
 os.environ["DATA_DIR"] = DATA
 os.environ["INDEX_PATH"] = os.path.join(DATA, "index.sqlite")
-for _k in ("KNOWLEDGE_JSONL", "GOLDEN_SET"):
+for _k in ("KNOWLEDGE_JSONL", "GOLDEN_SET", "PROMPT_VERSION"):
     os.environ.pop(_k, None)
 
 # docling und pymupdf gehoeren in die Ingest-venv; ohne sie Attrappen, damit auch

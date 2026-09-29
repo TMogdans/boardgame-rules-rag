@@ -44,7 +44,7 @@ def laufkopie():
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
          "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py",
-         "test_pipe_alt.py", "test_judge.py")
+         "test_pipe_alt.py", "test_judge.py", "test_prompt.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -604,6 +604,38 @@ MUTATIONEN = [
     ("MG3 Migration: fremdes Golden Set akzeptiert (Kritiker)", "rag.py",
      '        if gs.get("spiel_id") not in (None, spiel_id):\n            raise', '        if False:\n            raise',
      ("test_regression.py",)),
+
+    # Prompt-Version v1/v2 (test_prompt.py)
+    ("PV1 v2 wird Default", "rag.py",
+     'os.environ.get("PROMPT_VERSION", "v1")', 'os.environ.get("PROMPT_VERSION", "v2")', ("test_prompt.py", "test_pipe_alt.py")),
+    ("PV2 v1-Text veraendert (Regel 7)", "rag.py",
+     "7. Kein externes Wissen einbauen.", "7. Kein externes Wissen verwenden.", ("test_prompt.py", "test_pipe_alt.py")),
+    ("PV3 Valve PROMPT_VERSION wirkungslos", "openwebui_pipe.py",
+     "        rag.PROMPT_VERSION = v.PROMPT_VERSION\n", "        pass\n", ("test_prompt.py",)),
+    ("PV4 Umgebung schlaegt Valve", "openwebui_pipe.py",
+     "        rag.PROMPT_VERSION = v.PROMPT_VERSION\n",
+     '        rag.PROMPT_VERSION = os.environ.get("PROMPT_VERSION") or v.PROMPT_VERSION\n', ("test_prompt.py",)),
+    ("PV5 Signalwort erkennt die v2-Saetze nicht", "rag.py",
+     "    if kategorie == KAT_VERWEIGERUNG:\n        treffer +=", "    if False:\n        treffer +=", ("test_prompt.py",)),
+    ("PV6 judge: Regel fuer die Verweigerungs-Saetze fehlt (kern-Prompt)", "judge.py",
+     "\n- Die Sätze „Dazu enthaelt das Dokument keine Angaben“, „In den gefundenen Stellen steht das nicht eindeutig“ "
+     "und „In den gefundenen Stellen steht dazu nichts“ (auch mit Umlauten, mit Seitenhinweis) sind KEINE falsche "
+     "Aussage: Steht die Antwort im Heft, ist eine solche Antwort unsicher; ist Verweigern richtig "
+     "(erwartet_verweigerung), ist sie richtig. Nur wenn daneben eine falsche Regel behauptet wird, ist sie falsch.",
+     "", ("test_prompt.py",)),
+    ("PV7 Konfig-Zeile nennt prompt= auch bei v1 (Referenzen aendern sich)", "rag.py",
+     "if PROMPT_VERSION != 'v1' else ''", "if True else ''", ("test_prompt.py",)),
+    ("PV8 unbekannte Version faellt still auf v1", "rag.py",
+     "    if version not in SYSTEM_PROMPTS:\n        raise KonfigFehler(",
+     '    if version not in SYSTEM_PROMPTS:\n        return SYSTEM_PROMPTS["v1"]\n        raise KonfigFehler(', ("test_prompt.py",)),
+    ("PV9 v2-Saetze zaehlen auch bei Normalfragen als Treffer", "rag.py",
+     "    if kategorie == KAT_VERWEIGERUNG:\n        treffer +=", "    if True:\n        treffer +=", ("test_prompt.py",)),
+    ("PV10 v2 ohne Regel 9", "rag.py",
+     "    return v1.replace(regel6, neu6) + neu9", "    return v1.replace(regel6, neu6)", ("test_prompt.py",)),
+    ("PV11 baue_nachrichten ignoriert die Version", "rag.py",
+     '{"role": "system", "content": system_prompt()},', '{"role": "system", "content": SYSTEM_PROMPT},', ("test_prompt.py",)),
+    ("PV12 v2 mit alter Regel 6", "rag.py",
+     "    return v1.replace(regel6, neu6) + neu9", "    return v1 + neu9", ("test_prompt.py",)),
 ]
 
 

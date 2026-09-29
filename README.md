@@ -124,7 +124,18 @@ DROP_TYPES=flavor,meta python rag.py eval # Ballast aus dem Index werfen (nur mi
 THINK=1 python rag.py eval                # Reasoning des LLM anschalten
 HYBRID=1 python rag.py eval food-chain-magnate  # Vektor + BM25 (FTS5) per Reciprocal Rank Fusion, nur mit Index
 RRF_K=60                                  # Daempfung der Rangfusion, Default 60
+PROMPT_VERSION=v2 python rag.py eval food-chain-magnate  # Systemprompt v2 statt v1 (Default v1)
 ```
+
+**Prompt-Version.** `PROMPT_VERSION` waehlt den Systemprompt aus `rag.SYSTEM_PROMPTS`. `v1` ist der
+bisherige Text (Default; ohne die Variable aendert sich nichts). `v2` ist v1 mit ersetzter Regel 6
+(steht die Antwort nicht eindeutig in den Quellen: "In den gefundenen Stellen steht das nicht
+eindeutig." plus die naechstliegenden Seiten; beruehren die Quellen das Thema gar nicht: "In den
+gefundenen Stellen steht dazu nichts.") und neuer Regel 9 (Ausnahme oder Widerspruch: beide Stellen
+mit Seite nennen). Eine unbekannte Version bricht mit `ABBRUCH (Konfiguration)` ab. Die Konfig-Zeile
+der Eval nennt `prompt=v2` nur, wenn die Version nicht v1 ist -- die Ausgabe mit v1 bleibt
+unveraendert. Bei Verweigerungsfragen zaehlen die beiden v2-Saetze als Signalwort (weiter ein Indiz,
+kein Urteil); `judge.py` wertet sie im kern-Prompt nicht als falsche Aussage.
 
 `FRAGMENT_THRESHOLD=50` (in `auto_ingest.py`) entscheidet, ab wie vielen Text-Fragmenten
 eine Seite als Grafik gilt und zur Vision-Route geht.
@@ -297,6 +308,7 @@ python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
 python test_chat.py          # Spiel im Chat: nur explizite Wahl (Spiel: X)
 python test_pipe_alt.py      # alter Pipe-Weg wie ed36f99 (pipe_referenz.json, pipe_verlauf_referenz.json)
 python test_judge.py         # Bewertungsmodell (judge.py)
+python test_prompt.py        # Prompt-Version v1/v2: v1 byte-gleich, Default v1, Valve/Umgebung, Signalwort, judge-Regel
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
@@ -527,6 +539,8 @@ noch die Frage ein. Dann gilt:
   seit dem letzten `rag.py index` geaendert, erscheint das als Fehlertext mit dem
   passenden `rag.py index`-Befehl -- keine stille Antwort aus altem Material.
 - `HYBRID` gibt es als Valve (Default aus), nie aus der Container-Umgebung.
+- `PROMPT_VERSION` gibt es als Valve (Default `v1`); es gilt auf dem alten wie auf dem Index-Weg und
+  schlaegt eine `PROMPT_VERSION` aus der Container-Umgebung. Der Sprachmodus aendert daran nichts.
 
 `knowledge.jsonl` ist als einzelne Datei gemountet. Ein Bind-Mount haengt an der Inode:
 wird die Datei auf dem Host per Rename ersetzt (`mv`, rsync ohne `--inplace`), sieht der

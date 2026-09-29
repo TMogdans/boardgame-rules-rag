@@ -48,6 +48,7 @@ HYBRID        = os.environ.get("HYBRID", "0") == "1"      # Vektor + BM25 (FTS5)
 RRF_K         = int(os.environ.get("RRF_K", 60))          # Daempfung der Rangfusion (Cormack et al.: 60)
 RERANK_MODEL  = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 CANDIDATES    = int(os.environ.get("CANDIDATES", 20))     # so viele grob abrufen, bevor der Reranker auf TOP_K eindampft
+PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "v1")   # Systemprompt: v1 (Bestand) oder v2 (siehe SYSTEM_PROMPTS)
 PDF_DIR       = os.path.join(os.path.dirname(__file__), "pdfs")
 DATA_DIR      = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
@@ -69,6 +70,39 @@ Regeln:
 6. Ist eine Frage nicht durch die Quellen gedeckt, sage ausdruecklich "Dazu enthaelt das Dokument keine Angaben." und rate NICHT.
 7. Kein externes Wissen einbauen.
 8. Lieber knapp und korrekt als ausfuehrlich und unsicher."""
+
+SYSTEM_PROMPTS = {"v1": SYSTEM_PROMPT}
+
+
+def _baue_v2(v1):
+    """v2 = v1 mit ersetzter Regel 6 und angehaengter Regel 9. Bricht laut ab, wenn v1
+    sich so geaendert hat, dass die Ableitung nichts mehr trifft."""
+    regel6 = '6. Ist eine Frage nicht durch die Quellen gedeckt, sage ausdruecklich "Dazu enthaelt das Dokument keine Angaben." und rate NICHT.\n'
+    letzte = "8. Lieber knapp und korrekt als ausfuehrlich und unsicher."
+    if v1.count(regel6) != 1 or not v1.endswith(letzte):
+        raise RuntimeError("SYSTEM_PROMPTS['v1'] passt nicht mehr zur Ableitung von v2 -- _baue_v2 nachziehen.")
+    neu6 = ('6. Steht die Antwort nicht eindeutig in den Quellen, rate NICHT. Sage dann: '
+            '"In den gefundenen Stellen steht das nicht eindeutig." und nenne die Seiten der Quellen, '
+            'die dem Thema am naechsten kommen ("Schau auf Seite X nach."). Beruehren die Quellen das '
+            'Thema gar nicht, sage: "In den gefundenen Stellen steht dazu nichts."\n')
+    neu9 = ("\n9. Nennen die Quellen eine Ausnahme oder widersprechen sie sich, gib beide Stellen mit Seite an, "
+            "statt dich fuer eine zu entscheiden.")
+    return v1.replace(regel6, neu6) + neu9
+
+
+# v2: Regel 6 ersetzt (auch "nicht eindeutig" -> Seiten nennen, nicht nur verweigern), Regel 9 neu
+# (Ausnahme/Widerspruch: beide Stellen nennen). Regeln 1-5, 7, 8 woertlich v1. Default bleibt v1:
+# ohne PROMPT_VERSION aendert sich der LLM-Payload nicht.
+SYSTEM_PROMPTS["v2"] = _baue_v2(SYSTEM_PROMPT)
+
+
+def system_prompt(version=None):
+    """Systemprompt der Version (Default: PROMPT_VERSION). Unbekannte Version bricht laut ab,
+    statt still auf v1 zu fallen -- sonst misst ein Lauf mit Tippfehler v1 unter v2-Etikett."""
+    version = PROMPT_VERSION if version is None else version
+    if version not in SYSTEM_PROMPTS:
+        raise KonfigFehler(f"PROMPT_VERSION {version!r} unbekannt; bekannt: {', '.join(sorted(SYSTEM_PROMPTS))}.")
+    return SYSTEM_PROMPTS[version]
 
 
 class KonfigFehler(RuntimeError):
@@ -1229,7 +1263,7 @@ def baue_nachrichten(query, hits):
     """
     kontext = "\n\n".join(f"[{h['doc']}, Seite {h['seite']}]\n{h['text']}" for h, _ in hits)
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": f"Quellen:\n{kontext}\n\nFrage: {query}"},
     ]
 
@@ -1312,15 +1346,27 @@ def bewerte_retrieval(frage, abgerufene_seiten):
     return KAT_GETROFFEN if any(s in abgerufene_seiten for s in erwartete) else KAT_VERFEHLT
 
 
+# Verweigerungs-Saetze des Prompts v2 (Regel 6). Bei Verweigerungsfragen zaehlen sie als
+# Signalwort, auch wenn das Golden Set sie nicht als Keyword nennt -- sonst wuerde v2 im
+# Verweigerungs-Indiz schlechter aussehen, nur weil es anders verweigert. Weiter ein Indiz,
+# kein Urteil. Nur fuer Verweigerungsfragen: bei allen anderen ist Verweigern keine Antwort.
+VERWEIGERUNGS_SAETZE = ("In den gefundenen Stellen steht das nicht eindeutig",
+                        "In den gefundenen Stellen steht dazu nichts")
+
+
 def bewerte_frage(frage, abgerufene_seiten, antwort):
     """Ein Wertungssatz pro Frage. Liest keine Umgebungsvariablen."""
+    kategorie = bewerte_retrieval(frage, abgerufene_seiten)
+    treffer = keyword_treffer(frage.get("keywords"), antwort)
+    if kategorie == KAT_VERWEIGERUNG:
+        treffer += [k for k in keyword_treffer(VERWEIGERUNGS_SAETZE, " ".join(antwort.split())) if k not in treffer]
     return {
         "id": frage.get("id"),
         "typ": frage.get("typ"),
-        "kategorie": bewerte_retrieval(frage, abgerufene_seiten),
+        "kategorie": kategorie,
         "erwartete_seiten": list(frage.get("seiten") or []),
         "abgerufene_seiten": list(abgerufene_seiten),
-        "keywords_getroffen": keyword_treffer(frage.get("keywords"), antwort),
+        "keywords_getroffen": treffer,
     }
 
 
@@ -1542,9 +1588,11 @@ def cmd_ask(query, spiel=None):
 
 
 def _konfig_zeile(quelle):
+    system_prompt()   # unbekannte PROMPT_VERSION bricht ab, bevor die Zeile etwas anderes behauptet
     return (f"Config: chunk={CHUNK_SIZE}/{CHUNK_OVERLAP}  top_k={TOP_K}  rerank={RERANK}"
             f"{'(' + RERANK_MODEL + ', cand=' + str(CANDIDATES) + ')' if RERANK else ''}"
             f"  embed={EMBED_MODEL}  llm={LLM_MODEL}  think={THINK}"
+            f"{'  prompt=' + PROMPT_VERSION if PROMPT_VERSION != 'v1' else ''}"
             f"  source={quelle}  drop_types={os.environ.get('DROP_TYPES', '') or '-'}")
 
 
