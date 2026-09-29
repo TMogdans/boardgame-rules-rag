@@ -180,7 +180,7 @@ MUTATIONEN = [
     ("P13 auch GeneratorExit wird als Fehler abgefangen",
      "openwebui_pipe.py", "        except Exception as e:\n            yield f", "        except BaseException as e:\n            yield f"),
     ("P14 Fusszeile geht in den Verlauf",
-     "openwebui_pipe.py", '"content": ohne_fusszeile(text_von(m.get("content")))', '"content": text_von(m.get("content"))'),
+     "openwebui_pipe.py", '"content": ohne_fusszeile(text_von(m.get("content")), index_weg)', '"content": text_von(m.get("content"))'),
     ("P15 Task-Anfragen laufen ins Retrieval",
      "openwebui_pipe.py", "        if task:", "        if task == 'title_generation':"),
     ("P16 Ollama-Fehlergrund geht verloren",
