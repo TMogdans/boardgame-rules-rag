@@ -791,14 +791,29 @@ def aktualisiere_index(spiel_ids=None, pfad=None, data_dir=None, ausgabe=print):
 
     Nur bei "alle" werden Spiele entfernt, deren Verzeichnis verschwunden ist --
     ein Einzelaufruf fasst fremde Spiele nie an.
+
+    Ein kaputtes Spiel (spiel.json ohne oder mit leerer knowledge.jsonl, Ollama-
+    Fehler ...) bricht nicht mehr alles ab: es wird gemeldet, sein alter Stand
+    bleibt, die uebrigen laufen weiter, und am Ende kommt ein KonfigFehler mit
+    allen Fehlern (Exit-Code 2). Wer genau ein Spiel anfordert, bekommt dessen
+    eigenen Fehler.
     """
     alle = spiel_ids is None
     spiel_ids = liste_spiele(data_dir) if alle else [pruefe_spiel_id(s) for s in spiel_ids]
     con = oeffne_index(pfad, schreibend=True)
     try:
-        ergebnis = {}
+        ergebnis, fehler = {}, {}
         for sid in spiel_ids:
-            ergebnis[sid] = aktualisiere_spiel(con, sid, data_dir)
+            try:
+                ergebnis[sid] = aktualisiere_spiel(con, sid, data_dir)
+            except Exception as e:
+                con.rollback()
+                if len(spiel_ids) == 1 and not alle:
+                    raise
+                fehler[sid] = e
+                ergebnis[sid] = ("fehler", 0)
+                ausgabe(f"  {sid}: FEHLER {type(e).__name__}: {e}")
+                continue
             ausgabe(f"  {sid}: {ergebnis[sid][0]} ({ergebnis[sid][1]} Chunks)")
         if alle:
             weg = [r[0] for r in con.execute("SELECT spiel_id FROM spiele")]
@@ -806,6 +821,12 @@ def aktualisiere_index(spiel_ids=None, pfad=None, data_dir=None, ausgabe=print):
                 entferne_spiel(con, sid)
                 ergebnis[sid] = ("entfernt", 0)
                 ausgabe(f"  {sid}: entfernt (kein Verzeichnis mehr unter data/)")
+        if fehler:
+            e = KonfigFehler(f"{len(fehler)} von {len(spiel_ids)} Spielen nicht indexiert (alter Stand bleibt): "
+                             + "; ".join(f"{s}: {type(x).__name__}: {x}" for s, x in list(fehler.items())[:5])
+                             + (" ..." if len(fehler) > 5 else ""))
+            e.ergebnis = ergebnis
+            raise e
         return ergebnis
     finally:
         con.close()

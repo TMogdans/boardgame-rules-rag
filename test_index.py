@@ -213,6 +213,36 @@ class TestSpieleImIndex(IndexTest):
         self.assertEqual([s["spiel_id"] for s in rag.spiele_im_index(con)], ["food-chain-magnate"])
         self.assertEqual(con.execute("SELECT count(*) FROM chunks WHERE spiel_id='brass-birmingham'").fetchone()[0], 0)
 
+    def test_kaputtes_spiel_haelt_den_rest_nicht_auf(self):
+        self.baue()
+        import shutil
+        shutil.rmtree(os.path.join(self.data, "brass-birmingham"))       # verschwunden
+        rag.lege_spiel_an("Ohne Wissen")                                   # spiel.json ohne knowledge.jsonl
+        rag.lege_spiel_an("Leer")
+        open(rag.knowledge_pfad("leer"), "w").close()                      # leere knowledge.jsonl
+        neu = FCM + [chunk("food-chain-magnate", "Food Chain Magnate", 4, 3, "Neue Regel.")]
+        rag.schreibe_jsonl(rag.knowledge_pfad("food-chain-magnate"), neu)
+        meldungen = []
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            rag.aktualisiere_index(ausgabe=meldungen.append)
+        text = str(ctx.exception)
+        self.assertIn("2 von 3 Spielen", text)
+        self.assertIn("leer", text)
+        self.assertIn("ohne-wissen", text)
+        self.assertEqual(ctx.exception.ergebnis["food-chain-magnate"], ("neu", self.stuecke(neu)))
+        self.assertEqual(ctx.exception.ergebnis["brass-birmingham"], ("entfernt", 0))
+        self.assertTrue(any("leer: FEHLER" in m for m in meldungen))
+        con = self.oeffne()
+        self.assertEqual([s["spiel_id"] for s in rag.spiele_im_index(con)], ["food-chain-magnate"])
+        chunks, _ = rag.lade_spiel(con, "food-chain-magnate")
+        self.assertIn("Neue Regel.", [c["text"] for c in chunks])
+
+    def test_einzelnes_kaputtes_spiel_meldet_seinen_eigenen_fehler(self):
+        rag.lege_spiel_an("Ohne Wissen")
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            rag.aktualisiere_index(["ohne-wissen"], ausgabe=lambda *_: None)
+        self.assertIn("knowledge.jsonl fehlt", str(ctx.exception))
+
     def test_metadaten(self):
         self.baue()
         con = self.oeffne()

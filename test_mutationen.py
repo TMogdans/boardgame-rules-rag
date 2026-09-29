@@ -366,6 +366,11 @@ MUTATIONEN = [
      "rag.py", '    woerter = re.findall(r"\\w+", query.lower())', '    woerter = re.findall(r"\\w+", query.casefold())'),
     ("B2 WAL-Index wird nicht erkannt",
      "rag.py", "    if len(kopf) == 20 and kopf[18] == 2 and kopf[19] == 2:", "    if False:"),
+    ("I1 ein kaputtes Spiel bricht index --alle ab",
+     "rag.py", "                if len(spiel_ids) == 1 and not alle:\n                    raise",
+     "                if True:\n                    raise"),
+    ("I2 Fehler einzelner Spiele werden verschluckt (Exit 0)",
+     "rag.py", "        if fehler:\n            e = KonfigFehler(", "        if False:\n            e = KonfigFehler("),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]
