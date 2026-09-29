@@ -195,9 +195,21 @@ def erzeuge():
         daten = berechne(suche, eval_lauf)
         daten["_erzeugt_mit"] = (f"rag.py aus {REFERENZ_COMMIT}, numpy {np.__version__}, "
                                  f"Python {sys.version.split()[0]} -- python regression_referenz.py --erzeuge")
+        # Eine Zeile je Fall: lesbare Diffs, falls die Referenz je neu erzeugt wird.
         with open(JSON_PFAD, "w", encoding="utf-8") as f:
-            json.dump(daten, f, ensure_ascii=False, indent=0, sort_keys=True)
-            f.write("\n")
+            f.write("{\n")
+            bloecke = sorted(daten)
+            for bi, block in enumerate(bloecke):
+                wert = daten[block]
+                if isinstance(wert, dict):
+                    f.write(f"{json.dumps(block)}: {{\n")
+                    zeilen = [f"  {json.dumps(k, ensure_ascii=False)}: {json.dumps(v, ensure_ascii=False)}"
+                              for k, v in sorted(wert.items())]
+                    f.write(",\n".join(zeilen) + "\n}")
+                else:
+                    f.write(f"{json.dumps(block)}: {json.dumps(wert, ensure_ascii=False)}")
+                f.write(",\n" if bi < len(bloecke) - 1 else "\n")
+            f.write("}\n")
         print(f"{len(daten['topk'])} Top-k-Faelle, {len(daten['rerank'])} Reranker-Faelle, "
               f"{len(daten['eval'])} eval-Laeufe -> {JSON_PFAD}")
     finally:
