@@ -468,8 +468,20 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE (spiel_id, konfig, pos)
 );
 """
+# rowid = chunks.id. Die Spalte tag traegt ein Token je (Spiel, Konfiguration): der
+# Spielfilter steht damit IM MATCH-Ausdruck und FTS5 schneidet Posting-Listen. Die
+# erste Fassung filterte mit rowid IN (json_each(...)) -- gemessen wuchs das mit
+# (passende Zeilen gesamt) x (Chunks des Spiels): 100 Spiele x 181 Chunks 235 ms,
+# 5 x 1000 schon 407 ms pro Frage; bei 47k Zeilen und einem 2000er-Heft Sekunden.
 _FTS_SQL = ("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
-            "text, tokenize='unicode61 remove_diacritics 2')")   # rowid = chunks.id
+            "text, tag, tokenize='unicode61 remove_diacritics 2')")
+
+
+def fts_tag(spiel_id, konfig):
+    """Ein FTS-Token je (Spiel, Konfiguration) -- nur Buchstaben/Ziffern, damit der
+    Tokenizer es nicht zerlegt."""
+    import hashlib
+    return "t" + hashlib.sha1(f"{spiel_id}\0{konfig}".encode()).hexdigest()[:24]
 
 
 def index_konfig(embed_model=None, size=None, overlap=None):
@@ -580,7 +592,8 @@ def aktualisiere_spiel(con, spiel_id, data_dir=None):
                               "VALUES (?,?,?,?,?,?,?)",
                               (spiel_id, konfig, pos, json.dumps(seite), typ, text, e.tobytes()))
             if fts:
-                con.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?,?)", (cur.lastrowid, text))
+                con.execute("INSERT INTO chunks_fts (rowid, text, tag) VALUES (?,?,?)",
+                            (cur.lastrowid, text, fts_tag(spiel_id, konfig)))
         con.execute("INSERT OR REPLACE INTO staende VALUES (?,?,?,?,?)",
                     (spiel_id, konfig, fp, len(stuecke), int(embs.shape[1])))
     return "neu", len(stuecke)
@@ -681,10 +694,13 @@ def fts_abfrage(query):
 def bm25_rangfolge(con, query, chunks, n):
     """Positionen in `chunks` nach BM25, beste zuerst -- nur unter DIESEN Chunks.
 
-    Die Einschraenkung auf die rowids des geladenen Spiels steht in der Abfrage
-    selbst (vor ORDER BY/LIMIT), nicht als Nachfilter: sonst verdraengten Treffer
-    anderer Spiele die eigenen aus den ersten n. Die IDF-Statistik von FTS5 ist
-    allerdings tabellenweit (alle Spiele, alle Staende) -- sie gewichtet Woerter,
+    Der Spielfilter steht im MATCH-Ausdruck selbst (tag-Token des Stands), also
+    vor ORDER BY/LIMIT: ein Nachfilter liesse Treffer anderer Spiele die eigenen
+    aus den ersten n verdraengen. Per DROP_TYPES ausgelassene Chunks desselben
+    Spiels koennen noch darunter sein; deshalb wird um genau deren Anzahl mehr
+    geholt und danach auf die geladenen Chunks beschraenkt -- das ist exakt das
+    Top-n der geladenen. Die tag-Spalte hat BM25-Gewicht 0. Die IDF-Statistik von
+    FTS5 bleibt tabellenweit (alle Spiele, alle Staende): sie gewichtet Woerter,
     waehlt aber keine fremden Chunks aus.
     """
     ausdruck = fts_abfrage(query)
@@ -693,11 +709,15 @@ def bm25_rangfolge(con, query, chunks, n):
     if not _hat_fts(con):
         raise KonfigFehler("HYBRID=1, aber der Index hat keine FTS5-Tabelle (SQLite ohne FTS5?).")
     pos = {c["chunk_id"]: i for i, c in enumerate(chunks)}
+    spiel_id, konfig = con.execute("SELECT spiel_id, konfig FROM chunks WHERE id=?",
+                                   (chunks[0]["chunk_id"],)).fetchone()
+    gesamt = con.execute("SELECT chunks FROM staende WHERE spiel_id=? AND konfig=?", (spiel_id, konfig)).fetchone()[0]
+    ausgelassen = gesamt - len(chunks)
     zeilen = con.execute(
         "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
-        "AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",
-        (ausdruck, json.dumps(list(pos)), n)).fetchall()
-    return [pos[r[0]] for r in zeilen]
+        "ORDER BY bm25(chunks_fts, 1.0, 0.0), rowid LIMIT ?",
+        (f'tag : "{fts_tag(spiel_id, konfig)}" AND text : ({ausdruck})', n + ausgelassen)).fetchall()
+    return [pos[r[0]] for r in zeilen if r[0] in pos][:n]
 
 
 def rrf(rangfolgen, k=None):

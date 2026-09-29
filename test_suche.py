@@ -170,6 +170,24 @@ class TestHybrid(SucheTest):
             folge = rag.bm25_rangfolge(self.con, "Waitress", chunks, 2)
         self.assertEqual([chunks[i]["seite"] for i in folge], [14])
 
+    def test_bm25_holt_fuer_ausgelassene_typen_nach(self):
+        # Zwei flavor-Chunks desselben Spiels tragen "Waitress" oefter als der
+        # Regel-Chunk (Seite 14). Mit DROP_TYPES=flavor und n=1 muss trotzdem
+        # Seite 14 kommen -- ein LIMIT ohne Nachholen lieferte nichts.
+        C = "crew"
+        meta = rag.lege_spiel_an("Crew")
+        rag.schreibe_jsonl(rag.knowledge_pfad(C), [
+            c(C, "Crew", 1, 1, "Waitress Waitress Waitress! Werbespruch.", "flavor"),
+            c(C, "Crew", 2, 3, "Waitress Waitress, noch ein Werbespruch.", "flavor"),
+            c(C, "Crew", 3, 14, "Die Waitress bringt 3 Dollar."),
+            c(C, "Crew", 4, 5, "Die Kette wird gebaut.")])
+        self.assertEqual(meta["spiel_id"], C)
+        rag.aktualisiere_index([C], ausgabe=lambda *_: None)
+        chunks, _ = rag.lade_spiel(self.con, C, {"flavor"})
+        self.assertEqual([chunks[i]["seite"] for i in rag.bm25_rangfolge(self.con, "Waitress", chunks, 1)], [14])
+        alle, _ = rag.lade_spiel(self.con, C)
+        self.assertEqual([alle[i]["seite"] for i in rag.bm25_rangfolge(self.con, "Waitress", alle, 3)], [1, 3, 14])
+
     def test_bm25_ohne_filter_wuerde_fremde_liefern(self):
         # Gegenprobe zur Konstruktion: ungefiltert gewinnen die Brass-Chunks.
         roh = self.con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "

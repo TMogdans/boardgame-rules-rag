@@ -204,8 +204,18 @@ und rankt dann -- der Filter wirkt vor dem Ranking, ein fremdes Spiel kann keine
 verdraengen. `python rag.py ask --spiel food-chain-magnate "Wie verdiene ich Geld?"`
 bringt den Index vorher auf Stand. `HYBRID=1` fusioniert die Vektor-Rangfolge mit BM25
 (beide auf `CANDIDATES` begrenzt, mit `RERANK=1` danach Cross-Encoder); Default ist aus,
-damit der Standardweg unveraendert bleibt. Die IDF-Gewichte von FTS5 sind tabellenweit
-(alle Spiele und Staende) -- sie gewichten Woerter, waehlen aber keine fremden Chunks aus.
+damit der Standardweg unveraendert bleibt. Der Spielfilter steht im MATCH-Ausdruck (ein
+Token je Spiel und Stand), nicht als `rowid IN (...)` -- das wuchs gemessen mit
+(Treffer gesamt) x (Chunks des Spiels) in den Sekundenbereich. Die IDF-Gewichte von FTS5
+sind tabellenweit (alle Spiele und Staende) -- sie gewichten Woerter, waehlen aber keine
+fremden Chunks aus.
+
+Gemessen mit dem Indexcode bei 250 Spielen (ein Spiel mit 2000 Chunks, 1024 Dimensionen,
+Embedding gefakt): Indexbau ohne Embedding 1,9 s, Lauf ohne Aenderung 0,16 s; ein Spiel
+laden typisch 0,8 ms (181 Chunks) bzw. 9,1 ms (2000 Chunks, max 13,5); Vektorsuche in
+2000 Chunks typisch 0,33 ms (max 0,64), hybrid 7,1 ms (max 7,6); BM25 allein bei 47.691
+Zeilen typisch 3,4 ms (max 7,1). Platz: 4,6 KB je Zeile (4 KB Vektor + Text), bei 47k
+Zeilen also rund 220 MB plus FTS.
 
 **Warum kein sqlite-vec**, obwohl es auf der Zielmaschine laedt (Wheel 0.1.9 fuer
 Python 3.14/manylinux, `enable_load_extension` vorhanden): Gesucht wird immer innerhalb

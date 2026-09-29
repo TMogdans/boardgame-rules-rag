@@ -235,22 +235,18 @@ MUTATIONEN = [
      '"WHERE ? IS NOT NULL AND konfig=? ORDER BY pos", (spiel_id, konfig)).fetchall()'),
     ("SF2 vorab geladene fremde Chunks werden durchgewunken",
      "rag.py", "        if fremd:\n            raise KonfigFehler", "        if False:\n            raise KonfigFehler"),
-    ("SF3 BM25 filtert erst nach dem LIMIT",
-     "rag.py",
-     '"AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
-     '        (ausdruck, json.dumps(list(pos)), n)).fetchall()\n'
-     '    return [pos[r[0]] for r in zeilen]',
-     '"ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
-     '        (ausdruck, n)).fetchall()\n'
-     '    return [pos[r[0]] for r in zeilen if r[0] in pos]'),
+    ("SF3 BM25 filtert erst nach dem LIMIT (Spiel nicht im MATCH)",
+     "rag.py", """(f'tag : "{fts_tag(spiel_id, konfig)}" AND text : ({ausdruck})', n + ausgelassen)""",
+     """(f'text : ({ausdruck})', n + ausgelassen)"""),
     ("SF4 BM25 ganz ohne Spielfilter",
-     "rag.py",
-     '"AND rowid IN (SELECT value FROM json_each(?)) ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
-     '        (ausdruck, json.dumps(list(pos)), n)).fetchall()\n'
-     '    return [pos[r[0]] for r in zeilen]',
-     '"ORDER BY bm25(chunks_fts), rowid LIMIT ?",\n'
-     '        (ausdruck, n)).fetchall()\n'
-     '    return [pos.get(r[0], 0) for r in zeilen]'),
+     "rag.py", "    return [pos[r[0]] for r in zeilen if r[0] in pos][:n]",
+     "    return [pos.get(r[0], 0) for r in con.execute('SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
+     "ORDER BY bm25(chunks_fts), rowid LIMIT ?', (ausdruck, n))]"),
+    ("SF5 BM25 ohne Nachholen fuer ausgelassene Typen (DROP_TYPES verschluckt Treffer)",
+     "rag.py", "        (f'tag : \"{fts_tag(spiel_id, konfig)}\" AND text : ({ausdruck})', n + ausgelassen)",
+     "        (f'tag : \"{fts_tag(spiel_id, konfig)}\" AND text : ({ausdruck})', n)"),
+    ("SF6 tag-Spalte zaehlt in BM25 mit",
+     "rag.py", "ORDER BY bm25(chunks_fts, 1.0, 0.0), rowid LIMIT ?", "ORDER BY bm25(chunks_fts, 0.0, 1.0), rowid LIMIT ?"),
     ("H1 HYBRID per Default an",
      "rag.py", 'HYBRID        = os.environ.get("HYBRID", "0") == "1"', 'HYBRID        = os.environ.get("HYBRID", "1") == "1"'),
     ("H2 Fusion ignoriert BM25",
