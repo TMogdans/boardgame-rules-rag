@@ -80,6 +80,24 @@ class KonfigFehler(RuntimeError):
 
 
 # ---------- Guards ----------
+def pruefe_schreibziel(pfad):
+    """Nie durch einen Symlink schreiben -- vor JEDEM Schreibzugriff der Skripte.
+
+    Vorfall: Die README empfahl, ~/rag-lab/knowledge.jsonl per Symlink neben rag.py
+    zu legen. Ein Testlauf schrieb ueber classify.main() dorthin und damit in die
+    LIVE-Wissensbasis der Pipe (79 Eintraege "flavor", 8 Minuten 0 Chunks). Lesen
+    durch einen Symlink bleibt erlaubt; zum Schreiben ist er nie noetig -- wer eine
+    Datei ausserhalb meint, nennt ihren echten Pfad. (Ein symlinktes Verzeichnis
+    data/ ist davon nicht betroffen: geprueft wird die Datei selbst.)
+    """
+    if os.path.islink(pfad):
+        raise KonfigFehler(
+            f"{pfad} ist ein Symlink auf {os.path.realpath(pfad)} -- die Skripte schreiben nie durch "
+            "Symlinks (so wurde einmal die Live-Wissensbasis ueberschrieben). Die Zieldatei direkt "
+            "angeben (z.B. --spiel / echter Pfad) oder den Symlink entfernen.")
+    return pfad
+
+
 def pruefe_chunk_konfiguration(size=None, overlap=None):
     """CHUNK_SIZE muss echt groesser als CHUNK_OVERLAP sein.
 
@@ -275,7 +293,7 @@ def lege_spiel_an(name, spiel_id=None, sprache=None, aliase=None, quelle_pdf=Non
     if meta["sprache"] not in SPRACHEN:
         raise KonfigFehler(f"Sprache {meta['sprache']!r} unbekannt; bekannt: {', '.join(SPRACHEN)}. "
                            "Neue Sprachen in rag.SPRACHEN ergaenzen.")
-    with open(pfad, "w", encoding="utf-8") as f:
+    with open(pruefe_schreibziel(pfad), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
         f.write("\n")
     return meta
@@ -353,7 +371,7 @@ def lies_jsonl(pfad):
 
 
 def schreibe_jsonl(pfad, eintraege):
-    with open(pfad, "w", encoding="utf-8") as f:
+    with open(pruefe_schreibziel(pfad), "w", encoding="utf-8") as f:
         for e in eintraege:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
@@ -568,7 +586,7 @@ def load_chunks():
     drop = lies_drop_types()
     # Verbalisierte Wissensbasis (Docling -> Qwen) statt roher pypdf-Extraktion?
     if os.environ.get("SOURCE") == "knowledge":
-        with open(os.path.join(os.path.dirname(__file__), "knowledge.jsonl")) as kf:
+        with open(os.environ.get("KNOWLEDGE_JSONL") or os.path.join(os.path.dirname(__file__), "knowledge.jsonl")) as kf:
             rohchunks = [json.loads(line) for line in kf if line.strip()]
         return baue_knowledge_chunks(rohchunks, drop)
     from pypdf import PdfReader
@@ -713,7 +731,7 @@ def oeffne_index(pfad=None, schreibend=False):
     pfad = pfad or INDEX_PATH
     if schreibend:
         os.makedirs(os.path.dirname(os.path.abspath(pfad)), exist_ok=True)
-        con = sqlite3.connect(pfad, timeout=30)
+        con = sqlite3.connect(pruefe_schreibziel(pfad), timeout=30)
         con.executescript(_SCHEMA_SQL)
         if fts5_verfuegbar(con):
             con.execute(_FTS_SQL)
@@ -1184,7 +1202,7 @@ def _schreibe_oder_pruefe(pfad, inhalt):
                 return "unveraendert"
         raise KonfigFehler(f"{pfad} existiert schon mit anderem Inhalt -- nicht ueberschrieben. "
                            "Zum erneuten Migrieren die Datei vorher selbst entfernen.")
-    with open(pfad, "w", encoding="utf-8") as f:
+    with open(pruefe_schreibziel(pfad), "w", encoding="utf-8") as f:
         f.write(inhalt)
     return "geschrieben"
 
@@ -1228,8 +1246,8 @@ def cmd_migriere(args):
                              [--quelle knowledge.jsonl] [--golden golden_set.json] [--pdf heft.pdf]"""
     basis = os.path.dirname(os.path.abspath(__file__))
     rest, opt = spiel_argumente(args)
-    extra = {"--quelle": os.path.join(basis, "knowledge.jsonl"), "--pdf": None,
-             "--golden": os.path.join(basis, "golden_set.json")}
+    extra = {"--quelle": os.environ.get("KNOWLEDGE_JSONL") or os.path.join(basis, "knowledge.jsonl"), "--pdf": None,
+             "--golden": os.environ.get("GOLDEN_SET") or os.path.join(basis, "golden_set.json")}
     i = 0
     while i < len(rest):
         if rest[i] in extra and i + 1 < len(rest):
@@ -1261,7 +1279,7 @@ def cmd_vergleiche(args):
     if not args:
         raise KonfigFehler(cmd_vergleiche.__doc__)
     sid = loese_spiel(args[0])
-    quelle = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge.jsonl")
+    quelle = os.environ.get("KNOWLEDGE_JSONL") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge.jsonl")
     if "--quelle" in args[1:-1]:
         quelle = args[args.index("--quelle") + 1]
     drop = drop_fuer_index()
@@ -1357,6 +1375,7 @@ def cmd_eval(golden_set_pfad=None):
     # Pfad als Parameter, damit der komplette Wertungsdurchlauf mit einem
     # Beispiel-Golden-Set testbar ist (siehe test_wertung.py, TestCmdEval).
     gs = json.load(open(golden_set_pfad
+                        or os.environ.get("GOLDEN_SET")
                         or os.path.join(os.path.dirname(__file__), "golden_set.json")))
     chunks, embs = build_index()
     print(_konfig_zeile(os.environ.get('SOURCE', 'pdf')))

@@ -7,16 +7,38 @@ dass die Tests ueberhaupt etwas festhalten.
 
     python test_mutationen.py
 
-Jede Mutation wird eingespielt, die Tests aus TESTS laufen, dann wird die Datei aus dem Speicher zurueckgeschrieben (finally).
+Der Treiber arbeitet NIE im Arbeitsverzeichnis: er kopiert die Quelldateien in
+ein Temp-Verzeichnis (ohne Symlinks, ohne data/, knowledge.jsonl, golden_set.json)
+und mutiert nur dort. Vorfall: verfaelschter Code schreibt, wohin er will -- unter
+S10 schrieb classify.main() ueber einen Symlink im Clone in die LIVE-Wissensbasis.
+Jede Mutation wird in der Kopie eingespielt, die Tests aus TESTS laufen dort, dann
+wird die Datei der Kopie zurueckgeschrieben (finally).
 Exit-Code 1, wenn eine Mutation gruen bleibt, deren Namen nicht mit "[gleich]"
 beginnt -- solche sind nachweislich verhaltensgleich, siehe M3.
 """
+import glob
 import io
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+# Was in die Laufkopie gehoert: Code und die eingecheckten Testdaten -- nie echte Daten.
+KOPIEREN = ("*.py", "golden_set.example.json", "regression_referenz.json")
+
+
+def laufkopie():
+    """Temp-Kopie der Quelldateien; Symlinks werden nicht mitgenommen."""
+    ziel = tempfile.mkdtemp(prefix="rag-mutationen-")
+    for muster in KOPIEREN:
+        for quelle in glob.glob(os.path.join(BASE, muster)):
+            if os.path.islink(quelle):
+                continue
+            shutil.copy(quelle, ziel)
+    os.makedirs(os.path.join(ziel, "pdfs"))
+    return ziel
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
          "test_pipe_index.py", "test_regression.py", "test_zuordnung.py")
@@ -400,16 +422,43 @@ MUTATIONEN = [
      "auto_ingest.py", "    if os.path.exists(ziel_pfad) and not ueberschreiben:", "    if False:"),
     ("S14 ingest.py --spiel ueberschreibt ungefragt",
      "ingest.py", "    if os.path.exists(ziel_pfad) and not ueberschreiben:", "    if False:"),
+    # ---- Schutz echter Daten (test_schutz.py; fuenftes Feld = nur diese Testdateien) ----
+    ("A1 Mutationstreiber arbeitet im Arbeitsverzeichnis statt in einer Kopie",
+     "test_mutationen.py", '    ziel = tempfile.mkdtemp(prefix="rag-mutationen-")\n',
+     '    return BASE\n    ziel = tempfile.mkdtemp(prefix="rag-mutationen-")\n', ("test_schutz.py",)),
+    ("U1 testumgebung biegt classify.KNOW nicht um",
+     "testumgebung.py", 'classify.KNOW = os.path.join(TMP, "knowledge.jsonl")\n', "", ("test_schutz.py",)),
+    ("U2 testumgebung biegt vision_ingest.KNOW nicht um",
+     "testumgebung.py", 'vision_ingest.KNOW = os.path.join(TMP, "knowledge.jsonl")\n', "", ("test_schutz.py",)),
+    ("Y1 Schreiben durch Symlinks wieder erlaubt",
+     "rag.py", "    if os.path.islink(pfad):\n        raise KonfigFehler(", "    if False:\n        raise KonfigFehler(",
+     ("test_schutz.py",)),
+    ("Y2 classify.py prueft das Schreibziel nicht",
+     "classify.py", "    rag.pruefe_schreibziel(KNOW)", "    pass", ("test_schutz.py",)),
+    ("Y3 vision_ingest.py prueft das Schreibziel nicht",
+     "vision_ingest.py", "    with open(rag.pruefe_schreibziel(know), \"w\"", "    with open(know, \"w\"", ("test_schutz.py",)),
+    ("Y4 ingest.py prueft das Schreibziel nicht",
+     "ingest.py", "    with open(rag.pruefe_schreibziel(out), \"w\"", "    with open(out, \"w\"", ("test_schutz.py",)),
+    ("Q1 alter Eval-Weg ignoriert KNOWLEDGE_JSONL",
+     "rag.py", 'with open(os.environ.get("KNOWLEDGE_JSONL") or os.path.join(os.path.dirname(__file__), "knowledge.jsonl")) as kf:',
+     'with open(os.path.join(os.path.dirname(__file__), "knowledge.jsonl")) as kf:'),
+    ("Q2 vergleiche ignoriert KNOWLEDGE_JSONL",
+     "rag.py", '    quelle = os.environ.get("KNOWLEDGE_JSONL") or os.path.join(',
+     '    quelle = None or os.path.join('),
     ("R6 Migration ueberschreibt eine abweichende Datei",
      "rag.py", "        raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt", "        if False: raise KonfigFehler(f\"{pfad} existiert schon mit anderem Inhalt"),
 ]
 
 
-def rote_tests():
+def rote_tests(lauf, tests=TESTS):
     rot = []
-    for datei in TESTS:
-        p = subprocess.run([sys.executable, os.path.join(BASE, datei)],
-                           cwd=BASE, capture_output=True, text=True)
+    umgebung = dict(os.environ, DATA_DIR=os.path.join(lauf, "data"),
+                    INDEX_PATH=os.path.join(lauf, "data", "index.sqlite"))
+    for k in ("KNOWLEDGE_JSONL", "GOLDEN_SET", "REGRESSION_REFERENZ"):
+        umgebung.pop(k, None)
+    for datei in tests:
+        p = subprocess.run([sys.executable, os.path.join(lauf, datei)],
+                           cwd=lauf, env=umgebung, capture_output=True, text=True)
         if p.returncode == 0:
             continue
         namen = [z.split(" ")[1] for z in p.stderr.splitlines()
@@ -430,8 +479,18 @@ def ausgewaehlt():
 def main():
     unerwartet_gruen = []
     auswahl = ausgewaehlt()
-    for name, datei, alt, neu in auswahl:
-        pfad = os.path.join(BASE, datei)
+    lauf = laufkopie()
+    try:
+        return _mutiere(auswahl, lauf, unerwartet_gruen)
+    finally:
+        # nie das Arbeitsverzeichnis loeschen -- auch nicht unter einer Mutation von laufkopie()
+        if os.path.realpath(lauf) != os.path.realpath(BASE):
+            shutil.rmtree(lauf, ignore_errors=True)
+
+
+def _mutiere(auswahl, lauf, unerwartet_gruen):
+    for name, datei, alt, neu, *nur_tests in auswahl:
+        pfad = os.path.join(lauf, datei)
         orig = io.open(pfad, encoding="utf-8").read()
         if alt not in orig:
             print(f"[FEHLT] {name}: Muster nicht mehr in {datei} -- Mutation nachziehen")
@@ -439,7 +498,7 @@ def main():
             continue
         try:
             io.open(pfad, "w", encoding="utf-8").write(orig.replace(alt, neu, 1))
-            rot = rote_tests()
+            rot = rote_tests(lauf, nur_tests[0] if nur_tests else TESTS)
         finally:
             io.open(pfad, "w", encoding="utf-8").write(orig)
         print(f"[{'ROT  ' if rot else 'GRUEN'}] {name}")

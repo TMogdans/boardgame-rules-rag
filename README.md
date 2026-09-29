@@ -294,6 +294,7 @@ python test_suche.py         # Suche pro Spiel (Filter vor dem Ranking) und HYBR
 python test_eval_spiele.py   # Eval pro Spiel und --alle
 python test_pipe_index.py    # Pipe auf dem Index-Weg: Zuordnung gegen alle Spiele, Veraltet-Pruefung
 python test_zuordnung.py     # strenge Spielzuordnung, --spiel mit Name oder id
+python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
 # Referenz neu erzeugen (braucht git), oder eine plattformeigene gegenpruefen:
@@ -428,10 +429,20 @@ Die Stellschrauben (`CHUNK_SIZE`, `CHUNK_OVERLAP`, `TOP_K`, `DROP_TYPES`, `LLM_M
 `EMBED_MODEL`, `THINK`, Pfade, `OLLAMA_URL` aus Sicht des Containers) stehen als *Valves*
 unter Admin → Funktionen. Die Defaults sind die oben gemessene Konfiguration:
 `CHUNK_SIZE=400`, `CHUNK_OVERLAP=150`, `TOP_K=4`, `DROP_TYPES=flavor,meta`. Der passende
-Vergleichslauf: `SOURCE=knowledge CHUNK_SIZE=400 DROP_TYPES=flavor,meta python rag.py eval`.
-`rag.py` liest `knowledge.jsonl` und `golden_set.json` neben sich selbst -- im Clone also
-dieselbe Datei verlinken, die der Container gemountet bekommt
-(`ln -s ~/rag-lab/knowledge.jsonl .`), sonst vergleicht der Lauf gegen eine andere Basis.
+Vergleichslauf gegen dieselbe Datei, die der Container gemountet bekommt -- per Pfad,
+**nicht per Symlink** neben `rag.py`:
+
+```bash
+KNOWLEDGE_JSONL=~/rag-lab/knowledge.jsonl GOLDEN_SET=~/rag-lab/golden_set.json \
+  SOURCE=knowledge CHUNK_SIZE=400 DROP_TYPES=flavor,meta python rag.py eval
+```
+
+> **Keine Symlinks auf Live-Daten neben den Code legen.** Frueher stand hier
+> `ln -s ~/rag-lab/knowledge.jsonl .`. Ein Testlauf (Mutationstreiber) hat darueber die
+> Live-Wissensbasis der Pipe ueberschrieben: 79 Eintraege `flavor`, 8 Minuten keine
+> Chunks. Seitdem schreibt kein Skript mehr durch einen Symlink (Abbruch mit Hinweis),
+> alle Tests biegen ihre Pfade ueber `testumgebung.py` in ein Temp-Verzeichnis, und
+> `test_mutationen.py` mutiert nur in einer Temp-Kopie. `test_schutz.py` prueft das.
 
 **Viele Spiele (Index-Weg):** Valve `INDEX_PATH` setzen (z.B. `/rag/data/index.sqlite`)
 und statt der Einzeldatei das ganze `data/` read-only mounten:

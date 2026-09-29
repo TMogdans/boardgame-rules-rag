@@ -20,6 +20,7 @@ from unittest import mock
 BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
 
 FCM = {"spiel_id": "food-chain-magnate", "name": "Food Chain Magnate", "aliase": ["Food Chain", "FCM"]}

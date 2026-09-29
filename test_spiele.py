@@ -39,6 +39,7 @@ for _name in ("docling", "docling.document_converter", "pymupdf"):
                 sys.modules["docling"].document_converter = _m
             sys.modules[_name] = _m
 
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag            # noqa: E402
 import auto_ingest    # noqa: E402
 import ingest         # noqa: E402

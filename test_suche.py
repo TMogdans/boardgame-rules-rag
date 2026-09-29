@@ -20,6 +20,7 @@ import numpy as np
 BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
 
 ACHSEN = ("geld", "kette", "werbung", "rest")

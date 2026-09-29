@@ -39,6 +39,7 @@ import numpy as np
 BASE = os.path.dirname(os.path.abspath(__file__))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
 import regression_referenz as ref  # noqa: E402
 from regression_referenz import WISSEN, GOLDEN, FRAGEN, RASTER, achsen_embed, hash_embed  # noqa: E402
@@ -288,6 +289,21 @@ class TestVergleiche(RegressionsTest):
                 text = self.lauf(angabe)
                 self.assertIn(f"{len(GOLDEN['fragen'])}/{len(GOLDEN['fragen'])} Fragen mit identischer", text)
                 self.assertIn(os.path.join(self.lab, "knowledge.jsonl"), text)   # aufgeloester Symlink
+
+    def test_quelle_per_umgebung_statt_symlink(self):
+        # Ersatz fuer den Symlink neben rag.py: KNOWLEDGE_JSONL/GOLDEN_SET (nur lesend)
+        for name in ("knowledge.jsonl", "golden_set.json"):
+            os.remove(os.path.join(self.basis, name))
+        env = {"KNOWLEDGE_JSONL": os.path.join(self.lab, "knowledge.jsonl"),
+               "GOLDEN_SET": os.path.join(self.lab, "golden_set.json")}
+        with mock.patch.dict(os.environ, env):
+            text = self.lauf("Food Chain Magnate")
+            self.assertIn(f"{len(GOLDEN['fragen'])}/{len(GOLDEN['fragen'])} Fragen mit identischer", text)
+            puffer = io.StringIO()
+            with self.mit("fake-hash", 400, 150, "flavor,meta"), contextlib.redirect_stdout(puffer):
+                os.environ.update(env)
+                rag.cmd_eval()
+            self.assertIn("getroffen :", puffer.getvalue())
 
     def test_leere_quelle_bricht_laut_ab(self):
         open(os.path.join(self.lab, "knowledge.jsonl"), "w").close()

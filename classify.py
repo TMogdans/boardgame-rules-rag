@@ -150,6 +150,10 @@ def main(argv=()):
         e["typ"], e["typ_antwort"] = classify(e["text"])
         counts[e["typ"]] = counts.get(e["typ"], 0) + 1
 
+    if BASE not in sys.path:
+        sys.path.insert(0, BASE)
+    import rag
+    rag.pruefe_schreibziel(KNOW)           # nie durch einen Symlink (Live-Wissensbasis)
     with open(KNOW, "w") as f:
         for e in entries:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")

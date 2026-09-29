@@ -16,6 +16,7 @@ import contextlib, io, json, os, re, sys, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag
 
 BASE = os.path.dirname(os.path.abspath(__file__))

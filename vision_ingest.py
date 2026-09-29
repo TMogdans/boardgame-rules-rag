@@ -129,7 +129,7 @@ def main(argv=None):
         e.update(felder)
         entries.append(e)
 
-    with open(know, "w", encoding="utf-8") as f:
+    with open(rag.pruefe_schreibziel(know), "w", encoding="utf-8") as f:
         for e in entries:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 

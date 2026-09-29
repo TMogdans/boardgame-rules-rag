@@ -152,7 +152,7 @@ def main():
     doc = DocumentConverter().convert(pdf).document
     blocks = blocks_mit_seite(sammle_seiten(doc))
     print(f"{len(blocks)} Bloecke, verbalisiere mit {LLM} ...")
-    with open(out, "w", encoding="utf-8") as f:
+    with open(rag.pruefe_schreibziel(out), "w", encoding="utf-8") as f:
         for i, (seite, b) in enumerate(blocks, 1):
             v = verbalize(b)
             e = eintrag(i, seite, b, v)

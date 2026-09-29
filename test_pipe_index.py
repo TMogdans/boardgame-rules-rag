@@ -23,6 +23,7 @@ import httpx
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
+import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
 import openwebui_pipe as op  # noqa: E402
 from test_openwebui_pipe import fake_post, sammle, ollama_ndjson  # noqa: E402
