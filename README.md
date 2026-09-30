@@ -46,6 +46,7 @@ sind weiter unten beschrieben.
 | `inspect_layout.py` | Zeigt die Docling-Region-Labels pro Seite (zum Debuggen und Verstehen des Routings). |
 | `openwebui_pipe.py` | Open-WebUI-Pipe: dieselbe Retrieval-Logik als Modell in der Chat-Oberflaeche (siehe "Open WebUI"). |
 | `install_openwebui_pipe.py` | Laedt die Pipe per API in Open WebUI (anlegen oder aktualisieren). |
+| `messung/` | Messwerkzeug: Lauf mit Antwortprotokoll -> Bewerten -> Vergleichen, Retrieval-Trefferquote, Modellvergleich. Nur Code; die Daten liegen in einem eigenen Datenverzeichnis ausserhalb des Repos. Siehe `messung/README.md`. |
 | `golden_set.example.json` | Beispiel-Testset (Food Chain Magnate). Kopiere es nach `golden_set.json` und passe es an dein Spiel an. |
 
 ## Voraussetzungen
@@ -330,6 +331,10 @@ python test_pipe_alt.py      # alter Pipe-Weg wie ed36f99 (pipe_referenz.json, p
 python test_judge.py         # Bewertungsmodell (judge.py)
 python test_prompt.py        # Prompt-Version v1/v2: v1 byte-gleich, Default v1, Valve/Umgebung, Signalwort, judge-Regel
 python test_entscheidung.py  # Entscheidungsschritt: Default aus, argmax, C ohne LLM, B-Hinweis, Sprache, Valve/Umgebung
+python test_messung_vergleiche.py  # messung/: Kennzahlen, stabil/gleichgerichtet, Median statt Mittel
+python test_messung_bewerte.py     # messung/: judge.bewerte-Fake, urteile.jsonl, Abbruch bei unbekannter Frage
+python test_messung_lauf.py        # messung/: Antwortprotokoll und meta.json
+python test_messung_retrieval.py   # messung/: Trefferquote, Verzeichnis-Anteil
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig

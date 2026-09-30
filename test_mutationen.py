@@ -40,11 +40,18 @@ def laufkopie():
                 continue
             shutil.copy(quelle, ziel)
     os.makedirs(os.path.join(ziel, "pdfs"))
+    # Messwerkzeug (nur Code, keine Daten)
+    os.makedirs(os.path.join(ziel, "messung"))
+    for quelle in glob.glob(os.path.join(BASE, "messung", "*.py")):
+        if not os.path.islink(quelle):
+            shutil.copy(quelle, os.path.join(ziel, "messung"))
     return ziel
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
          "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py",
-         "test_pipe_alt.py", "test_judge.py", "test_prompt.py", "test_entscheidung.py")
+         "test_pipe_alt.py", "test_judge.py", "test_prompt.py", "test_entscheidung.py",
+         "test_messung_vergleiche.py", "test_messung_bewerte.py", "test_messung_lauf.py",
+         "test_messung_retrieval.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -740,6 +747,55 @@ MUTATIONEN = [
     ("VS11 Token-Statistik mittelt ueber deterministische Nullen", "judge.py",
      'and u.get("output_tokens") is not None and not u.get("deterministisch")]',
      'and u.get("output_tokens") is not None]', ("test_judge.py",)),
+    # Messwerkzeug (messung/): Kennzahlen, Bewerten, Lauf-Protokoll, Retrieval
+    ("MV1 Treffsicherheit: Nenner ohne Abzug der unsicheren Urteile", "messung/vergleiche.py",
+     '    nenner = alle - zaehler["unsicher"]', "    nenner = alle", ("test_messung_vergleiche.py",)),
+    ("MV2 stabil richtig: ein richtiger Lauf genuegt", "messung/vergleiche.py",
+     'if u == {"richtig"}:', 'if "richtig" in u:', ("test_messung_vergleiche.py",)),
+    ("MV3 stabil falsch: ein falscher Lauf genuegt", "messung/vergleiche.py",
+     'elif u == {"falsch"}:', 'elif "falsch" in u:', ("test_messung_vergleiche.py",)),
+    ("MV4 Laufzeit typisch als Mittelwert statt Median", "messung/vergleiche.py",
+     '"median": statistics.median(werte)', '"median": statistics.mean(werte)', ("test_messung_vergleiche.py",)),
+    ("MV5 Laufzeit-Maximum fehlt (Median statt Maximum)", "messung/vergleiche.py",
+     '"max": max(werte)}', '"max": statistics.median(werte)}', ("test_messung_vergleiche.py",)),
+    ("MV6 gleichgerichtet: ein einzelner besserer Lauf genuegt", "messung/vergleiche.py",
+     "        if min(b) > max(a):", "        if max(b) > min(a):", ("test_messung_vergleiche.py",)),
+    ("MV7 Wiederholungen mit anderen Fragen werden nicht bemerkt", "messung/vergleiche.py",
+     "        if set(l) != erste:", "        if False:", ("test_messung_vergleiche.py",)),
+    ("MV8 ein Lauf je Setting liefert trotzdem 'gleichgerichtet'", "messung/vergleiche.py",
+     "        if len(settings[n]) < min_laeufe or len(settings[basis_name]) < min_laeufe:",
+     "        if False:", ("test_messung_vergleiche.py",)),
+    ("MB1 unbekannte Frage bricht nicht ab", "messung/bewerte.py",
+     '        if z["frage_id"] not in cache[sid]:', "        if False:", ("test_messung_bewerte.py",)),
+    ("MB2 Flag 'deterministisch' geht verloren", "messung/bewerte.py",
+     '"deterministisch": bool(r.get("deterministisch"))}', '"deterministisch": False}', ("test_messung_bewerte.py",)),
+    ("MB3 Fragen erst beim Bewerten aufloesen (Lauf 1 bezahlt vor Fehler in Lauf 2)", "messung/bewerte.py",
+     'geladen.append((p, zeilen, loese_fragen_auf(zeilen, opt["--golden"], p)))',
+     "geladen.append((p, zeilen, None))", ("test_messung_bewerte.py",)),
+    ("MB4 urteile.jsonl landet nicht neben den Antworten", "messung/bewerte.py",
+     '    ziel = os.path.join(os.path.dirname(os.path.abspath(pfad_antworten)), "urteile.jsonl")',
+     '    ziel = os.path.join(os.getcwd(), "urteile.jsonl")', ("test_messung_bewerte.py",)),
+    ("ML1 meta.json ohne Modell", "messung/lauf.py",
+     '"modell": rag.LLM_MODEL,', '"modell": None,', ("test_messung_lauf.py",)),
+    ("ML2 Haken nur an werte/spiel: rag.answer nicht gehookt", "messung/lauf.py",
+     "    rag.cmd_eval_spiel, rag.answer, rag.werte_fragen = spiel, answer, werte\n    try:",
+     "    rag.cmd_eval_spiel, rag.werte_fragen = spiel, werte\n    try:", ("test_messung_lauf.py",)),
+    ("ML3 Haken werden nicht zurueckgenommen", "messung/lauf.py",
+     "        rag.cmd_eval_spiel, rag.answer, rag.werte_fragen = orig_spiel, orig_answer, orig_werte\n        aus.close()",
+     "        aus.close()", ("test_messung_lauf.py",)),
+    ("ML4 vorhandener Lauf wird ueberschrieben", "messung/lauf.py",
+     "    if not ueberschreiben and (", "    if False and (", ("test_messung_lauf.py",)),
+    ("ML5 Entscheidungs-Option nicht protokolliert", "messung/lauf.py",
+     '"entscheid": opt, "probs": probs,', '"entscheid": None, "probs": None,', ("test_messung_lauf.py",)),
+    ("ML6 meta.json nach Abbruch nicht aktualisiert", "messung/lauf.py",
+     '        meta["antworten"] = akt["n"]\n        schreibe_meta(pfad_m, meta)',
+     "        pass", ("test_messung_lauf.py",)),
+    ("MR1 Verweigerungsfragen zaehlen in die Trefferquote", "messung/retrieval.py",
+     '                if f.get("erwartet_verweigerung") or not f.get("seiten"):',
+     '                if not f.get("seiten") and False:', ("test_messung_retrieval.py",)),
+    ("MR2 Verzeichnis-Ausgabe traegt Regelheft-Text", "messung/retrieval.py",
+     '"typ": h.get("typ"), "vision_seite"', '"text": h["text"], "typ": h.get("typ"), "vision_seite"',
+     ("test_messung_retrieval.py",)),
 ]
 
 
