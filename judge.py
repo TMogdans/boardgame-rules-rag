@@ -21,6 +21,10 @@ Golden-Fragen mit `kern`/`zusatz` bekommen die Kern/Zusatz-Variante des Prompts;
 nur fuer den Lauf. Im Modus anthropic werden Token und Kosten mitgezaehlt.
 
 Die Seitenangabe prueft der Judge NICHT -- das macht Code deterministisch.
+Deterministische Vorstufe (alle Modi, auch im Eichlauf): besteht die Antwort AUSSCHLIESSLICH
+aus einem festen Verweigerungssatz (optional mit Fundstellen-Liste), wird KEIN Modell gefragt:
+richtig bei erwartet_verweigerung, sonst unsicher. Grund: Haiku wertete denselben festen Text
+mal unsicher, mal falsch -- Regeln im Prompt reichen nicht (gemessen 2026-09-30).
 Umgebungsvariable: OLLAMA_URL (wie rag.py).
 """
 import argparse, json, math, os, re, statistics, sys, time
@@ -216,8 +220,67 @@ def lies_anthropic_key(pfad=None):
     return key
 
 
+# ---------- Deterministische Vorstufe: feste Verweigerungssaetze ----------
+# Eigene Liste statt Import aus rag.py (numpy/Modelle beim Import); test_judge gleicht sie
+# ueber rags Funktionen (entscheid_text_nichts) gegen die Wirkung ab.
+# Normalisiert verglichen: klein, Whitespace zusammengezogen, ae/oe/ue/ss statt Umlaut/ss.
+VERWEIGERUNGS_SAETZE_FEST = (
+    "Dazu enthaelt das Dokument keine Angaben.",                # Prompt v1, Regel 6
+    "In den gefundenen Stellen steht das nicht eindeutig.",     # Prompt v2, Regel 6
+    "In den gefundenen Stellen steht dazu nichts.",             # Prompt v2 / Entscheidungsschritt C
+)
+# "Schau auf Seite X nach." gibt es nur hinter dem "nicht eindeutig"-Satz (v2).
+_SCHAU_AUF_SEITE = "In den gefundenen Stellen steht das nicht eindeutig."
+_VERWEIGERUNG_GRUND = "fester Verweigerungssatz"
+
+
+def _normalisiere(text):
+    t = " ".join((text or "").split()).lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        t = t.replace(alt, neu)
+    return t
+
+
+def _verweigerung_regex():
+    def liste(item, verbinder):
+        return rf"{item}(?:(?:{verbinder}){item})*"
+    # Chat: "S. 14, S. 12"; Sprache: "Seite 14, Seite 12 und Seite 4"
+    fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
+                   + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + r")\.?)?")
+    teile = []
+    for satz in VERWEIGERUNGS_SAETZE_FEST:
+        n = re.escape(_normalisiere(satz))
+        if satz == _SCHAU_AUF_SEITE:
+            n += r"(?:\s+schau auf seite\s+\d+(?:(?:\s*,\s*|\s+und\s+)\d+)*\s+nach\.)?"
+        teile.append(n)
+    return re.compile(r"(?:" + "|".join(teile) + ")" + fundstellen + r"\Z")
+
+
+_VERWEIGERUNG_RE = _verweigerung_regex()
+
+
+def ist_fester_verweigerungssatz(antwort):
+    """True, wenn die Antwort ausschliesslich ein fester Verweigerungssatz ist (siehe oben)."""
+    return bool(_VERWEIGERUNG_RE.match(_normalisiere(antwort)))
+
+
+def deterministisches_urteil(frage, antwort):
+    """Urteil-dict ohne Modellaufruf, oder None, wenn die Antwort mehr als den festen Satz enthaelt."""
+    if not ist_fester_verweigerungssatz(antwort):
+        return None
+    return {"urteil": "richtig" if frage.get("erwartet_verweigerung") else "unsicher",
+            "probs": None, "rest": None, "rohtext": _VERWEIGERUNG_GRUND,
+            "input_tokens": 0, "output_tokens": 0, "sekunden": 0.0, "deterministisch": True}
+
+
 def bewerte(modus, modell, frage, antwort):
-    """Ein Urteil. Rueckgabe: dict(urteil, probs, rest, rohtext, sekunden)."""
+    """Ein Urteil. Rueckgabe: dict(urteil, probs, rest, rohtext, sekunden).
+
+    Zuerst die deterministische Vorstufe (kein Modellaufruf, "deterministisch": True).
+    """
+    fest = deterministisches_urteil(frage, antwort)
+    if fest is not None:
+        return fest
     prompt = baue_prompt(frage, antwort, modus)
     t0 = time.perf_counter()
     if modus == "logprob":
@@ -320,6 +383,8 @@ def berechne_metriken(einzel):
         "richtig_nicht_erkannt": _block(haupt, "richtig", lambda ur: ur != "richtig", art),
         "unsicher_trennung": unsicher,
         "unparsebar": _quote(sum(1 for u in haupt if u["urteil"] == UNPARSEBAR), len(haupt)),
+        # ueber ALLE Einzelurteile (auch strittig): so viele Urteile kamen ohne Modell zustande
+        "deterministisch": _quote(sum(1 for u in einzel if u.get("deterministisch")), len(einzel)),
         "laufzeit": laufzeit(einzel),
     }
     tk = tokens_und_kosten(einzel)
@@ -333,7 +398,9 @@ def berechne_metriken(einzel):
 
 
 def laufzeit(einzel):
-    s = [u["sekunden"] for u in einzel if u.get("sekunden") is not None]
+    # nur echte Modellaufrufe: deterministische Urteile (0 s) wuerden den Median druecken
+    s = [u["sekunden"] for u in einzel
+         if u.get("sekunden") is not None and not u.get("deterministisch")]
     if not s:
         return {"n": 0, "median": None, "max": None}
     return {"n": len(s), "median": statistics.median(s), "max": max(s)}
@@ -346,7 +413,7 @@ def kosten_usd(input_tokens, output_tokens):
 def tokens_und_kosten(einzel):
     """Token-Summen, typisch/Maximum je Aufruf und Kosten; None ohne Token-Angaben (Ollama-Modi)."""
     mit = [u for u in einzel if u.get("input_tokens") is not None
-           and u.get("output_tokens") is not None]
+           and u.get("output_tokens") is not None and not u.get("deterministisch")]
     if not mit:
         return None
     ein = [u["input_tokens"] for u in mit]
@@ -466,6 +533,8 @@ def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None):
             "sekunden": r["sekunden"], "rohtext": r.get("rohtext"),
             "input_tokens": r.get("input_tokens"), "output_tokens": r.get("output_tokens"),
         })
+        if r.get("deterministisch"):
+            einzel[-1]["deterministisch"] = True
         if e.get("override"):
             einzel[-1]["override"] = True
             einzel[-1]["label_original"] = e["label_original"]
@@ -497,6 +566,7 @@ def formatiere(m, modus, modell):
     if m["anzahl_strittig"]:
         z += ["", "Nur strittige Eintraege:", _matrix_text(m["matrix_strittig"])]
     z.append(f"\nUnparsebar (zaehlt als Fehler): {_p(m['unparsebar'])}")
+    z.append(f"Deterministisch (fester Verweigerungssatz, ohne Modell): {_p(m['deterministisch'])}")
     for titel, k in (("Durchgewunken (falsch als richtig)", "durchgewunken"),
                      ("Falsch nicht erkannt (falsch, Urteil != falsch)", "falsch_nicht_erkannt"),
                      ("Abgelehnt (richtig als falsch)", "abgelehnt"),
@@ -520,7 +590,7 @@ def formatiere(m, modus, modell):
                      f"Fehler oberhalb {_p(s['fehler_oberhalb'])}")
     lz = m["laufzeit"]
     if lz["n"]:
-        z += ["", f"Laufzeit je Aufruf (n={lz['n']}): typisch (Median) {lz['median']:.2f}s, "
+        z += ["", f"Laufzeit je Modellaufruf (n={lz['n']}): typisch (Median) {lz['median']:.2f}s, "
                   f"Maximum {lz['max']:.2f}s"]
     tk = m.get("tokens")
     if tk:
