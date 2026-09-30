@@ -824,5 +824,174 @@ class TestOverrides(unittest.TestCase):
 
 
 
+# ---------------------------------------------------------------------------
+# Deterministische Vorstufe: feste Verweigerungssaetze ohne Modell
+# ---------------------------------------------------------------------------
+FRAGE_VERW = dict(FRAGE, erwartet_verweigerung=True)
+# Wortlaut der erkannten Formen (nicht aus judge.py abgeleitet)
+FESTE_ANTWORTEN = (
+    "Dazu enthaelt das Dokument keine Angaben.",
+    "In den gefundenen Stellen steht das nicht eindeutig.",
+    "In den gefundenen Stellen steht das nicht eindeutig. Schau auf Seite 14 nach.",
+    "In den gefundenen Stellen steht dazu nichts.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 14, S. 12, S. 4.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 14.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: Seite 14.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: Seite 14 und Seite 12.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: Seite 14, Seite 12 und Seite 4.",
+    "Dazu enthaelt das Dokument keine Angaben. Naechste Fundstellen: S. 3, S. 5.",
+)
+# Antworten mit weiterem Inhalt: duerfen NICHT deterministisch gewertet werden
+MIT_ZUSATZ = (
+    "In den gefundenen Stellen steht dazu nichts. Es sind aber 5 Karten.",
+    "Man zieht 3 Karten. In den gefundenen Stellen steht dazu nichts.",
+    "Zehn Dollar. Dazu enthaelt das Dokument keine Angaben.",
+    "Dazu enthaelt das Dokument keine Angaben. Die Regel lautet: 10 Dollar.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 14. Es sind 5.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 14 und S. 12.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: Seite 14 Seite 12.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 14, Seite 12.",
+    "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen:",
+    "Dazu enthaelt das Dokument keine Angaben. Schau auf Seite 14 nach.",
+    "Antwort.\n\nHinweis: nur teilweise belegt -- pruef S. 14.",
+    "In den gefundenen Stellen steht dazu nichts. Hinweis: nur teilweise belegt.",
+    "",
+)
+
+
+class TestVorstufe(unittest.TestCase):
+    def _bewerte_ohne_netz(self, modus, frage, antwort):
+        http = FakeHTTP()
+        with mock.patch.object(judge.requests, "post", http):
+            r = judge.bewerte(modus, "m", frage, antwort)
+        return r, http
+
+    def test_feste_saetze_richtig_bei_verweigerung_in_allen_modi_ohne_modellaufruf(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        key = os.path.join(tmp.name, "api_key")   # bewusst: keine Key-Datei noetig
+        for modus in ("logprob", "frei", "anthropic"):
+            for a in FESTE_ANTWORTEN:
+                with self.subTest(modus=modus, antwort=a), \
+                     mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", key):
+                    r, http = self._bewerte_ohne_netz(modus, FRAGE_VERW, a)
+                    self.assertEqual(r["urteil"], "richtig")
+                    self.assertEqual(http.aufrufe, [])
+                    self.assertIs(r["deterministisch"], True)
+                    self.assertEqual(r["rohtext"], "fester Verweigerungssatz")
+                    self.assertEqual((r["input_tokens"], r["output_tokens"]), (0, 0))
+                    self.assertLess(r["sekunden"], 0.01)
+
+    def test_feste_saetze_unsicher_wenn_antwort_im_heft_steht(self):
+        for a in FESTE_ANTWORTEN:
+            with self.subTest(antwort=a):
+                r, http = self._bewerte_ohne_netz("frei", FRAGE, a)
+                self.assertEqual(r["urteil"], "unsicher")
+                self.assertEqual(http.aufrufe, [])
+                self.assertIs(r["deterministisch"], True)
+        # fehlt erwartet_verweigerung ganz, gilt es als "nein"
+        r, _ = self._bewerte_ohne_netz("frei", {"frage": "?"}, FESTE_ANTWORTEN[0])
+        self.assertEqual(r["urteil"], "unsicher")
+
+    def test_normalisierung_gross_klein_whitespace_umlaute(self):
+        varianten = (
+            "  DAZU ENTHAELT DAS DOKUMENT KEINE ANGABEN.  ",
+            "dazu enthält das dokument keine angaben.",
+            "Dazu enthaelt das\n  Dokument\tkeine Angaben.\n",
+            "In den gefundenen Stellen steht dazu nichts.\n\nNaechste Fundstellen: S. 14,\nS. 12.",
+            "In den gefundenen Stellen steht dazu nichts. Nächste Fundstellen: S. 14.",
+            "In den gefundenen Stellen steht dazu nichts. NAECHSTE FUNDSTELLEN: SEITE 14 UND SEITE 12.",
+            "In den gefundenen Stellen steht das nicht eindeutig. Schau auf Seite 7 nach.",
+        )
+        for a in varianten:
+            with self.subTest(antwort=a):
+                r, http = self._bewerte_ohne_netz("frei", FRAGE_VERW, a)
+                self.assertEqual(r["urteil"], "richtig")
+                self.assertEqual(http.aufrufe, [])
+        # ss/ß und oe/ö, ue/ü gelten gleich (Normalisierung beidseitig)
+        self.assertEqual(judge._normalisiere("Straße Größe Fuß für Mönch"),
+                         judge._normalisiere("Strasse Groesse Fuss fuer Moench"))
+
+    def test_zusatzinhalt_geht_ans_modell(self):
+        for a in MIT_ZUSATZ:
+            with self.subTest(antwort=a):
+                http = FakeHTTP(ollama={"message": {"content": "Passt.\nURTEIL: falsch"}})
+                with mock.patch.object(judge.requests, "post", http):
+                    r = judge.bewerte("frei", "m", FRAGE_VERW, a)
+                self.assertEqual(len(http.aufrufe), 1)
+                self.assertEqual(r["urteil"], "falsch")
+                self.assertNotIn("deterministisch", r)
+
+    def test_anthropic_fragt_das_modell_nur_bei_zusatz(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        key = os.path.join(tmp.name, "api_key")
+        with open(key, "w") as f:
+            f.write("sk-test\n")
+        antwort = {"content": [{"type": "text", "text": "URTEIL: richtig"}],
+                   "usage": {"input_tokens": 100, "output_tokens": 10}}
+        http = FakeHTTP(anthropic=antwort)
+        with mock.patch.object(judge, "ANTHROPIC_KEY_DATEI", key), \
+             mock.patch.object(judge.requests, "post", http):
+            judge.bewerte("anthropic", "m", FRAGE_VERW, FESTE_ANTWORTEN[3])
+            self.assertEqual(http.aufrufe, [])
+            r = judge.bewerte("anthropic", "m", FRAGE_VERW, MIT_ZUSATZ[0])
+        self.assertEqual(len(http.aufrufe), 1)
+        self.assertEqual(r["urteil"], "richtig")
+
+    def test_satzliste_stimmt_mit_rag_ueberein(self):
+        """Wirkung, nicht Quelltext: rags Funktionen erzeugen die festen Texte, judge wertet sie
+        deterministisch -- C-Text in Chat- und Sprachform, bei 0, 1 und mehreren Seiten."""
+        import rag
+        hitsets = ([], [({"seite": 14}, 0.5)],
+                   [({"seite": 14}, 0.5), ({"seite": 12}, 0.4), ({"seite": 14}, 0.3), ({"seite": 4}, 0.2)])
+        for hits in hitsets:
+            for sprache in (False, True):
+                text = rag.entscheid_text_nichts(hits, sprache=sprache)
+                with self.subTest(text=text):
+                    r, http = self._bewerte_ohne_netz("frei", FRAGE_VERW, text)
+                    self.assertEqual(r["urteil"], "richtig")
+                    self.assertEqual(http.aufrufe, [])
+        # der B-Hinweis hinter einer Antwort ist kein reiner Verweigerungssatz -> Modell
+        b = "Zehn Dollar." + rag.entscheid_hinweis(hitsets[1])
+        self.assertFalse(judge.ist_fester_verweigerungssatz(b))
+        # die v2-Saetze der Eval und der v1-Satz aus dem Prompt werden deterministisch gewertet
+        for satz in rag.VERWEIGERUNGS_SAETZE:
+            self.assertTrue(judge.ist_fester_verweigerungssatz(satz + "."), satz)
+        self.assertTrue(judge.ist_fester_verweigerungssatz("Dazu enthaelt das Dokument keine Angaben."))
+        self.assertIn('"Dazu enthaelt das Dokument keine Angaben."', rag.SYSTEM_PROMPTS["v1"])
+
+    def test_eichlauf_nutzt_vorstufe_und_metriken_weisen_sie_aus(self):
+        eintraege = [
+            {"spiel_id": "s1", "frage_id": 1, "antwort": FESTE_ANTWORTEN[4], "label": "richtig"},
+            {"spiel_id": "s1", "frage_id": 1, "antwort": "Zehn Dollar.", "label": "richtig"},
+            {"spiel_id": "s1", "frage_id": 2, "antwort": FESTE_ANTWORTEN[0], "label": "unsicher"},
+        ]
+        golden = {"s1": {1: FRAGE_VERW, 2: dict(FRAGE, id=2)}}
+        http = FakeHTTP(ollama=lp_antwort([("A", 0.9), ("C", 0.05)]))
+        with mock.patch.object(judge.requests, "post", http):
+            einzel = judge.eichen(eintraege, golden, "logprob", "m")
+        self.assertEqual(len(http.aufrufe), 1)   # nur die Antwort mit Inhalt
+        self.assertEqual([u["urteil"] for u in einzel], ["richtig", "richtig", "unsicher"])
+        self.assertEqual([bool(u.get("deterministisch")) for u in einzel], [True, False, True])
+        m = judge.berechne_metriken(einzel)
+        self.assertEqual((m["deterministisch"]["zaehler"], m["deterministisch"]["nenner"]), (2, 3))
+        # Laufzeit zaehlt nur den echten Modellaufruf
+        self.assertEqual(m["laufzeit"]["n"], 1)
+        self.assertIn("Deterministisch", judge.formatiere(m, "logprob", "m"))
+
+    def test_metriken_ohne_deterministische_urteile(self):
+        m = judge.berechne_metriken([eintrag("s1", "richtig", "richtig")])
+        self.assertEqual((m["deterministisch"]["zaehler"], m["deterministisch"]["nenner"]), (0, 1))
+
+    def test_tokens_mitteln_nicht_ueber_deterministische_nullen(self):
+        einzel = [tok("s1", 100, 10), tok("s1", 300, 30),
+                  dict(tok("s1", 0, 0), deterministisch=True, sekunden=0.0)]
+        t = judge.berechne_metriken(einzel)["tokens"]
+        self.assertEqual(t["n"], 2)
+        self.assertEqual(t["aufrufe_gesamt"], 3)
+        self.assertEqual(t["input_typisch"], 200)
+
+
 if __name__ == "__main__":
     unittest.main()
