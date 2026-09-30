@@ -46,8 +46,9 @@ _FUSSZEILE_INDEX = re.compile(r"(?:\n\n)?---\n\*Quelle: [^\n]*\*\s*\Z")
 _HINWEIS_TEILWEISE = re.compile(r"(?:\n\n)?Hinweis: nur teilweise belegt[^\n]*\s*\Z")
 # Mindest-Schnittstelle des geladenen rag.py fuer den Index-Weg (rag.SCHNITTSTELLE).
 # Ein aelterer Clone im Mount ergaebe sonst AttributeError mitten in der Antwort.
-MIN_SCHNITTSTELLE = 7
-_RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten")
+MIN_SCHNITTSTELLE = 8
+_RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten",
+                   "setze_verlauf_ein")
 # Nur mit Valve ENTSCHEIDUNG gebraucht -- ein aelterer Clone bleibt ohne es nutzbar.
 _RAG_ENTSCHEIDUNG = ("entscheide", "entscheid_text_nichts", "entscheid_hinweis")
 _RAG_INDEX_WEG = _RAG_ALTER_WEG + ("oeffne_index", "spiele_im_index", "katalog_aus_index", "ordne_spiel",
@@ -93,11 +94,6 @@ def zerlege_verlauf(messages, index_weg=False):
         elif m.get("role") == "assistant":
             verlauf.append({"role": "assistant", "content": ohne_fusszeile(text_von(m.get("content")), index_weg)})
     return text_von(messages[letzte].get("content")).strip(), verlauf
-
-
-def setze_verlauf_ein(nachrichten, verlauf):
-    """Verlauf zwischen Systemprompt und die Quellen-Frage schieben."""
-    return nachrichten[:1] + verlauf + nachrichten[1:]
 
 
 def fundstellen(hits):
@@ -291,6 +287,14 @@ class Pipe:
             return option, rag.entscheid_hinweis(hits, sprache=sprache)
         return option, ""
 
+    async def _mit_verlauf(self, nachrichten, verlauf):
+        """Verlauf einsetzen -- mit rag.setze_verlauf_ein, derselben Funktion, die der Eval benutzt.
+
+        self._rag ist nach der Suche geladen; ohne (Suche ersetzt) wird es im Thread geholt, nie
+        unter dem Lock im Event-Loop (er liegt waehrend eines Embeddings in einem anderen Thread)."""
+        rag = self._rag or await asyncio.to_thread(self._rag_fuer, self.valves)
+        return rag.setze_verlauf_ein(nachrichten, verlauf)
+
     async def _entscheid_fuer(self, frage, hits, sprache):
         """(option, Text) -- ohne Valve ENTSCHEIDUNG (None, "") und kein Aufruf."""
         v = self.valves
@@ -450,7 +454,7 @@ class Pipe:
             return
         nachrichten, hits = await asyncio.to_thread(self._suche, frage, self.valves)
         entscheid = await self._entscheid_fuer(frage, hits, bool(rf.get("sprache")))
-        async for stueck in self._antwort_oder_fest(setze_verlauf_ein(nachrichten, verlauf), entscheid):
+        async for stueck in self._antwort_oder_fest(await self._mit_verlauf(nachrichten, verlauf), entscheid):
             yield stueck
         # Fuer Sprache keine Fusszeile -- Scores wuerden sonst vorgelesen. Der Prompt
         # bleibt derselbe wie bei der CLI, damit das Golden Set weiter gilt.
@@ -517,7 +521,7 @@ class Pipe:
             yield f"**Fehler in der RAG-Pipe:** {grund}\n\n---\n*Quelle: {name} -- keine Antwort*"
             return
         try:
-            async for stueck in self._antwort_oder_fest(setze_verlauf_ein(nachrichten, verlauf), entscheid):
+            async for stueck in self._antwort_oder_fest(await self._mit_verlauf(nachrichten, verlauf), entscheid):
                 yield stueck
         except Exception as e:
             # Auch im Fehlerpfad sichtbar, welches Heft geantwortet hat (Teilantwort!)

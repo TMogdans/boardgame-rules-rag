@@ -505,6 +505,72 @@ class TestKernZusatzPrompt(unittest.TestCase):
         self.assertIn("URTEIL: <klasse>", pf)
 
 
+class TestPraxisPrompt(unittest.TestCase):
+    """Praxisfragen (Liste als kern, Dict als beleg, Ketten mit Verlauf) und Byte-Gleichheit fuer golden-v2."""
+
+    # SHA-256 der Prompts, die judge.py VOR der Praxis-Erweiterung (Stand 228dfd8) fuer diese
+    # golden-v2-artigen Fragen erzeugte (kern als String, beleg als String, kein verlauf).
+    V2_FRAGE = {"frage": "Wie viele Karten ziehe ich?", "erwartet": "Fuenf Karten.",
+                "kern": "Man zieht auf fuenf Karten nach.", "zusatz": ["Es gibt kein Handkartenlimit."],
+                "beleg": "Draw up to five cards.", "erwartet_verweigerung": False}
+    V2_LEER = {"frage": "Gibt es Solo?", "erwartet": "Keine Angabe.", "kern": "Das Heft macht keine Angabe.",
+               "zusatz": [], "beleg": "Gesucht: solo - keine Treffer.", "erwartet_verweigerung": True}
+    V2_SOLL = {
+        ("V2_FRAGE", "frei"): "f8b3042d1f145af0e2abf400765129ba40510dfc20a6f7e3016253edd9e8519c",
+        ("V2_FRAGE", "logprob"): "c5a4d71652961a09bc5acb87dec8ebb4da3b74b4103cb4e67392ace8379465bf",
+        ("V2_LEER", "frei"): "0cff75886d5afead0fe7f1e2113eadd8723d76247a03188230b207685de27f03",
+        ("V2_LEER", "logprob"): "a09b5b23400c0e7bbaa1ab9fd3826bc6ac7d8d2e0ba13a7695cd9e51f74a6c6b",
+    }
+
+    PRAXIS = {"frage": "und zu dritt?", "typ": "kette", "erwartet_verweigerung": False,
+              "verlauf": ["Wie baue ich den Nemesis-Stapel zusammen?", "und zu dritt?"],
+              "kern": ["Zu dritt kommen 5 Basiskarten der Stufe 1 dazu.", "Aufbau wie immer: Stufe 3 unten."],
+              "zusatz": ["Zu dritt gibt es eine Joker-Karte."],
+              "beleg": {"10": "Use the chart below.", "8": "Add the wild card."}}
+
+    def test_golden_v2_prompt_ist_byte_gleich_dem_alten(self):
+        import hashlib
+        for (name, modus), soll in self.V2_SOLL.items():
+            with self.subTest(frage=name, modus=modus):
+                p = judge.baue_prompt(getattr(self, name), "Fuenf.", modus)
+                self.assertEqual(hashlib.sha256(p.encode("utf-8")).hexdigest(), soll)
+
+    def test_kern_liste_wird_aufzaehlung_nicht_repr(self):
+        p = judge.baue_prompt(self.PRAXIS, "x", "frei")
+        self.assertIn("sonst höchstens teilweise): \n- Zu dritt kommen 5 Basiskarten der Stufe 1 dazu.\n"
+                      "- Aufbau wie immer: Stufe 3 unten.\nZusatz", p)
+        self.assertNotIn("['", p)
+
+    def test_beleg_dict_eine_zeile_je_seite(self):
+        p = judge.baue_prompt(self.PRAXIS, "x", "frei")
+        self.assertIn("Beleg aus dem Regelheft: \nS. 10: Use the chart below.\nS. 8: Add the wild card.\n", p)
+        self.assertNotIn("{'", p)
+
+    def test_kette_zeigt_fruehere_nutzerfragen_einmal(self):
+        p = judge.baue_prompt(self.PRAXIS, "x", "frei")
+        self.assertIn("Bisheriger Gesprächsverlauf (Fragen des Nutzers, älteste zuerst):\n"
+                      "- Wie baue ich den Nemesis-Stapel zusammen?\n\nFrage: und zu dritt?\n", p)
+        self.assertEqual(p.count("und zu dritt?"), 1)   # die letzte Frage steht nicht doppelt im Verlauf
+
+    def test_ohne_verlauf_kein_verlaufsblock(self):
+        self.assertNotIn("Gesprächsverlauf", judge.baue_prompt(dict(self.PRAXIS, verlauf=[]), "x", "frei"))
+        self.assertNotIn("Gesprächsverlauf", judge.baue_prompt(self.V2_FRAGE, "x", "frei"))
+
+    def test_nur_die_letzte_antwort_steht_im_prompt(self):
+        p = judge.baue_prompt(dict(self.PRAXIS, verlauf=["Frage A?", "und B?"], frage="und B?"), "LETZTE", "frei")
+        self.assertIn("- Frage A?", p)
+        self.assertEqual(p.count("LETZTE"), 1)
+
+    def test_teil_leerstelle_fester_satz_ist_unsicher_ohne_modellaufruf(self):
+        f = dict(self.PRAXIS, typ="leerstelle", teil_leerstelle=True, erwartet_verweigerung=False, seiten=[24])
+        with mock.patch.object(judge.requests, "post", side_effect=AssertionError("kein Modellaufruf")):
+            r = judge.bewerte("frei", "m", f, "In den gefundenen Stellen steht dazu nichts.")
+            self.assertEqual((r["urteil"], r["deterministisch"]), ("unsicher", True))
+            r = judge.bewerte("frei", "m", dict(f, erwartet_verweigerung=True),
+                              "In den gefundenen Stellen steht dazu nichts.")
+            self.assertEqual(r["urteil"], "richtig")
+
+
 class TestGoldenSuffix(unittest.TestCase):
     def _golden_dir(self, d):
         gd = os.path.join(d, "golden")

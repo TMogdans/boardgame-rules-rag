@@ -544,7 +544,7 @@ def ordne_spiel(anfrage, katalog, schwelle=0.8):
 # zur naechsten -- kein Fenster. Eine unbekannte Wahl ("Spiel: Azull") wird gemeldet,
 # nie still im alten Spiel beantwortet; das alte Spiel bleibt gewaehlt. Eine reine
 # Namensnachricht ohne Rueckfrage ist eine gewoehnliche Frage im aktuellen Spiel.
-SCHNITTSTELLE = 7            # Version der Funktionen, die openwebui_pipe.py braucht
+SCHNITTSTELLE = 8            # Version der Funktionen, die openwebui_pipe.py braucht
 RUECKFRAGE = "Zu welchem Spiel ist die Frage?"
 KEIN_REGELHEFT = "Kein Regelheft zu „"   # Anfang unserer Meldung zu einer unbekannten Wahl
 _WAHL = re.compile(r"^\s*(?:spiel\s*:|wechsel\s+zu\s)\s*(?P<rest>.*)\Z", re.I | re.S)
@@ -1256,16 +1256,27 @@ def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
 
 
 # ---------- Antwort vom LLM ----------
-def baue_nachrichten(query, hits):
+def baue_nachrichten(query, hits, verlauf=None):
     """Systemprompt + Quellen + Frage -- die eine Stelle, an der der Prompt entsteht.
 
     Die CLI (answer) und die Open-WebUI-Pipe (openwebui_pipe.py) bauen ihn beide
-    hier, damit das Golden Set auch das misst, was im Chat ankommt.
+    hier, damit das Golden Set auch das misst, was im Chat ankommt. Mit verlauf
+    (fruehere Wortwechsel) steht er zwischen Systemprompt und Quellen-Frage.
     """
-    return [
+    nachrichten = [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": f"Quellen:\n{baue_kontext(hits)}\n\nFrage: {query}"},
     ]
+    return setze_verlauf_ein(nachrichten, verlauf) if verlauf else nachrichten
+
+
+def setze_verlauf_ein(nachrichten, verlauf):
+    """Verlauf zwischen Systemprompt und die Quellen-Frage schieben.
+
+    Die eine Stelle fuer Pipe UND Eval (Ketten): openwebui_pipe.py ruft diese Funktion des
+    geladenen rag.py, es gibt keine zweite Kopie.
+    """
+    return nachrichten[:1] + verlauf + nachrichten[1:]
 
 
 def baue_kontext(hits):
@@ -1278,21 +1289,22 @@ def baue_kontext(hits):
 LETZTER_ENTSCHEID = None
 
 
-def answer(query, hits):
+def answer(query, hits, verlauf=None):
     """Antwort auf die Frage. Mit ENTSCHEIDUNG=1 zuerst der Entscheidungsschritt (siehe beantworte,
-    Option danach in LETZTER_ENTSCHEID); ohne ist das genau ein LLM-Aufruf wie bisher."""
+    Option danach in LETZTER_ENTSCHEID); ohne ist das genau ein LLM-Aufruf wie bisher.
+    verlauf: fruehere Wortwechsel (Nutzer-/Assistant-Nachrichten) fuer Ketten, sonst None."""
     global LETZTER_ENTSCHEID
     LETZTER_ENTSCHEID = None
     if entscheidung_an():
-        text, LETZTER_ENTSCHEID = beantworte(query, hits)
+        text, LETZTER_ENTSCHEID = beantworte(query, hits, verlauf)
         return text
-    return _llm_antwort(query, hits)
+    return _llm_antwort(query, hits, verlauf)
 
 
-def _llm_antwort(query, hits):
+def _llm_antwort(query, hits, verlauf=None):
     r = requests.post(f"{OLLAMA}/api/chat", json={
         "model": LLM_MODEL,
-        "messages": baue_nachrichten(query, hits),
+        "messages": baue_nachrichten(query, hits, verlauf),
         "think": THINK,
         "stream": False,
     }, timeout=600)
@@ -1418,7 +1430,7 @@ def entscheid_hinweis(hits, sprache=False):
     return f"\n\n{ENTSCHEID_TEILWEISE} -- pruef {_seiten_liste(seiten, False)}."
 
 
-def beantworte(query, hits):
+def beantworte(query, hits, verlauf=None):
     """(antwort, (option, probs)) mit Entscheidungsschritt -- unabhaengig von ENTSCHEIDUNG.
 
     C: KEIN Antwort-Aufruf, fester Text mit den abgerufenen Seiten. B: normale Antwort plus
@@ -1427,7 +1439,7 @@ def beantworte(query, hits):
     option, probs = entscheide(query, hits)
     if option == "C":
         return entscheid_text_nichts(hits), (option, probs)
-    text = _llm_antwort(query, hits)
+    text = _llm_antwort(query, hits, verlauf)
     if option == "B":
         text += entscheid_hinweis(hits)
     return text, (option, probs)
@@ -1572,6 +1584,29 @@ def formatiere_zusammenfassung(z):
         "  woertlich vorkommt. Er erkennt keine falsche Antwort und belegt kein",
         "  'keine einzige falsch' -- diese Kategorie erhebt das Skript nicht.",
     ]
+
+
+PRAXIS_TYPEN = ("ablauf", "kette")
+
+
+def fasse_je_typ(saetze):
+    """{typ: fasse_zusammen(saetze dieses Typs)} in der Reihenfolge des ersten Auftretens."""
+    je_typ = {}
+    for s in saetze:
+        je_typ.setdefault(s.get("typ") or "?", []).append(s)
+    return {t: fasse_zusammen(v) for t, v in je_typ.items()}
+
+
+def formatiere_je_typ(saetze):
+    """Aufschluesselung der Retrieval-Wertung je Typ -- nur, wenn Praxis-Typen (ablauf/kette)
+    vorkommen; ein reines Faktenset behaelt genau seine bisherige Ausgabe."""
+    if not any(s.get("typ") in PRAXIS_TYPEN for s in saetze):
+        return []
+    z = ["", "== je Typ (Retrieval) =="]
+    for t, k in fasse_je_typ(saetze).items():
+        z.append(f"  {t:<12} Fragen {k['fragen']:>3}  getroffen {k['getroffen']}/{k['retrieval_nenner']}"
+                 f"  verfehlt {k['verfehlt']}/{k['retrieval_nenner']}  Verweigerungsfragen {k['verweigerungsfragen']}")
+    return z
 
 
 # ---------- Migration: alte Einzeldatei -> data/<spiel_id>/ ----------
@@ -1759,6 +1794,83 @@ def _konfig_zeile(quelle):
             f"  source={quelle}  drop_types={os.environ.get('DROP_TYPES', '') or '-'}")
 
 
+# ---------- Ketten (Praxisfragen, typ "kette") ----------
+# Wie die Open-WebUI-Pipe: Retrieval nur auf der jeweils letzten Nachricht, das Antwortmodell
+# bekommt den Verlauf (fruehere Fragen und die eigenen Antworten OHNE Hinweis/Fusszeile) zwischen
+# Systemprompt und Quellen-Frage (setze_verlauf_ein).
+_HINWEIS_IM_VERLAUF = re.compile(r"(?:\n\n)?" + re.escape(ENTSCHEID_TEILWEISE) + r"[^\n]*\s*\Z")
+
+
+def verlauf_antwort(text):
+    """Eigene Antwort, wie sie in den Verlauf kommt: ohne den Hinweis des Entscheidungsschritts (B).
+
+    Die Pipe entfernt ihn (openwebui_pipe.ohne_fusszeile) samt Fusszeile; der Eval erzeugt keine
+    Fusszeile. test_ketten.py haelt beide Wege gegeneinander.
+    """
+    return _HINWEIS_IM_VERLAUF.sub("", text)
+
+
+def fruehere_fragen(frage):
+    """Nutzerfragen VOR der letzten Nachricht einer Golden-Set-Frage (leer ohne "verlauf").
+
+    Das Golden Set fuehrt die letzte Frage auch als letztes Element von "verlauf"; sie ist die
+    Frage selbst, kein frueherer Wortwechsel.
+    """
+    verlauf = list(frage.get("verlauf") or [])
+    if verlauf and verlauf[-1] == frage.get("frage"):
+        verlauf.pop()
+    return verlauf
+
+
+def suchanfrage(frage, verlauf):
+    """Die Suchanfrage aus letzter Frage und bisherigem Verlauf (Nachrichten-Liste).
+
+    Heute die letzte Frage unveraendert -- so sucht die Pipe. Hier haengt spaeter der
+    Umformulierungsschritt ("condense question"), Pipe und Eval bekaemen ihn dann gemeinsam.
+    """
+    return frage
+
+
+def antworte_frage(f, suche):
+    """Eine Golden-Set-Frage beantworten: {"hits", "antwort", "entscheid", "verlauf"}.
+
+    Ohne "verlauf" genau ein Retrieval und ein answer() wie bisher. Bei einer Kette werden die
+    frueheren Nutzerfragen der Reihe nach vom System selbst beantwortet (Retrieval auf der jeweils
+    letzten Nachricht, Antwort mit dem bis dahin aufgebauten Verlauf); "verlauf" im Ergebnis
+    protokolliert diese Zwischenschritte. Bewertet wird allein die letzte Antwort.
+    """
+    global LETZTER_ENTSCHEID
+    nachrichten, zwischen = [], []
+    for q in fruehere_fragen(f):
+        hits = suche(suchanfrage(q, nachrichten))
+        LETZTER_ENTSCHEID = None
+        ans = answer(q, hits, nachrichten) if nachrichten else answer(q, hits)
+        zwischen.append({"frage": q, "antwort": ans, "abgerufen": [h["seite"] for h, _ in hits],
+                         "scores": [round(float(s), 4) for _, s in hits],
+                         "entscheid": LETZTER_ENTSCHEID if entscheidung_an() else None})
+        nachrichten = nachrichten + [{"role": "user", "content": q},
+                                     {"role": "assistant", "content": verlauf_antwort(ans)}]
+    hits = suche(suchanfrage(f["frage"], nachrichten))
+    LETZTER_ENTSCHEID = None
+    ans = answer(f["frage"], hits, nachrichten) if nachrichten else answer(f["frage"], hits)
+    return {"hits": hits, "antwort": ans, "verlauf": zwischen,
+            "entscheid": LETZTER_ENTSCHEID if entscheidung_an() else None}
+
+
+GOLDEN_STANDARD = "golden_set.json"
+
+
+def golden_datei():
+    """Name der Golden-Set-Datei im Spielordner: Umgebungsvariable GOLDEN_DATEI, sonst golden_set.json.
+
+    Nur ein Dateiname -- kein Pfad, damit der Eval nie ausserhalb des Spielordners liest.
+    """
+    name = os.environ.get("GOLDEN_DATEI") or GOLDEN_STANDARD
+    if os.path.basename(name) != name or name in (".", ".."):
+        raise KonfigFehler(f"GOLDEN_DATEI={name!r} muss ein reiner Dateiname im Spielordner sein.")
+    return name
+
+
 def cmd_eval(golden_set_pfad=None):
     # Pfad als Parameter, damit der komplette Wertungsdurchlauf mit einem
     # Beispiel-Golden-Set testbar ist (siehe test_wertung.py, TestCmdEval).
@@ -1779,7 +1891,7 @@ def lade_golden_set(spiel_id, data_dir=None):
     Ein Golden Set ohne oder mit fremder spiel_id ist ein Kopierfehler: seine
     Seitenzahlen wuerden gegen ein anderes Heft gewertet.
     """
-    pfad = os.path.join(spiel_verzeichnis(spiel_id, data_dir), "golden_set.json")
+    pfad = os.path.join(spiel_verzeichnis(spiel_id, data_dir), golden_datei())
     if not os.path.exists(pfad):
         raise KonfigFehler(f"{pfad} fehlt -- ohne Golden Set keine Eval fuer {spiel_id!r}.")
     with open(pfad, encoding="utf-8") as f:
@@ -1797,13 +1909,14 @@ def cmd_eval_spiel(spiel_id, data_dir=None):
     try:
         chunks, embs = lade_spiel(con, spiel_id, drop_fuer_index())
         name = lies_spiel(spiel_id, data_dir)["name"]
-        print(_konfig_zeile("index") + f"  hybrid={HYBRID}")
+        print(_konfig_zeile("index") + f"  hybrid={HYBRID}"
+              + (f"  golden={golden_datei()}" if golden_datei() != GOLDEN_STANDARD else ""))
         print(f"Spiel: {name} ({spiel_id})  Index: {len(chunks)} Chunks\n")
         saetze = werte_fragen(gs["fragen"],
                               lambda frage: retrieve(frage, chunks, embs, spiel_id=spiel_id, index=con))
     finally:
         con.close()
-    for zeile in formatiere_zusammenfassung(fasse_zusammen(saetze)):
+    for zeile in formatiere_zusammenfassung(fasse_zusammen(saetze)) + formatiere_je_typ(saetze):
         print(zeile)
     return saetze
 
@@ -1817,12 +1930,12 @@ def cmd_eval_spiele(args, data_dir=None):
     if "--alle" in args:
         alle = liste_spiele(data_dir)
         ids = [s for s in alle
-               if os.path.exists(os.path.join(spiel_verzeichnis(s, data_dir), "golden_set.json"))]
+               if os.path.exists(os.path.join(spiel_verzeichnis(s, data_dir), golden_datei()))]
         ohne = [s for s in alle if s not in ids]
         if ohne:
             print(f"Ohne Golden Set, nicht gewertet: {', '.join(ohne)}\n")
         if not ids:
-            raise KonfigFehler("Kein Spiel unter data/ hat ein golden_set.json.")
+            raise KonfigFehler(f"Kein Spiel unter data/ hat ein {golden_datei()}.")
     else:
         ids = [loese_spiel(a, data_dir) for a in args]
     alle_saetze = []
@@ -1832,23 +1945,22 @@ def cmd_eval_spiele(args, data_dir=None):
         print()
     if len(ids) > 1:
         print(f"==================== Gesamt ueber {len(ids)} Spiele ====================")
-        for zeile in formatiere_zusammenfassung(fasse_zusammen(alle_saetze)):
+        for zeile in formatiere_zusammenfassung(fasse_zusammen(alle_saetze)) + formatiere_je_typ(alle_saetze):
             print(zeile)
     return alle_saetze
 
 
 def werte_fragen(fragen, suche):
     """Frage fuer Frage: suchen, antworten, werten, ausgeben. suche(frage) -> hits."""
-    global LETZTER_ENTSCHEID
     saetze = []
     for f in fragen:
-        hits = suche(f["frage"])
-        LETZTER_ENTSCHEID = None
-        ans = answer(f["frage"], hits)
-        entscheid = LETZTER_ENTSCHEID if entscheidung_an() else None
+        erg = antworte_frage(f, suche)
+        hits, ans, entscheid = erg["hits"], erg["antwort"], erg["entscheid"]
         satz = bewerte_frage(f, [h["seite"] for h, _ in hits], ans)
         saetze.append(satz)
         print(f"[{f['id']}] ({f['typ']}) {f['frage']}")
+        for z in erg["verlauf"]:
+            print(f"    Verlauf  : {z['frage']} -> abgerufen={z['abgerufen']}")
         print(f"    erwartet : {f['erwartet']}")
         if satz["kategorie"] == KAT_VERWEIGERUNG:
             print(f"    Wertung  : Verweigerungsfrage -- Retrieval-Quote nicht anwendbar "

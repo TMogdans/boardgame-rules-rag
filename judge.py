@@ -32,6 +32,8 @@ from collections import defaultdict
 
 import requests
 
+import rag  # fruehere_fragen: dieselbe Regel wie beim Beantworten der Kette
+
 OLLAMA = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_KEY_DATEI = os.path.expanduser("~/.config/anthropic/api_key")
@@ -82,7 +84,7 @@ Du bist Prüfer für ein Brettspiel-Regel-Assistenzsystem. Du bewertest eine Ant
 
 PROMPT_KOPF = _PROMPT_EINLEITUNG + KLASSEN_TEXT + """
 
-Frage: {frage}
+{verlauf}Frage: {frage}
 Erwartet (Musterlösung): {erwartet}
 Beleg aus dem Regelheft: {beleg}
 Verweigern ist laut Golden Set die richtige Antwort (erwartet_verweigerung): {verweigerung}
@@ -95,7 +97,7 @@ Antwort des Systems:
 
 PROMPT_KOPF_KERN = _PROMPT_EINLEITUNG + KLASSEN_TEXT_KERN + """
 
-Frage: {frage}
+{verlauf}Frage: {frage}
 Kern (muss in der Antwort stehen, sonst höchstens teilweise): {kern}
 Zusatz (darf fehlen, ohne Abzug; falsch wiedergegeben = falsch):{zusatz}
 Beleg aus dem Regelheft: {beleg}
@@ -117,20 +119,51 @@ URTEIL: <klasse>
 wobei <klasse> eines von richtig, teilweise, falsch, unsicher ist."""
 
 
+def _aufzaehlung(eintraege):
+    return "\n".join(f"- {e}" for e in eintraege)
+
+
+def _kern_text(kern):
+    """kern als String (golden-v2) unveraendert; als Liste (Praxisfragen) eine Aufzaehlung."""
+    if isinstance(kern, (list, tuple)):
+        return "\n" + _aufzaehlung(kern)
+    return kern
+
+
+def _beleg_text(beleg):
+    """beleg als String (golden-v2) unveraendert; als Dict {Seite: Auszug} eine Zeile je Seite."""
+    if isinstance(beleg, dict):
+        return "\n" + "\n".join(f"S. {seite}: {auszug}" for seite, auszug in beleg.items())
+    return beleg
+
+
+def _verlauf_text(frage):
+    """Kette: die frueheren Fragen des Nutzers, damit eine elliptische letzte Frage ("und zu dritt?")
+    verstaendlich ist. Die Zwischenantworten des Systems gehen bewusst NICHT in den Prompt -- der
+    Pruefer wertet nur die letzte Antwort und soll nicht von fremden Antworten geleitet werden.
+    Ohne Verlauf leer, der Prompt bleibt dann Byte fuer Byte der bisherige."""
+    frueher = rag.fruehere_fragen(frage)
+    if not frueher:
+        return ""
+    return "Bisheriger Gesprächsverlauf (Fragen des Nutzers, älteste zuerst):\n" + _aufzaehlung(frueher) + "\n\n"
+
+
 def baue_prompt(frage, antwort, modus):
     """Judge-Prompt. Eingabe: Frage-Dict (frage, erwartet, beleg, erwartet_verweigerung;
-    optional kern (str) und zusatz (Liste) -- mit kern gilt die Kern/Zusatz-Variante,
-    ohne kern der bisherige Prompt unveraendert)."""
+    optional kern (str oder Liste) und zusatz (Liste) -- mit kern gilt die Kern/Zusatz-Variante,
+    ohne kern der bisherige Prompt unveraendert; beleg als String oder {Seite: Auszug}; verlauf
+    (Praxis-Kette) = fruehere Nutzerfragen)."""
     gemeinsam = dict(
         frage=frage.get("frage", ""),
-        beleg=frage.get("beleg") or "(keiner angegeben)",
+        verlauf=_verlauf_text(frage),
+        beleg=_beleg_text(frage.get("beleg")) or "(keiner angegeben)",
         verweigerung="ja" if frage.get("erwartet_verweigerung") else "nein",
         antwort=antwort,
     )
     if frage.get("kern"):
         zusatz = frage.get("zusatz") or []
         kopf = PROMPT_KOPF_KERN.format(
-            kern=frage["kern"],
+            kern=_kern_text(frage["kern"]),
             zusatz=("\n" + "\n".join(f"- {z}" for z in zusatz)) if zusatz else " (keiner)",
             **gemeinsam)
     else:

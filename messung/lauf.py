@@ -6,11 +6,15 @@ Messlauf: `rag.py eval` ueber Spiele mit Golden Set, dazu ein Antwortprotokoll.
     python messung/lauf.py AUSGABEVERZEICHNIS [--daten DATENVERZEICHNIS] [spiel_id ... | --alle]
 
 Alle Stellschrauben bleiben Umgebungsvariablen wie beim Eval (LLM_MODEL, THINK,
-PROMPT_VERSION, ENTSCHEIDUNG, HYBRID, TOP_K, CHUNK_SIZE, DROP_TYPES ...).
+PROMPT_VERSION, ENTSCHEIDUNG, HYBRID, TOP_K, CHUNK_SIZE, DROP_TYPES ...). GOLDEN_DATEI waehlt eine
+andere Golden-Set-Datei im Spielordner (Default golden_set.json); meta.json haelt sie fest.
 
 Schreibt ins Ausgabeverzeichnis (das der Aufrufer nennt, nie ins Repo):
   antworten.jsonl  je Frage: volle Antwort, abgerufene Seiten, Scores, Option des
-                   Entscheidungsschritts, Laufzeit der Antwort (Sekunden)
+                   Entscheidungsschritts, Laufzeit der Antwort (Sekunden). Bei einer Kette
+                   (Praxisfragen) zusaetzlich "verlauf": die live beantworteten Zwischenfragen
+                   {frage, antwort, abgerufen, scores, entscheid, t_antwort}; die Zeile selbst
+                   gehoert der letzten Frage.
   meta.json        vollstaendige Konfiguration des Laufs (Modell, Stellschrauben,
                    git-Commit von rag.py, Zeitstempel) -- ein Lauf ist damit auch
                    ohne die Konsolenausgabe (eval.txt) nachvollziehbar
@@ -34,7 +38,7 @@ import rag  # noqa: E402
 # nie die ganze Umgebung protokollieren (Tokens!).
 ENV_SCHLUESSEL = ("LLM_MODEL", "THINK", "PROMPT_VERSION", "ENTSCHEIDUNG", "HYBRID", "TOP_K", "RERANK",
                   "RRF_K", "CANDIDATES", "CHUNK_SIZE", "CHUNK_OVERLAP", "DROP_TYPES", "SOURCE",
-                  "EMBED_MODEL", "RERANK_MODEL", "OLLAMA_URL")
+                  "EMBED_MODEL", "RERANK_MODEL", "OLLAMA_URL", "GOLDEN_DATEI")
 # Wirksame Werte, wie rag.py sie nach dem Import haelt (Default eingerechnet).
 RAG_KONFIG = ("OLLAMA", "EMBED_MODEL", "LLM_MODEL", "CHUNK_SIZE", "CHUNK_OVERLAP", "TOP_K", "THINK", "RERANK",
               "HYBRID", "RRF_K", "RERANK_MODEL", "CANDIDATES", "PROMPT_VERSION", "ENTSCHEIDUNG")
@@ -60,6 +64,13 @@ def git_stand(pfad):
         return None, None
 
 
+def _golden_datei():
+    try:
+        return rag.golden_datei()
+    except rag.KonfigFehler:   # ein falscher Name bricht den Eval selbst mit klarer Meldung ab
+        return os.environ.get("GOLDEN_DATEI")
+
+
 def baue_meta(args, data_dir, start):
     commit, geaendert = git_stand(rag.__file__)
     try:
@@ -70,6 +81,7 @@ def baue_meta(args, data_dir, start):
         "modell": rag.LLM_MODEL,
         "konfiguration": {k: getattr(rag, k, None) for k in RAG_KONFIG},
         "drop_types": drop,
+        "golden_datei": _golden_datei(),
         "entscheidung_an": bool(rag.entscheidung_an()),
         "env": {k: os.environ[k] for k in ENV_SCHLUESSEL if k in os.environ},
         "rag_commit": commit,
@@ -107,39 +119,46 @@ def fuehre_aus(ausgabe, args=("--alle",), data_dir=None, ueberschreiben=False, e
     start = uhr()
     meta = baue_meta(args, data_dir, start)
     schreibe_meta(pfad_m, meta)   # gleich am Anfang: auch ein abgebrochener Lauf ist zuzuordnen
-    akt = {"spiel": None, "fragen": {}, "n": 0}
-    orig_spiel, orig_answer, orig_werte = rag.cmd_eval_spiel, rag.answer, rag.werte_fragen
+    akt = {"spiel": None, "calls": [], "n": 0}
+    orig_spiel, orig_answer, orig_frage = rag.cmd_eval_spiel, rag.answer, rag.antworte_frage
     aus = open(pfad_a, "w", encoding="utf-8")
 
     def spiel(sid, *a, **k):
         akt["spiel"] = sid
         return orig_spiel(sid, *a, **k)
 
-    def werte(fragen, suche):
-        akt["fragen"] = {f["frage"]: f for f in fragen}
-        return orig_werte(fragen, suche)
-
-    def answer(frage, hits):
+    def answer(frage, hits, *rest):
+        # jede Antwort (auch die Zwischenantworten einer Kette) einzeln stoppen
         t = time.perf_counter()
-        ans = orig_answer(frage, hits)
-        dt = time.perf_counter() - t
-        f = akt["fragen"][frage]
+        ans = orig_answer(frage, hits, *rest)
+        dt = round(time.perf_counter() - t, 2)
         ent = getattr(rag, "LETZTER_ENTSCHEID", None)
-        opt, probs = ent if ent else (None, None)
-        aus.write(json.dumps({"spiel_id": akt["spiel"], "frage_id": f["id"], "frage": frage, "antwort": ans,
-                              "abgerufen": [h["seite"] for h, _ in hits],
-                              "scores": [round(float(s), 4) for _, s in hits],
-                              "entscheid": opt, "probs": probs, "t_antwort": round(dt, 2)},
-                             ensure_ascii=False) + "\n")
-        aus.flush()
-        akt["n"] += 1
+        akt["calls"].append((dt, ent if ent else (None, None)))
         return ans
 
-    rag.cmd_eval_spiel, rag.answer, rag.werte_fragen = spiel, answer, werte
+    def antworte(f, suche):
+        akt["calls"] = []
+        erg = orig_frage(f, suche)
+        calls = akt["calls"]   # ein Eintrag je Antwort; der letzte gehoert der bewerteten Frage
+        dt, (opt, probs) = calls[-1]
+        zeile = {"spiel_id": akt["spiel"], "frage_id": f["id"], "frage": f["frage"], "antwort": erg["antwort"],
+                 "abgerufen": [h["seite"] for h, _ in erg["hits"]],
+                 "scores": [round(float(s), 4) for _, s in erg["hits"]],
+                 "entscheid": opt, "probs": probs, "t_antwort": dt}
+        if f.get("verlauf"):   # Kette: die live beantworteten Zwischenschritte
+            zeile["verlauf"] = [{**{k: v for k, v in z.items() if k != "entscheid"},
+                                 "entscheid": e[0], "probs": e[1], "t_antwort": t}
+                                for z, (t, e) in zip(erg["verlauf"], calls)]
+        aus.write(json.dumps(zeile, ensure_ascii=False) + "\n")
+        aus.flush()
+        akt["n"] += 1
+        return erg
+
+    rag.cmd_eval_spiel, rag.answer, rag.antworte_frage = spiel, answer, antworte
     try:
         eval_fn(list(args), data_dir=data_dir)
     finally:
-        rag.cmd_eval_spiel, rag.answer, rag.werte_fragen = orig_spiel, orig_answer, orig_werte
+        rag.cmd_eval_spiel, rag.answer, rag.antworte_frage = orig_spiel, orig_answer, orig_frage
         aus.close()
         meta["ende"] = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(uhr()))
         meta["antworten"] = akt["n"]
