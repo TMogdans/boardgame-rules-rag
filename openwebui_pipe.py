@@ -41,10 +41,15 @@ _FEHLERZEILE = re.compile(r"(?:\n\n)?\*\*Fehler in der RAG-Pipe:\*\*.*\Z", re.S)
 # Index-Weg: die Fusszeile nennt das Spiel ("Quelle: Food Chain Magnate, Seite 11 ...").
 # Der alte Weg behaelt seine Fusszeile unveraendert (byte-gleich zu ed36f99).
 _FUSSZEILE_INDEX = re.compile(r"(?:\n\n)?---\n\*Quelle: [^\n]*\*\s*\Z")
+# Hinweis des Entscheidungsschritts bei B (rag.entscheid_hinweis), vor der Fusszeile. Er nennt
+# Seiten ohne deren Text -- aus demselben Grund wie die Fusszeile nicht in den Verlauf.
+_HINWEIS_TEILWEISE = re.compile(r"(?:\n\n)?Hinweis: nur teilweise belegt[^\n]*\s*\Z")
 # Mindest-Schnittstelle des geladenen rag.py fuer den Index-Weg (rag.SCHNITTSTELLE).
 # Ein aelterer Clone im Mount ergaebe sonst AttributeError mitten in der Antwort.
 MIN_SCHNITTSTELLE = 7
 _RAG_ALTER_WEG = ("lies_drop_types", "baue_knowledge_chunks", "l2norm", "embed", "retrieve", "baue_nachrichten")
+# Nur mit Valve ENTSCHEIDUNG gebraucht -- ein aelterer Clone bleibt ohne es nutzbar.
+_RAG_ENTSCHEIDUNG = ("entscheide", "entscheid_text_nichts", "entscheid_hinweis")
 _RAG_INDEX_WEG = _RAG_ALTER_WEG + ("oeffne_index", "spiele_im_index", "katalog_aus_index", "ordne_spiel",
                                    "chat_woerterbuch", "spiel_im_chat", "RUECKFRAGE", "KEIN_REGELHEFT", "index_konfig",
                                    "stand_im_index", "fingerprint", "lade_spiel", "knowledge_pfad", "KonfigFehler")
@@ -67,7 +72,7 @@ def ohne_fusszeile(text, index_weg=False):
     """
     if index_weg:
         text = _FUSSZEILE_INDEX.sub("", text)
-    return _FEHLERZEILE.sub("", _FUSSZEILE.sub("", text))
+    return _HINWEIS_TEILWEISE.sub("", _FEHLERZEILE.sub("", _FUSSZEILE.sub("", text)))
 
 
 def zerlege_verlauf(messages, index_weg=False):
@@ -177,6 +182,7 @@ class Pipe:
         DROP_TYPES: str = Field("flavor,meta", description="Chunk-Typen, die nicht in den Index gehen (regel, flavor, meta)")
         THINK: bool = False
         PROMPT_VERSION: str = Field("v1", description="Systemprompt: v1 (Bestand) oder v2 (Regel 6 ersetzt, Regel 9 neu); wie PROMPT_VERSION bei rag.py")
+        ENTSCHEIDUNG: bool = Field(False, description="Entscheidungsschritt vor der Antwort (A/B/C); C = fester Text ohne Antwort-Aufruf, B = Hinweis; wie ENTSCHEIDUNG=1 bei rag.py")
         # Welches Spiel knowledge.jsonl beschreibt -- fuer Anfragen mit "regelfrage.spiel"
         # (Home Assistant). Solange es eine Wissensbasis gibt, ist das ein Eintrag.
         SPIEL: str = "Food Chain Magnate"
@@ -236,6 +242,12 @@ class Pipe:
             raise RuntimeError(f"rag.py unter {pfad} kennt keine Prompt-Versionen, Valve PROMPT_VERSION="
                                f"{v.PROMPT_VERSION!r} waere wirkungslos. Clone aktualisieren.")
         rag.PROMPT_VERSION = v.PROMPT_VERSION
+        # Entscheidungsschritt: ebenso allein das Valve. Ein rag.py ohne ihn -> laut abbrechen.
+        fehlt = [n for n in _RAG_ENTSCHEIDUNG if not hasattr(rag, n)]
+        if v.ENTSCHEIDUNG and fehlt:
+            raise RuntimeError(f"rag.py unter {pfad} kennt keinen Entscheidungsschritt (fehlt: {', '.join(fehlt)}), "
+                               "Valve ENTSCHEIDUNG waere wirkungslos. Clone aktualisieren.")
+        rag.ENTSCHEIDUNG = "1" if v.ENTSCHEIDUNG else "0"
         return rag
 
     def _lade_index(self, rag, v):
@@ -267,6 +279,36 @@ class Pipe:
     def _rag_fuer(self, v):
         with self._lock:
             return self._lade_rag(v)
+
+    def _entscheide(self, frage, hits, v, sprache):
+        """(option, Text) des Entscheidungsschritts: C -> fester Text statt Antwort, B -> Hinweis
+        hinter die Antwort, A -> "". Modell und Ollama aus den Valves, nicht aus Modul-Globalen."""
+        rag = self._rag_fuer(v)
+        option, _ = rag.entscheide(frage, hits, modell=v.LLM_MODEL, ollama=v.OLLAMA_URL)
+        if option == "C":
+            return option, rag.entscheid_text_nichts(hits, sprache=sprache)
+        if option == "B":
+            return option, rag.entscheid_hinweis(hits, sprache=sprache)
+        return option, ""
+
+    async def _entscheid_fuer(self, frage, hits, sprache):
+        """(option, Text) -- ohne Valve ENTSCHEIDUNG (None, "") und kein Aufruf."""
+        v = self.valves
+        if not v.ENTSCHEIDUNG:
+            return None, ""
+        return await asyncio.to_thread(self._entscheide, frage, hits, v, sprache)
+
+    async def _antwort_oder_fest(self, nachrichten, entscheid):
+        """LLM-Antwort nach dem Entscheidungsschritt. Bei C laeuft KEIN Stream vom LLM, die
+        Pipe gibt den festen Text aus; bei B folgt der Hinweis; ohne Schritt wie bisher."""
+        option, zusatz = entscheid
+        if option == "C":
+            yield zusatz
+            return
+        async for stueck in self._stream(nachrichten):
+            yield stueck
+        if zusatz:
+            yield zusatz
 
     # ---------- Index-Weg (viele Spiele) ----------
     def _lade_katalog(self, rag, v):
@@ -407,7 +449,8 @@ class Pipe:
             yield "Keine Frage gefunden."
             return
         nachrichten, hits = await asyncio.to_thread(self._suche, frage, self.valves)
-        async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
+        entscheid = await self._entscheid_fuer(frage, hits, bool(rf.get("sprache")))
+        async for stueck in self._antwort_oder_fest(setze_verlauf_ein(nachrichten, verlauf), entscheid):
             yield stueck
         # Fuer Sprache keine Fusszeile -- Scores wuerden sonst vorgelesen. Der Prompt
         # bleibt derselbe wie bei der CLI, damit das Golden Set weiter gilt.
@@ -467,13 +510,14 @@ class Pipe:
         name = next((s["name"] for s in self._katalog[0] if s["spiel_id"] == spiel_id), spiel_id)
         try:
             nachrichten, hits = await asyncio.to_thread(self._suche_spiel, frage, v, spiel_id)
+            entscheid = await self._entscheid_fuer(frage, hits, bool(rf.get("sprache")))
         except Exception as e:
-            # Embedding/Index-Ausfall: wie die Fusszeile sichtbar, welches Heft gefragt war
+            # Embedding/Index-Ausfall (auch der Entscheidungsschritt): sichtbar, welches Heft gefragt war
             grund = " ".join(f"{type(e).__name__}: {e}".split())
             yield f"**Fehler in der RAG-Pipe:** {grund}\n\n---\n*Quelle: {name} -- keine Antwort*"
             return
         try:
-            async for stueck in self._stream(setze_verlauf_ein(nachrichten, verlauf)):
+            async for stueck in self._antwort_oder_fest(setze_verlauf_ein(nachrichten, verlauf), entscheid):
                 yield stueck
         except Exception as e:
             # Auch im Fehlerpfad sichtbar, welches Heft geantwortet hat (Teilantwort!)

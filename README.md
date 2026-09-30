@@ -125,6 +125,7 @@ THINK=1 python rag.py eval                # Reasoning des LLM anschalten
 HYBRID=1 python rag.py eval food-chain-magnate  # Vektor + BM25 (FTS5) per Reciprocal Rank Fusion, nur mit Index
 RRF_K=60                                  # Daempfung der Rangfusion, Default 60
 PROMPT_VERSION=v2 python rag.py eval food-chain-magnate  # Systemprompt v2 statt v1 (Default v1)
+ENTSCHEIDUNG=1 python rag.py eval food-chain-magnate     # Entscheidungsschritt vor der Antwort (Default 0 = aus)
 ```
 
 **Prompt-Version.** `PROMPT_VERSION` waehlt den Systemprompt aus `rag.SYSTEM_PROMPTS`. `v1` ist der
@@ -136,6 +137,25 @@ mit Seite nennen). Eine unbekannte Version bricht mit `ABBRUCH (Konfiguration)` 
 der Eval nennt `prompt=v2` nur, wenn die Version nicht v1 ist -- die Ausgabe mit v1 bleibt
 unveraendert. Bei Verweigerungsfragen zaehlen die beiden v2-Saetze als Signalwort (weiter ein Indiz,
 kein Urteil); `judge.py` wertet sie im kern-Prompt nicht als falsche Aussage.
+
+**Entscheidungsschritt.** Mit `ENTSCHEIDUNG=1` fragt `rag.py` vor der Antwort dasselbe Modell mit
+denselben Quellen (gleiche Quellenkoepfe wie der Antwort-Prompt): "Enthalten die Quellen die Antwort
+auf die Frage? A) ja, vollstaendig B) nur teilweise C) nein" -- ein Token, `temperature 0`, `think`
+aus, Wahrscheinlichkeiten ueber `logprobs`. Es zaehlt allein die gewaehlte Option (argmax), es gibt
+keine Schwelle: gemessen (66 Golden-Set-Fragen, 6 Spiele, qwen3:14b) lagen 54/66 Konfidenzen ueber
+0,99, die Option selbst trennte dagegen gut (C bei 14/19 Stellen ohne Antwort, 3/47 Treffer
+faelschlich C).
+
+- **C**: kein Antwort-Aufruf. Fester Text `In den gefundenen Stellen steht dazu nichts. Naechste
+  Fundstellen: S. 14, S. 12.` (abgerufene Seiten in Rangfolge, ohne Duplikate). Der Satz zaehlt bei
+  Verweigerungsfragen als Signalwort und faellt unter die judge-Regel fuer Verweigerungssaetze.
+- **B**: normale Antwort plus `Hinweis: nur teilweise belegt -- pruef S. 14, S. 12.`
+- **A**: normale Antwort, unveraendert. Steht keine der drei Optionen unter den `top_logprobs`,
+  gilt A (in `rag.beantworte` erkennbar an `probs=None`).
+- Liefert Ollama kein `logprobs`, bricht es ab (`ABBRUCH (Konfiguration)`) -- nie still A. Ein
+  anderer Wert als `0`/`1` bricht ebenso ab.
+- Die Eval zeigt je Frage `Entscheid: C (A=0.000 B=0.004 C=0.996)`; die Konfig-Zeile nennt
+  `entscheidung=1` nur, wenn an. Ohne die Variable ist alles byte-gleich zum bisherigen Stand.
 
 `FRAGMENT_THRESHOLD=50` (in `auto_ingest.py`) entscheidet, ab wie vielen Text-Fragmenten
 eine Seite als Grafik gilt und zur Vision-Route geht.
@@ -309,6 +329,7 @@ python test_chat.py          # Spiel im Chat: nur explizite Wahl (Spiel: X)
 python test_pipe_alt.py      # alter Pipe-Weg wie ed36f99 (pipe_referenz.json, pipe_verlauf_referenz.json)
 python test_judge.py         # Bewertungsmodell (judge.py)
 python test_prompt.py        # Prompt-Version v1/v2: v1 byte-gleich, Default v1, Valve/Umgebung, Signalwort, judge-Regel
+python test_entscheidung.py  # Entscheidungsschritt: Default aus, argmax, C ohne LLM, B-Hinweis, Sprache, Valve/Umgebung
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
@@ -541,6 +562,14 @@ noch die Frage ein. Dann gilt:
 - `HYBRID` gibt es als Valve (Default aus), nie aus der Container-Umgebung.
 - `PROMPT_VERSION` gibt es als Valve (Default `v1`); es gilt auf dem alten wie auf dem Index-Weg und
   schlaegt eine `PROMPT_VERSION` aus der Container-Umgebung. Der Sprachmodus aendert daran nichts.
+- `ENTSCHEIDUNG` gibt es als Valve (Default aus); es gilt auf beiden Wegen und schlaegt eine
+  `ENTSCHEIDUNG` aus der Container-Umgebung. Optionswahl mit `LLM_MODEL`/`OLLAMA_URL` der Valves,
+  ohne den Chat-Verlauf (so wurde gemessen). Bei C streamt kein LLM, die Pipe gibt den festen Text
+  aus; bei B folgt der Hinweis der Antwort. Die Fusszeile bleibt im Chat wie bisher dahinter. Im
+  Sprachmodus ohne Markdown und ohne "S.": `In den gefundenen Stellen steht dazu nichts. Naechste
+  Fundstellen: Seite 14 und Seite 12.` bzw. `Hinweis: nur teilweise belegt, pruef Seite 14 und
+  Seite 12.` Der B-Hinweis faellt wie die Fusszeile aus dem Verlauf. Scheitert die Optionswahl
+  (z.B. kein `logprobs`), erscheint das als Fehlertext ohne LLM-Antwort.
 
 `knowledge.jsonl` ist als einzelne Datei gemountet. Ein Bind-Mount haengt an der Inode:
 wird die Datei auf dem Host per Rename ersetzt (`mv`, rsync ohne `--inplace`), sieht der

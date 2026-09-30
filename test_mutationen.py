@@ -44,7 +44,7 @@ def laufkopie():
 TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_openwebui_pipe.py",
          "test_spiele.py", "test_index.py", "test_suche.py", "test_eval_spiele.py",
          "test_pipe_index.py", "test_regression.py", "test_zuordnung.py", "test_chat.py",
-         "test_pipe_alt.py", "test_judge.py", "test_prompt.py")
+         "test_pipe_alt.py", "test_judge.py", "test_prompt.py", "test_entscheidung.py")
 
 # (Name, Datei, Suchmuster, Ersatz)
 MUTATIONEN = [
@@ -636,6 +636,81 @@ MUTATIONEN = [
      '{"role": "system", "content": system_prompt()},', '{"role": "system", "content": SYSTEM_PROMPT},', ("test_prompt.py",)),
     ("PV12 v2 mit alter Regel 6", "rag.py",
      "    return v1.replace(regel6, neu6) + neu9", "    return v1 + neu9", ("test_prompt.py",)),
+
+    # Entscheidungsschritt vor der Antwort (test_entscheidung.py)
+    ("EN1 Default an statt aus", "rag.py",
+     'os.environ.get("ENTSCHEIDUNG", "0")', 'os.environ.get("ENTSCHEIDUNG", "1")',
+     ("test_entscheidung.py", "test_openwebui_pipe.py")),
+    ("EN2 Valve-Default an statt aus", "openwebui_pipe.py",
+     "ENTSCHEIDUNG: bool = Field(False,", "ENTSCHEIDUNG: bool = Field(True,", ("test_entscheidung.py", "test_pipe_alt.py")),
+    ("EN3 bei C doch ein Antwort-Aufruf (rag)", "rag.py",
+     '    if option == "C":\n        return entscheid_text_nichts(hits), (option, probs)\n',
+     '    if option == "C":\n        _llm_antwort(query, hits)\n        return entscheid_text_nichts(hits), (option, probs)\n', ("test_entscheidung.py",)),
+    ("EN4 bei C doch ein LLM-Stream (Pipe)", "openwebui_pipe.py",
+     '        if option == "C":\n            yield zusatz\n            return\n',
+     '        if option == "C":\n            async for _ in self._stream(nachrichten):\n                pass\n            yield zusatz\n            return\n', ("test_entscheidung.py",)),
+    ("EN5 C-Text ohne Seiten", "rag.py",
+     '    return f"{ENTSCHEID_NICHTS} {ENTSCHEID_NAECHSTE} {_seiten_liste(seiten, sprache)}."', "    return ENTSCHEID_NICHTS", ("test_entscheidung.py",)),
+    ("EN6 B ohne Hinweis (rag)", "rag.py", "        text += entscheid_hinweis(hits)", "        pass", ("test_entscheidung.py",)),
+    ("EN7 B ohne Hinweis (Pipe)", "openwebui_pipe.py",
+     "        if zusatz:\n            yield zusatz\n", "        if False:\n            yield zusatz\n", ("test_entscheidung.py",)),
+    ("EN8 Schwelle statt argmax", "rag.py",
+     "    return max(ENTSCHEID_OPTIONEN, key=lambda o: probs[o]), probs",
+     '    return ("C" if probs["C"] > 0.99 else "B" if probs["B"] > 0.99 else "A"), probs', ("test_entscheidung.py",)),
+    ("EN9 fehlendes logprobs still als A", "rag.py",
+     '    if not lp:\n        raise KonfigFehler(\n            "Entscheidungsschritt',
+     '    if not lp:\n        return "A", None\n        raise KonfigFehler(\n            "Entscheidungsschritt', ("test_entscheidung.py",)),
+    ("EN10 Sprachmodus mit S.-Abkuerzung", "rag.py",
+     '    if not sprache:\n        return ", ".join(f"S. {s}" for s in seiten)',
+     '    if True:\n        return ", ".join(f"S. {s}" for s in seiten)', ("test_entscheidung.py",)),
+    ("EN11 Pipe reicht den Sprachmodus nicht durch (alter Weg)", "openwebui_pipe.py",
+     '        entscheid = await self._entscheid_fuer(frage, hits, bool(rf.get("sprache")))',
+     '        entscheid = await self._entscheid_fuer(frage, hits, False)', ("test_entscheidung.py",)),
+    ("EN12 Pipe reicht den Sprachmodus nicht durch (Index-Weg)", "openwebui_pipe.py",
+     '            entscheid = await self._entscheid_fuer(frage, hits, bool(rf.get("sprache")))',
+     '            entscheid = await self._entscheid_fuer(frage, hits, False)', ("test_entscheidung.py",)),
+    ("EN13 Valve ENTSCHEIDUNG wirkungslos", "openwebui_pipe.py",
+     '        if not v.ENTSCHEIDUNG:\n            return None, ""', '        if True:\n            return None, ""', ("test_entscheidung.py",)),
+    ("EN14 Umgebung schlaegt Valve (Entscheidung)", "openwebui_pipe.py",
+     "        if not v.ENTSCHEIDUNG:\n",
+     '        if not (os.environ["ENTSCHEIDUNG"] == "1" if "ENTSCHEIDUNG" in os.environ else v.ENTSCHEIDUNG):\n', ("test_entscheidung.py",)),
+    ("EN15 Umgebung schlaegt Valve (rag-Global)", "openwebui_pipe.py",
+     '        rag.ENTSCHEIDUNG = "1" if v.ENTSCHEIDUNG else "0"\n',
+     '        rag.ENTSCHEIDUNG = os.environ.get("ENTSCHEIDUNG") or ("1" if v.ENTSCHEIDUNG else "0")\n', ("test_entscheidung.py",)),
+    ("EN16 Konfig-Zeile nennt entscheidung auch bei aus", "rag.py",
+     "if entscheidung_an() else ''", "if True else ''", ("test_entscheidung.py",)),
+    ("EN17 unbekannter ENTSCHEIDUNG-Wert still aus", "rag.py",
+     '    if wert not in ("0", "1"):\n        raise KonfigFehler(f"ENTSCHEIDUNG',
+     '    if False:\n        raise KonfigFehler(f"ENTSCHEIDUNG', ("test_entscheidung.py",)),
+    ("EN18 Optionswahl ohne Quellenkoepfe", "rag.py",
+     '{"role": "user", "content": f"Quellen:\\n{baue_kontext(hits)}\\n\\nFrage: {query}\\n\\n{ENTSCHEID_FRAGE}"}',
+     '{"role": "user", "content": "Quellen:\\n" + "\\n\\n".join(h["text"] for h, _ in hits) + f"\\n\\nFrage: {query}\\n\\n{ENTSCHEID_FRAGE}"}', ("test_entscheidung.py",)),
+    ("EN19 Fragetext weicht von der Messung ab", "rag.py",
+     '"Antworte nur mit dem Buchstaben.")', '"Antworte nur mit einem Buchstaben.")', ("test_entscheidung.py",)),
+    ("EN20 Payload ohne temperature 0", "rag.py",
+     '"options": {"num_predict": 1, "temperature": 0}}', '"options": {"num_predict": 1}}', ("test_entscheidung.py",)),
+    ("EN21 Token-Varianten (' C', 'C)') nicht erkannt", "rag.py",
+     '    t = token.strip().rstrip(").:").strip().upper()\n    return t if t in ENTSCHEID_OPTIONEN', '    t = token\n    return t if t in ENTSCHEID_OPTIONEN', ("test_entscheidung.py",)),
+    ("EN22 Pipe nimmt das Modell nicht aus dem Valve", "openwebui_pipe.py",
+     "modell=v.LLM_MODEL, ollama=v.OLLAMA_URL", "modell=None, ollama=v.OLLAMA_URL", ("test_entscheidung.py",)),
+    ("EN23 C-Satz ist kein Verweigerungs-Signal mehr", "rag.py",
+     'ENTSCHEID_NICHTS = "In den gefundenen Stellen steht dazu nichts."', 'ENTSCHEID_NICHTS = "In den gefundenen Stellen steht nichts dazu."', ("test_entscheidung.py",)),
+    ("EN24 B-Hinweis bleibt im Verlauf", "openwebui_pipe.py",
+     '    return _HINWEIS_TEILWEISE.sub("", _FEHLERZEILE.sub("", _FUSSZEILE.sub("", text)))',
+     '    return _FEHLERZEILE.sub("", _FUSSZEILE.sub("", text))', ("test_entscheidung.py",)),
+    ("EN25 altes rag.py ohne Entscheidungsschritt nicht erkannt", "openwebui_pipe.py",
+     "        if v.ENTSCHEIDUNG and fehlt:", "        if False:", ("test_entscheidung.py",)),
+    ("EN26 Seiten mit Duplikaten", "rag.py",
+     '    return list(dict.fromkeys(h["seite"] for h, _ in hits))', '    return [h["seite"] for h, _ in hits]', ("test_entscheidung.py",)),
+    ("EN27 Eval zeigt die Option nicht", "rag.py",
+     '            print(f"    Entscheid: {entscheid_zeile(*entscheid)}")', "            pass", ("test_entscheidung.py",)),
+    ("EN28 Eval umgeht rag.answer (Mess-Haken sehen nichts)", "rag.py",
+     '        ans = answer(f["frage"], hits)\n        entscheid = LETZTER_ENTSCHEID if entscheidung_an() else None\n',
+     '        ans, entscheid = beantworte(f["frage"], hits) if entscheidung_an() else (answer(f["frage"], hits), None)\n',
+     ("test_entscheidung.py",)),
+    ("EN29 LETZTER_ENTSCHEID wird bei aus nicht zurueckgesetzt", "rag.py",
+     "    global LETZTER_ENTSCHEID\n    LETZTER_ENTSCHEID = None\n    if entscheidung_an():",
+     "    global LETZTER_ENTSCHEID\n    if entscheidung_an():", ("test_entscheidung.py",)),
 ]
 
 
@@ -649,6 +724,10 @@ def rote_tests(lauf, tests=TESTS):
                     INDEX_PATH=os.path.join(lauf, "data", "index.sqlite"),
                     HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config"))
     umgebung.setdefault("PYTHONUSERBASE", site.getuserbase())
+    # Kein Bytecode-Cache in der Laufkopie: .pyc gilt, solange mtime (in Sekunden) und Groesse
+    # der Quelle passen. Eine gleich lange Mutation in derselben Sekunde lief sonst mit dem
+    # Bytecode des vorigen Stands -- gemessen: EN23 ("dazu nichts" -> "nichts dazu") blieb gruen.
+    umgebung["PYTHONDONTWRITEBYTECODE"] = "1"
     for k in ("KNOWLEDGE_JSONL", "GOLDEN_SET", "REGRESSION_REFERENZ"):
         umgebung.pop(k, None)
     for datei in tests:

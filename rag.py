@@ -27,7 +27,7 @@ Konfiguration des Laufs. Keine Stellschraube (DROP_TYPES, SOURCE, CHUNK_SIZE) da
 einen Nenner verschieben -- sonst zieht dieselbe Einstellung, die das Retrieval
 veraendert, auch den Beobachtungspunkt mit.
 """
-import sys, json, glob, re, os, sqlite3, difflib, unicodedata
+import sys, json, glob, re, os, sqlite3, difflib, unicodedata, math
 import numpy as np
 import requests
 # pypdf wird erst im PDF-Zweig von load_chunks importiert. Die Wissensbasis-Route
@@ -49,6 +49,7 @@ RRF_K         = int(os.environ.get("RRF_K", 60))          # Daempfung der Rangfu
 RERANK_MODEL  = os.environ.get("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 CANDIDATES    = int(os.environ.get("CANDIDATES", 20))     # so viele grob abrufen, bevor der Reranker auf TOP_K eindampft
 PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "v1")   # Systemprompt: v1 (Bestand) oder v2 (siehe SYSTEM_PROMPTS)
+ENTSCHEIDUNG  = os.environ.get("ENTSCHEIDUNG", "0")      # Entscheidungsschritt vor der Antwort: "0" aus (Default), "1" an
 PDF_DIR       = os.path.join(os.path.dirname(__file__), "pdfs")
 DATA_DIR      = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
@@ -1261,14 +1262,34 @@ def baue_nachrichten(query, hits):
     Die CLI (answer) und die Open-WebUI-Pipe (openwebui_pipe.py) bauen ihn beide
     hier, damit das Golden Set auch das misst, was im Chat ankommt.
     """
-    kontext = "\n\n".join(f"[{h['doc']}, Seite {h['seite']}]\n{h['text']}" for h, _ in hits)
     return [
         {"role": "system", "content": system_prompt()},
-        {"role": "user", "content": f"Quellen:\n{kontext}\n\nFrage: {query}"},
+        {"role": "user", "content": f"Quellen:\n{baue_kontext(hits)}\n\nFrage: {query}"},
     ]
 
 
+def baue_kontext(hits):
+    """Quellenbloecke mit Kopf "[doc, Seite N]" -- fuer Antwort UND Entscheidungsschritt dieselben."""
+    return "\n\n".join(f"[{h['doc']}, Seite {h['seite']}]\n{h['text']}" for h, _ in hits)
+
+
+# (option, probs) des letzten answer()-Aufrufs mit ENTSCHEIDUNG=1, sonst None. Ueber answer()
+# statt eines zweiten Wegs, damit Mess-Skripte, die rag.answer umhaengen, alles weiter sehen.
+LETZTER_ENTSCHEID = None
+
+
 def answer(query, hits):
+    """Antwort auf die Frage. Mit ENTSCHEIDUNG=1 zuerst der Entscheidungsschritt (siehe beantworte,
+    Option danach in LETZTER_ENTSCHEID); ohne ist das genau ein LLM-Aufruf wie bisher."""
+    global LETZTER_ENTSCHEID
+    LETZTER_ENTSCHEID = None
+    if entscheidung_an():
+        text, LETZTER_ENTSCHEID = beantworte(query, hits)
+        return text
+    return _llm_antwort(query, hits)
+
+
+def _llm_antwort(query, hits):
     r = requests.post(f"{OLLAMA}/api/chat", json={
         "model": LLM_MODEL,
         "messages": baue_nachrichten(query, hits),
@@ -1277,6 +1298,146 @@ def answer(query, hits):
     }, timeout=600)
     r.raise_for_status()
     return r.json()["message"]["content"].strip()
+
+
+# ---------- Entscheidungsschritt vor der Antwort (ENTSCHEIDUNG=1) ----------
+# Gemessen 2026-09-30 (66 Golden-Set-Fragen ueber 6 Spiele, qwen3:14b): Die Optionswahl
+# trennt Stellen ohne Antwort gut -- C bei 14/19 "nicht enthalten", nur 3/47 Treffer
+# faelschlich C. Die Konfidenz dagegen ist nutzlos (54/66 ueber 0,99). Deshalb zaehlt allein
+# die gewaehlte Option (argmax), es gibt KEINE Schwelle. System- und Fragetext sind
+# woertlich die gemessenen -- wer sie aendert, misst neu.
+ENTSCHEID_SYSTEM = "Du pruefst nuechtern, ob bereitgestellte Regelheft-Auszuege eine Frage zu einem Brettspiel beantworten."
+ENTSCHEID_FRAGE = ("Enthalten die Quellen die Antwort auf die Frage?\n"
+                   "A) ja, vollstaendig  B) nur teilweise  C) nein, die Antwort steht nicht in den Quellen\n"
+                   "Antworte nur mit dem Buchstaben.")
+ENTSCHEID_OPTIONEN = ("A", "B", "C")
+# Feste Texte. Schreibweise ae/oe/ue wie die uebrigen Ausgaben von rag.py und der Pipe.
+# Der Satz ist einer der VERWEIGERUNGS_SAETZE (Signalwort der Eval, Regel im judge-kern-Prompt).
+ENTSCHEID_NICHTS = "In den gefundenen Stellen steht dazu nichts."
+ENTSCHEID_NAECHSTE = "Naechste Fundstellen:"
+ENTSCHEID_TEILWEISE = "Hinweis: nur teilweise belegt"
+
+
+def entscheidung_an(wert=None):
+    """ENTSCHEIDUNG "0" (Default) oder "1". Alles andere bricht laut ab -- ein Tippfehler
+    ("ja", "true") wuerde sonst still ohne Entscheidungsschritt messen."""
+    wert = ENTSCHEIDUNG if wert is None else wert
+    if wert not in ("0", "1"):
+        raise KonfigFehler(f"ENTSCHEIDUNG {wert!r} unbekannt; erlaubt: 0 (aus, Default) oder 1 (an).")
+    return wert == "1"
+
+
+def entscheid_nachrichten(query, hits):
+    """Prompt der Optionswahl: dieselben Quellenkoepfe wie baue_nachrichten, eigener Systemtext."""
+    return [
+        {"role": "system", "content": ENTSCHEID_SYSTEM},
+        {"role": "user", "content": f"Quellen:\n{baue_kontext(hits)}\n\nFrage: {query}\n\n{ENTSCHEID_FRAGE}"},
+    ]
+
+
+def entscheid_payload(query, hits, modell=None):
+    """Ein Token, deterministisch, ohne Reasoning, mit Token-Wahrscheinlichkeiten -- wie gemessen."""
+    return {"model": modell or LLM_MODEL, "messages": entscheid_nachrichten(query, hits),
+            "stream": False, "think": False, "logprobs": True, "top_logprobs": 20,
+            "options": {"num_predict": 1, "temperature": 0}}
+
+
+def _entscheid_option(token):
+    """Token -> "A"/"B"/"C" oder None. Varianten wie in judge.py: " A", "A)", "a.", "B:"."""
+    t = token.strip().rstrip(").:").strip().upper()
+    return t if t in ENTSCHEID_OPTIONEN else None
+
+
+def werte_entscheid(antwort_json):
+    """(option, probs) aus der Ollama-Antwort der Optionswahl.
+
+    option ist die wahrscheinlichste der drei (argmax, keine Schwelle; bei exaktem Gleichstand
+    die fruehere, also eher A). probs ist auf A+B+C normiert. Steht KEINE der drei unter den
+    top_logprobs, ist die Rueckgabe ("A", None): normal antworten, und None zeigt, dass das
+    geraten ist. Fehlt logprobs ganz, bricht es ab -- nie still "A".
+    """
+    lp = antwort_json.get("logprobs")
+    if not lp:
+        raise KonfigFehler(
+            "Entscheidungsschritt: die Ollama-Antwort enthaelt kein 'logprobs' -- dieses Modell/diese "
+            "Ollama-Version liefert keine Token-Wahrscheinlichkeiten. Ollama aktualisieren oder "
+            "ENTSCHEIDUNG=0 setzen (kein stilles 'A').")
+    erstes = lp[0]
+    kandidaten = erstes.get("top_logprobs") or [erstes]
+    roh = {o: 0.0 for o in ENTSCHEID_OPTIONEN}
+    for eintrag in kandidaten:
+        o = _entscheid_option(eintrag.get("token", ""))
+        if o:
+            roh[o] += math.exp(eintrag["logprob"])
+    summe = sum(roh.values())
+    if summe <= 0:
+        return "A", None
+    probs = {o: v / summe for o, v in roh.items()}
+    return max(ENTSCHEID_OPTIONEN, key=lambda o: probs[o]), probs
+
+
+def entscheide(query, hits, modell=None, ollama=None):
+    """Optionswahl: stehen die Antworten in den abgerufenen Stellen? -> ("A"|"B"|"C", probs).
+
+    A = ja, vollstaendig; B = nur teilweise; C = nein. Ein Ollama-Aufruf. modell/ollama
+    uebersteuern LLM_MODEL/OLLAMA (die Pipe reicht ihre Valves durch).
+    """
+    r = requests.post(f"{ollama or OLLAMA}/api/chat", json=entscheid_payload(query, hits, modell), timeout=120)
+    r.raise_for_status()
+    return werte_entscheid(r.json())
+
+
+def entscheid_seiten(hits):
+    """Abgerufene Seiten in Rangfolge, ohne Duplikate."""
+    return list(dict.fromkeys(h["seite"] for h, _ in hits))
+
+
+def _seiten_liste(seiten, sprache):
+    if not sprache:
+        return ", ".join(f"S. {s}" for s in seiten)
+    # Zum Vorlesen: ohne Abkuerzung, "Seite 14 und Seite 12"
+    teile = [f"Seite {s}" for s in seiten]
+    return teile[0] if len(teile) == 1 else ", ".join(teile[:-1]) + " und " + teile[-1]
+
+
+def entscheid_text_nichts(hits, sprache=False):
+    """Fester Text bei C -- statt einer LLM-Antwort. sprache=True: ohne "S."-Abkuerzung."""
+    seiten = entscheid_seiten(hits)
+    if not seiten:
+        return ENTSCHEID_NICHTS
+    return f"{ENTSCHEID_NICHTS} {ENTSCHEID_NAECHSTE} {_seiten_liste(seiten, sprache)}."
+
+
+def entscheid_hinweis(hits, sprache=False):
+    """Anhang bei B, hinter die normale Antwort. sprache=True: ohne "--" und ohne "S."."""
+    seiten = entscheid_seiten(hits)
+    if not seiten:
+        return f"\n\n{ENTSCHEID_TEILWEISE}."
+    if sprache:
+        return f"\n\n{ENTSCHEID_TEILWEISE}, pruef {_seiten_liste(seiten, True)}."
+    return f"\n\n{ENTSCHEID_TEILWEISE} -- pruef {_seiten_liste(seiten, False)}."
+
+
+def beantworte(query, hits):
+    """(antwort, (option, probs)) mit Entscheidungsschritt -- unabhaengig von ENTSCHEIDUNG.
+
+    C: KEIN Antwort-Aufruf, fester Text mit den abgerufenen Seiten. B: normale Antwort plus
+    Hinweis. A (auch "keine Option erkannt"): normale Antwort, unveraendert.
+    """
+    option, probs = entscheide(query, hits)
+    if option == "C":
+        return entscheid_text_nichts(hits), (option, probs)
+    text = _llm_antwort(query, hits)
+    if option == "B":
+        text += entscheid_hinweis(hits)
+    return text, (option, probs)
+
+
+def entscheid_zeile(option, probs):
+    """Kontrollzeile fuer die Eval: gewaehlte Option und (nur zur Einsicht) die Verteilung."""
+    if probs is None:
+        return f"{option} (keine Option unter den top_logprobs -- normal geantwortet)"
+    return f"{option} (" + " ".join(f"{o}={probs[o]:.3f}" for o in ENTSCHEID_OPTIONEN) + ")"
 
 
 # ---------- Wertung ----------
@@ -1346,7 +1507,8 @@ def bewerte_retrieval(frage, abgerufene_seiten):
     return KAT_GETROFFEN if any(s in abgerufene_seiten for s in erwartete) else KAT_VERFEHLT
 
 
-# Verweigerungs-Saetze des Prompts v2 (Regel 6). Bei Verweigerungsfragen zaehlen sie als
+# Verweigerungs-Saetze des Prompts v2 (Regel 6); der zweite ist auch der feste Text des
+# Entscheidungsschritts bei C (ENTSCHEID_NICHTS). Bei Verweigerungsfragen zaehlen sie als
 # Signalwort, auch wenn das Golden Set sie nicht als Keyword nennt -- sonst wuerde v2 im
 # Verweigerungs-Indiz schlechter aussehen, nur weil es anders verweigert. Weiter ein Indiz,
 # kein Urteil. Nur fuer Verweigerungsfragen: bei allen anderen ist Verweigern keine Antwort.
@@ -1593,6 +1755,7 @@ def _konfig_zeile(quelle):
             f"{'(' + RERANK_MODEL + ', cand=' + str(CANDIDATES) + ')' if RERANK else ''}"
             f"  embed={EMBED_MODEL}  llm={LLM_MODEL}  think={THINK}"
             f"{'  prompt=' + PROMPT_VERSION if PROMPT_VERSION != 'v1' else ''}"
+            f"{'  entscheidung=1' if entscheidung_an() else ''}"
             f"  source={quelle}  drop_types={os.environ.get('DROP_TYPES', '') or '-'}")
 
 
@@ -1676,10 +1839,13 @@ def cmd_eval_spiele(args, data_dir=None):
 
 def werte_fragen(fragen, suche):
     """Frage fuer Frage: suchen, antworten, werten, ausgeben. suche(frage) -> hits."""
+    global LETZTER_ENTSCHEID
     saetze = []
     for f in fragen:
         hits = suche(f["frage"])
+        LETZTER_ENTSCHEID = None
         ans = answer(f["frage"], hits)
+        entscheid = LETZTER_ENTSCHEID if entscheidung_an() else None
         satz = bewerte_frage(f, [h["seite"] for h, _ in hits], ans)
         saetze.append(satz)
         print(f"[{f['id']}] ({f['typ']}) {f['frage']}")
@@ -1691,6 +1857,8 @@ def werte_fragen(fragen, suche):
             print(f"    Wertung  : {satz['kategorie']} (erwartet={satz['erwartete_seiten']} "
                   f"abgerufen={satz['abgerufene_seiten']})")
         print(f"    Keywords : {satz['keywords_getroffen'] or 'KEINE getroffen'}   (Regressionswarner)")
+        if entscheid is not None:
+            print(f"    Entscheid: {entscheid_zeile(*entscheid)}")
         print(f"    Antwort  : {ans[:280]}")
         print()
     return saetze
