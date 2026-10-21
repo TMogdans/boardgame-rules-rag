@@ -118,6 +118,22 @@ class TestKetteLive(unittest.TestCase):
         self.assertEqual([(x["role"], x["content"]) for x in letzte[1:5]],
                          [("user", "a1?"), ("assistant", "Antwort 1"), ("user", "a2?"), ("assistant", "Antwort 2")])
 
+    def test_jede_kettenstufe_laeuft_ueber_rag_answer(self):
+        # Mess-Skripte haengen rag.answer um (lauf-6spiele/lauf.py). Auch mit Entscheidungsschritt
+        # muss jede Stufe der Kette -- Zwischenfragen UND die letzte -- dort durch, mit dem Verlauf,
+        # und LETZTER_ENTSCHEID steht danach fuer den Haken bereit.
+        echt = rag.answer
+        gesehen = []
+
+        def haken(frage, hits, verlauf=None):
+            text = echt(frage, hits, verlauf)
+            gesehen.append((frage, [x["role"] for x in (verlauf or [])], rag.LETZTER_ENTSCHEID[0]))
+            return text
+        with mock.patch.object(rag, "ENTSCHEIDUNG", "1"), mock.patch.object(rag, "answer", haken), \
+                mock.patch.object(rag, "entscheide", lambda q, h, **k: ("B", {"A": 0.1, "B": 0.8, "C": 0.1})):
+            rag.antworte_frage(KETTE, self.suche)
+        self.assertEqual(gesehen, [(Q1, [], "B"), (Q2, ["user", "assistant"], "B")])
+
     def test_frage_ohne_verlauf_ist_genau_ein_retrieval_und_eine_antwort(self):
         f = {"id": 1, "frage": Q1, "typ": "fakt"}
         erg = rag.antworte_frage(f, self.suche)
