@@ -1302,30 +1302,37 @@ class TestPerformance(BestandTest):
         return (statistics.median(ta), max(ta)), (statistics.median(tb), max(tb))
 
 class TestVorabmessung(unittest.TestCase):
-    """REQ-MB-23: Messergebnis der Extraktion liegt im Spec-Ordner -- nur Zahlen, kein Buchtext."""
+    """REQ-MB-23: Messergebnis der Extraktion liegt im Spec-Ordner -- Format Fassung 6, nur Zahlen, kein Buchtext."""
     PFAD = os.path.join(BASE, ".specify", "specs", "mehrbuch-bestand", "vorabmessung.json")
-    SCHLUESSEL = {"docling_version", "seiten", "zweispalten_mit_tabelle", "talentseiten", "L", "T", "H"}
+    SCHLUESSEL = {"docling_version", "pdfplumber_version", "seiten", "zweispalten_mit_tabelle", "talentseiten",
+                  "L", "T", "H"}
 
     @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_messergebnis_strukturell(self):
-        """[REQ-MB-23] vorabmessung.json: 10 Seiten (>= 3 zweispaltig mit Tabelle, >= 2 Talentseiten), L/T/H, Docling-Version, nur Zahlen."""
+        """[REQ-MB-23] vorabmessung.json (Fassung 6): 10 Stichprobenseiten, Talentseiten fuer H, L/T/H mit anker/handgeprueft, beide Versionen, sonst nur Zahlen."""
         with open(self.PFAD, encoding="utf-8") as f:
             m = json.load(f)
         self.assertEqual(set(m), self.SCHLUESSEL)
-        self.assertRegex(m["docling_version"], r"^\d+\.\d+(\.\d+)?$")
+        for v in ("docling_version", "pdfplumber_version"):
+            self.assertIs(type(m[v]), str, v)
+            self.assertRegex(m[v], r"^\d+(\.\d+)+$")
         seiten = m["seiten"]
         self.assertEqual(len(seiten), 10)
         self.assertEqual(len(set(seiten)), 10)
-        self.assertTrue(all(type(s) is int and s > 0 for s in seiten))
         self.assertGreaterEqual(len(m["zweispalten_mit_tabelle"]), 3)
-        self.assertGreaterEqual(len(m["talentseiten"]), 2)
         self.assertLessEqual(set(m["zweispalten_mit_tabelle"]), set(seiten))
-        self.assertLessEqual(set(m["talentseiten"]), set(seiten))
+        talent = m["talentseiten"]                    # ALLE Seiten von "Talentbeschreibungen" (Grundlage von H)
+        self.assertEqual(len(set(talent)), len(talent))
+        self.assertGreaterEqual(len(set(talent) & set(seiten)), 2)
+        self.assertTrue(all(type(x) is int and x > 0 for x in seiten + talent))
         self.assertEqual(set(m["L"]), {"richtig", "absaetze"})
         self.assertLessEqual(m["L"]["richtig"], m["L"]["absaetze"])
         self.assertIs(type(m["T"]), int)
-        self.assertEqual(set(m["H"]), {"erkannt", "vorhanden", "fehltreffer"})
-        self.assertLessEqual(m["H"]["erkannt"], m["H"]["vorhanden"])
+        h = m["H"]
+        self.assertEqual(set(h), {"erkannt", "vorhanden", "fehltreffer", "anker", "handgeprueft"})
+        self.assertLessEqual(h["erkannt"], h["vorhanden"])
+        self.assertLessEqual(h["anker"], h["vorhanden"])
+        self.assertLessEqual(h["vorhanden"], h["anker"] + h["handgeprueft"])
 
         def blaetter(x):
             if isinstance(x, dict):
@@ -1336,11 +1343,9 @@ class TestVorabmessung(unittest.TestCase):
                     yield from blaetter(v)
             else:
                 yield x
-        # Kein Buchtext (REQ-MB-18): ausser der Versionsangabe nur ganze Zahlen
-        rest = dict(m)
-        rest.pop("docling_version")
+        # Kein Buchtext (REQ-MB-18): ausser den beiden Versionsangaben nur ganze Zahlen
+        rest = {k: v for k, v in m.items() if k not in ("docling_version", "pdfplumber_version")}
         self.assertTrue(all(type(b) is int for b in blaetter(rest)), list(blaetter(rest)))
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
