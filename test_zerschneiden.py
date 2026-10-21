@@ -35,7 +35,7 @@ if BASE not in sys.path:
 import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
 import test_mehrbuch as mb  # noqa: E402
-from test_einlesen_reparatur import z, eintrag, LAYOUT_SEITEN, LAYOUT_LISTE  # noqa: E402
+from test_einlesen_reparatur import z, eintrag, LAYOUT_SEITEN, LAYOUT_LISTE, S1, S2, FT, STUFEN  # noqa: E402
 
 
 def einlesen():
@@ -249,6 +249,24 @@ class TestLayoutImIndex(ZerschneideTest):
             for c in je[pfad]:
                 self.assertTrue(c["text"].startswith(vorsatz), c["text"])
         self.assertIn("Text nach Gamma.", "".join(c["text"] for c in je[("K1", "U1", "Beta")]))
+
+    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
+    def test_req_mb_20_c_haeppchen_aus_unter_beginnen_mit_dem_pfad_samt_alpha(self):
+        """[REQ-MB-20] (c) Stufe 2 "Unter" in Alpha: dessen Haeppchen beginnen mit dem Pfad K1 > U1 > Alpha > Unter."""
+        seiten = {1: [z("K1", "section_header", S1), z("Einleitung K1.", schrift=FT),
+                      z("U1", "section_header", S1), z("Text U1.", schrift=FT),
+                      z("Alpha", "section_header", S1), z("Text vor Unter.", schrift=FT),
+                      z("Unter", "section_header", S2)] + [z(f"Untertext {i} lang genug.", schrift=FT) for i in range(6)] +
+                     [z("Beta", "section_header", S1), z("Text Beta.", schrift=FT)]}
+        self.lies_ein(seiten, LAYOUT_LISTE, layout={"klasse": "section_header", "stufen": STUFEN})
+        je = self.je_pfad(self.chunks(60, 20))
+        pfad = ("K1", "U1", "Alpha", "Unter")
+        self.assertNotIn(("K1", "U1", "Unter"), je)
+        self.assertGreater(len(je[pfad]), 1)
+        vorsatz = rag.titelvorsatz(list(pfad))
+        self.assertLess(vorsatz.index("Alpha"), vorsatz.index("Unter"))
+        for c in je[pfad]:
+            self.assertTrue(c["text"].startswith(vorsatz), c["text"])
 
 
 class TestVorspannImIndex(ZerschneideTest):
