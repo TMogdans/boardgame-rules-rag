@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** Fassung 3, zur Endabnahme
+- **Status:** **Abgenommen** durch Tobias am 2026-10-21 (Fassung 3 + MB-20-Negativfall)
 
 ## User Story
 
@@ -287,7 +287,7 @@ die Talentnamen stehen nur im Text.
 *Detektor:* synthetisches Buch, Liste auf 2 Ebenen (`K1 › U1`), darin Zeilen `Alpha`, `Beta`
 mit den Merkmalen und je Text → Pfade `K1 › U1 › Alpha` bzw. `… › Beta`, jedes Häppchen eines
 Unterabschnitts beginnt mit dessen Namen (REQ-MB-15). Negativfall: eine kurze Fließtextzeile
-`Gamma` ohne die Merkmale (eigene Zeile, aber andere Schriftgröße) bleibt Fließtext in `Beta`.
+`Gamma` ohne die Merkmale (eigene Zeile, aber andere Layout-Klasse; kommt später pdfplumber-Schriftinfo hinzu, wird der Negativfall um die Schriftgröße erweitert) bleibt Fließtext in `Beta`.
 Protokoll: `U1` = 2. Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von
 REQ-MB-12 unverändert).
 
