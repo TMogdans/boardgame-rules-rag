@@ -33,8 +33,19 @@ Vom Test erwartete Schnittstellen -- neues Modul einlesen.py, ohne docling impor
                    "seitenzahlen": {"quelle": "labels", "kontrollpunkte": {"<physisch>": gedruckt}} |
                                    {"quelle": "versatz", "versatz": n}
   Chunk aus lade_spiel: "seite" (gedruckt oder None), "seite_pdf" (physisch); rag.fundstelle(chunk)
+Fassung 4:
+  einlesen.baue_abschnitte(..., vorspann="Vorspann")      Text vor dem 1. Listeneintrag (REQ-MB-25);
+      Buchdeklaration "vorspann": <Name> setzt ihn fuer lies_buch_ein
+  einlesen.lies_buch_ein(..., pdf=None, docling_version=None, vorabmessung=None)
+      pdf: Lesezeichen/Labels aus der PDF-Datei selbst (REQ-MB-24), wenn deklariert
+      docling_version: Einlesen mit Docling (vom Docling-Adapter injiziert) -> Vergleich mit
+          "docling_version" in vorabmessung (Pfad, Default .specify/specs/mehrbuch-bestand/
+          vorabmessung.json); Protokoll.docling_version nennt die verwendete Version (REQ-MB-23)
+  einlesen.lesezeichen_aus_pdf(pfad) -> [{"titel", "ebene", "seite"(physisch)}]  in Dokumentreihenfolge
+  einlesen.seitenlabels_aus_pdf(pfad) -> [label je physischer Seite]                (REQ-MB-24)
 """
 import importlib
+import json
 import os
 import sys
 import unittest
@@ -147,15 +158,15 @@ class TestUeberschriftenListe(unittest.TestCase):
         """[REQ-MB-12] Passende Zeile auf der Zielseite wird durch den Listentitel ersetzt und beginnt den Abschnitt."""
         for titel, zeile, grund in ERSETZT:
             with self.subTest(grund=grund, zeile=zeile):
-                seiten = {6: [z("Vorspann ohne Titel.")], 7: [z(zeile, "section_header"), z("Fliesstext dazu.")]}
-                abschnitte, p = self.baue(seiten, [eintrag("Vorspann", 6), eintrag(titel, 7)])
+                seiten = {6: [z("Einleitung ohne Titel.")], 7: [z(zeile, "section_header"), z("Fliesstext dazu.")]}
+                abschnitte, p = self.baue(seiten, [eintrag("Einleitung", 6), eintrag(titel, 7)])
                 a = nach_pfad(abschnitte)[(titel,)]
                 self.assertTrue(a["text"].startswith(titel), a["text"])
                 self.assertNotIn(zeile, a["text"].replace(titel, ""))
                 self.assertIn("Fliesstext dazu.", a["text"])
                 self.assertNotIn(zeile, "".join(b["text"] for b in abschnitte).replace(titel, ""))
                 self.assertIn((titel, 7), p.gefunden)
-                self.assertEqual(p.nicht_gefunden, [("Vorspann", 6)])
+                self.assertEqual(p.nicht_gefunden, [("Einleitung", 6)])
 
     @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_nicht_ersetzte_faelle_bleiben_byte_gleich(self):
@@ -192,10 +203,10 @@ class TestUeberschriftenListe(unittest.TestCase):
         """[REQ-MB-12] Mehrere passende Zeilen: die mit den wenigsten Auslassungen gewinnt, auch wenn sie spaeter steht."""
         seiten = {7: [z("Bonusw rfel", "section_header"), z("Vorher."),
                       z("BONUSWÜRFEL", "section_header"), z("Nachher.")]}
-        abschnitte, p = self.baue(seiten, [eintrag("Vorspann", 7), eintrag("Bonuswürfel", 7)])
+        abschnitte, p = self.baue(seiten, [eintrag("Einleitung", 7), eintrag("Bonuswürfel", 7)])
         pfade = nach_pfad(abschnitte)
-        self.assertIn("Bonusw rfel", pfade[("Vorspann",)]["text"])
-        self.assertIn("Vorher.", pfade[("Vorspann",)]["text"])
+        self.assertIn("Bonusw rfel", pfade[("Einleitung",)]["text"])
+        self.assertIn("Vorher.", pfade[("Einleitung",)]["text"])
         self.assertTrue(pfade[("Bonuswürfel",)]["text"].startswith("Bonuswürfel"))
         self.assertIn("Nachher.", pfade[("Bonuswürfel",)]["text"])
         self.assertNotIn("BONUSWÜRFEL", pfade[("Bonuswürfel",)]["text"])
@@ -203,14 +214,14 @@ class TestUeberschriftenListe(unittest.TestCase):
 
     @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_eine_zeile_hoechstens_ein_eintrag(self):
-        """[REQ-MB-12] Eine Zeile wird hoechstens einem Eintrag zugeordnet (Listenreihenfolge); der zweite ist nicht gefunden."""
+        """[REQ-MB-12] Eine Zeile wird hoechstens einem Eintrag zugeordnet (Listenreihenfolge); der zweite beginnt hinter ihr (REQ-MB-13)."""
         seiten = {7: [z("Ablauf", "section_header"), z("Text zum Ablauf.")]}
         abschnitte, p = self.baue(seiten, [eintrag("Ablauf", 7, 1), eintrag("Ablauf", 7, 2)])
         self.assertEqual(p.gefunden, [("Ablauf", 7)])
         self.assertEqual(p.nicht_gefunden, [("Ablauf", 7)])
-        # kein Eintrag verschwindet (REQ-MB-13); WO der zweite beginnt, laesst die Spec offen
-        self.assertEqual(sorted(tuple(a["abschnittspfad"]) for a in abschnitte), [("Ablauf",), ("Ablauf", "Ablauf")])
-        self.assertEqual(sum(a["text"].count("Text zum Ablauf.") for a in abschnitte), 1)
+        self.assertEqual([a["abschnittspfad"] for a in abschnitte], [["Ablauf"], ["Ablauf", "Ablauf"]])
+        self.assertEqual(abschnitte[0]["text"], "Ablauf")
+        self.assertIn("Text zum Ablauf.", abschnitte[1]["text"])
 
     @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_ebenen_aus_der_liste(self):
@@ -240,7 +251,7 @@ class TestUeberschriftenListe(unittest.TestCase):
 class TestNichtGefunden(unittest.TestCase):
     @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
     def test_req_mb_13_abschnitt_ab_seitenanfang_und_protokoll(self):
-        """[REQ-MB-13] Eintrag ohne Gegenstueck: Abschnitt beginnt am Anfang der Zielseite, Protokoll nennt Titel und Seite."""
+        """[REQ-MB-13] (a) Eintrag ohne Gegenstueck, als erster seiner Seite: Abschnitt beginnt am Seitenanfang, Protokoll nennt ihn."""
         e = einlesen()
         seiten = {6: [z("Kapitel A", "section_header"), z("Text A.")],
                   7: [z("Text B eins."), z("Text B zwei.")],
@@ -259,6 +270,44 @@ class TestNichtGefunden(unittest.TestCase):
         self.assertEqual(p.nicht_gefunden, [("Kapitel B", 7)])
         self.assertEqual(p.gefunden, [("Kapitel A", 6), ("Kapitel C", 8)])
         self.assertEqual(p.mehrdeutig, [])
+
+    @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
+    def test_req_mb_13_beginnt_hinter_dem_vorangehenden_gefundenen_eintrag(self):
+        """[REQ-MB-13] (b) Liste A, B auf derselben Seite, nur A gefunden: B beginnt direkt hinter Zeile A, der Fliesstext liegt in B."""
+        e = einlesen()
+        seiten = {6: [z("Vorher", "section_header"), z("Text vorher.")],
+                  7: [z("Satz am Seitenanfang."), z("Kapitel A", "section_header"), z("Fliesstext nach A."),
+                      z("Noch mehr Fliesstext.")],
+                  8: [z("Kapitel C", "section_header"), z("Text C.")]}
+        p = e.Protokoll()
+        abschnitte = e.baue_abschnitte(seiten, [eintrag("Vorher", 6), eintrag("Kapitel A", 7), eintrag("Kapitel B", 7),
+                                                eintrag("Kapitel C", 8)], protokoll=p)
+        self.assertEqual([a["abschnittspfad"] for a in abschnitte],
+                         [["Vorher"], ["Kapitel A"], ["Kapitel B"], ["Kapitel C"]])
+        vorher, a, b, c = abschnitte
+        self.assertIn("Satz am Seitenanfang.", vorher["text"])     # Seite 7 vor Zeile A gehoert noch zu "Vorher"
+        self.assertEqual(a["text"], "Kapitel A")
+        self.assertIn("Fliesstext nach A.", b["text"])
+        self.assertIn("Noch mehr Fliesstext.", b["text"])
+        self.assertNotIn("Fliesstext", a["text"])
+        self.assertEqual(p.nicht_gefunden, [("Kapitel B", 7)])
+        self.assertEqual(p.gefunden, [("Vorher", 6), ("Kapitel A", 7), ("Kapitel C", 8)])
+
+    @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
+    def test_req_mb_13_listenreihenfolge_ist_massgeblich(self):
+        """[REQ-MB-13] Vorangehend in LISTENreihenfolge: B steht in der Liste vor A -> B beginnt am Seitenanfang, nicht hinter A."""
+        e = einlesen()
+        seiten = {6: [z("Vorher", "section_header"), z("Text vorher.")],
+                  7: [z("Satz am Seitenanfang."), z("Kapitel A", "section_header"), z("Fliesstext nach A.")]}
+        p = e.Protokoll()
+        abschnitte = e.baue_abschnitte(seiten, [eintrag("Vorher", 6), eintrag("Kapitel B", 7), eintrag("Kapitel A", 7)],
+                                       protokoll=p)
+        pfade = nach_pfad(abschnitte)
+        self.assertIn("Satz am Seitenanfang.", pfade[("Kapitel B",)]["text"])
+        self.assertNotIn("Satz am Seitenanfang.", pfade[("Vorher",)]["text"])
+        self.assertIn("Fliesstext nach A.", pfade[("Kapitel A",)]["text"])
+        self.assertEqual(p.nicht_gefunden, [("Kapitel B", 7)])
+
 
 
 # ===================================================================================
@@ -322,6 +371,28 @@ class TestLayoutUeberschriften(unittest.TestCase):
         abschnitte = e.baue_abschnitte(seiten, [eintrag("K1", 1)], layout={"klasse": "section_header"},
                                        protokoll=e.Protokoll())
         self.assertEqual([a["abschnittspfad"] for a in abschnitte], [["K1"], ["K1", "Bonusw rfel"]])
+
+
+# ===================================================================================
+# REQ-MB-25: Vorspann
+# ===================================================================================
+class TestVorspann(unittest.TestCase):
+    SEITEN = {1: [z("Ein eindeutiger Vorspanntext quorx."), z("Noch ein Satz davor.")],
+              2: [z("Kapitel", "section_header"), z("Text im Kapitel.")]}
+
+    @unittest.skip("devloop: REQ-MB-25 noch nicht implementiert")
+    def test_req_mb_25_text_vor_dem_ersten_eintrag_wird_vorspann(self):
+        """[REQ-MB-25] Text vor dem ersten Listeneintrag -> Abschnitt ["Vorspann"]; konfigurierter Name -> dieser Name."""
+        e = einlesen()
+        abschnitte = e.baue_abschnitte(self.SEITEN, [eintrag("Kapitel", 2)], protokoll=e.Protokoll())
+        self.assertEqual([a["abschnittspfad"] for a in abschnitte], [["Vorspann"], ["Kapitel"]])
+        self.assertIn("quorx", abschnitte[0]["text"])
+        self.assertIn("Noch ein Satz davor.", abschnitte[0]["text"])
+        self.assertNotIn("quorx", abschnitte[1]["text"])
+        anders = e.baue_abschnitte(self.SEITEN, [eintrag("Kapitel", 2)], vorspann="Auftakt", protokoll=e.Protokoll())
+        self.assertEqual([a["abschnittspfad"] for a in anders], [["Auftakt"], ["Kapitel"]])
+        ohne = e.baue_abschnitte({2: self.SEITEN[2]}, [eintrag("Kapitel", 2)], protokoll=e.Protokoll())
+        self.assertEqual([a["abschnittspfad"] for a in ohne], [["Kapitel"]])     # kein leerer Vorspann
 
 
 # ===================================================================================
@@ -393,6 +464,128 @@ class TestGedruckteSeite(mb.BestandTest):
         kapitel = next(c for c in self.chunks() if "Kapiteltext eins" in c["text"])
         self.assertEqual(kapitel["abschnittspfad"], ["Kapitel"])
         self.assertEqual((kapitel["seite"], kapitel["seite_pdf"]), (1, 3))
+
+
+# ===================================================================================
+# REQ-MB-23: Docling-Version beim Einlesen gegen das Messergebnis
+# ===================================================================================
+class TestDoclingVersion(mb.BestandTest):
+    """Version injiziert (kein echtes Docling): lies_buch_ein(..., docling_version=..., vorabmessung=...)."""
+    SEITEN = {1: [z("Kapitel", "section_header"), z("Feuer Text eins.")]}
+    LISTE = [eintrag("Kapitel", 1)]
+
+    def setUp(self):
+        super().setUp()
+        self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "lesezeichen"},
+                              seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True)])
+        self.messung = os.path.join(self.tmp.name, "vorabmessung.json")
+
+    def schreibe_messung(self, **felder):
+        m = {"seiten": list(range(1, 11)), "zweispalten_mit_tabelle": [1, 2, 3], "talentseiten": [4, 5],
+             "L": {"richtig": 40, "absaetze": 41}, "T": 0, "H": {"erkannt": 9, "vorhanden": 9, "fehltreffer": 0}}
+        m.update(felder)
+        with open(self.messung, "w", encoding="utf-8") as f:
+            json.dump(m, f)
+
+    def lies(self, version, **kw):
+        return einlesen().lies_buch_ein(mb.SID, "nord", self.SEITEN, lesezeichen=self.LISTE, docling_version=version,
+                                        vorabmessung=self.messung, **kw)
+
+    def pruefe_abbruch(self, version="2.5.1"):
+        """KonfigFehler -- ohne Buchdatei, und eine vorhandene bleibt unveraendert."""
+        with self.assertRaises(rag.KonfigFehler):
+            self.lies(version)
+        self.assertFalse(os.path.exists(self.buchdatei("nord")))
+        einlesen().lies_buch_ein(mb.SID, "nord", {1: [z("Kapitel", "section_header"), z("Alter Stand.")]},
+                                 lesezeichen=self.LISTE)                       # ohne Docling: kein Vergleich
+        vorher = mb.hashes(os.path.dirname(self.buchdatei("nord")))
+        with self.assertRaises(rag.KonfigFehler):
+            self.lies(version, ueberschreiben=True)
+        self.assertEqual(mb.hashes(os.path.dirname(self.buchdatei("nord"))), vorher)
+
+    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
+    def test_req_mb_23_gleiche_version_laeuft_und_steht_im_protokoll(self):
+        """[REQ-MB-23] Docling-Version gleich der im Messergebnis -> Einlesen laeuft, Protokoll nennt die Version."""
+        self.schreibe_messung(docling_version="2.5.1")
+        p = self.lies("2.5.1")
+        self.assertEqual(p.docling_version, "2.5.1")
+        self.assertTrue(os.path.exists(self.buchdatei("nord")))
+
+    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
+    def test_req_mb_23_abweichende_version_ist_konfigfehler(self):
+        """[REQ-MB-23] Abweichende Docling-Version -> KonfigFehler, keine Buchdatei bzw. alte unveraendert."""
+        self.schreibe_messung(docling_version="2.5.1")
+        self.pruefe_abbruch("2.6.0")
+
+    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
+    def test_req_mb_23_fehlendes_messergebnis_ist_konfigfehler(self):
+        """[REQ-MB-23] vorabmessung.json fehlt -> KonfigFehler beim Einlesen mit Docling, keine/unveraenderte Buchdatei."""
+        self.assertFalse(os.path.exists(self.messung))
+        self.pruefe_abbruch()
+
+    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
+    def test_req_mb_23_messergebnis_ohne_version_ist_konfigfehler(self):
+        """[REQ-MB-23] vorabmessung.json ohne docling_version -> KonfigFehler, keine/unveraenderte Buchdatei."""
+        self.schreibe_messung()
+        self.pruefe_abbruch()
+
+
+# ===================================================================================
+# REQ-MB-24: PDF-Adapter fuer Lesezeichen und Seitenlabels (synthetisches PDF, pypdf)
+# ===================================================================================
+PDF_LESEZEICHEN = [("Vorwort", 1, 2), ("Kapitel Eins", 1, 3), ("Teil A", 2, 4), ("Teil B", 2, 5),
+                   ("Kapitel Zwei", 1, 6)]                      # (Titel, Ebene, physische Seite)
+PDF_LABELS = ["i", "ii", "1", "2", "3", "4"]
+
+
+def baue_pdf(pfad):
+    """6 Seiten; Labels i, ii, dann arabisch ab 1; Lesezeichen auf 2 Ebenen."""
+    import pypdf
+    w = pypdf.PdfWriter()
+    for _ in PDF_LABELS:
+        w.add_blank_page(width=200, height=200)
+    w.set_page_label(0, 1, style="/r")
+    w.set_page_label(2, len(PDF_LABELS) - 1, style="/D", start=1)
+    eltern = None
+    for titel, ebene, seite in PDF_LESEZEICHEN:
+        item = w.add_outline_item(titel, seite - 1, parent=eltern if ebene == 2 else None)
+        if ebene == 1:
+            eltern = item
+    w.write(pfad)
+    return pfad
+
+
+class TestPdfAdapter(mb.BestandTest):
+    def setUp(self):
+        super().setUp()
+        self.pdf = baue_pdf(os.path.join(self.tmp.name, "testbuch.pdf"))
+
+    @unittest.skip("devloop: REQ-MB-24 noch nicht implementiert")
+    def test_req_mb_24_lesezeichen_und_labels_aus_der_pdf(self):
+        """[REQ-MB-24] Synthetisches PDF: Lesezeichen (2 Ebenen) -> Titel/Ebene/Seite/Reihenfolge; Labels je physischer Seite."""
+        e = einlesen()
+        self.assertEqual(e.lesezeichen_aus_pdf(self.pdf),
+                         [{"titel": t, "ebene": eb, "seite": s} for t, eb, s in PDF_LESEZEICHEN])
+        self.assertEqual(e.seitenlabels_aus_pdf(self.pdf), PDF_LABELS)
+
+    @unittest.skip("devloop: REQ-MB-24 noch nicht implementiert")
+    def test_req_mb_24_einlesen_liest_die_pdf_selbst(self):
+        """[REQ-MB-24] lies_buch_ein(pdf=...) nimmt Liste und gedruckte Seiten aus der Datei: Pfade und Seiten je Haeppchen."""
+        self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "lesezeichen"},
+                              seitenzahlen={"quelle": "labels"}, reparatur=True)])
+        seiten = {1: [z("Titelei ohne Lesezeichen.")]}
+        for titel, _, s in PDF_LESEZEICHEN:
+            seiten[s] = [z(titel, "section_header"), z(f"Inhalt auf physisch {s}.")]
+        p = einlesen().lies_buch_ein(mb.SID, "nord", seiten, pdf=self.pdf)
+        self.assertEqual(len(p.gefunden), len(PDF_LESEZEICHEN))
+        self.baue()
+        chunks, _ = rag.lade_spiel(self.oeffne(), mb.SID)
+        soll = {2: (["Vorwort"], None), 3: (["Kapitel Eins"], 1), 4: (["Kapitel Eins", "Teil A"], 2),
+                5: (["Kapitel Eins", "Teil B"], 3), 6: (["Kapitel Zwei"], 4)}
+        for physisch, (pfad, gedruckt) in soll.items():
+            with self.subTest(physisch=physisch):
+                c = next(c for c in chunks if f"physisch {physisch}." in c["text"])
+                self.assertEqual((c["abschnittspfad"], c["seite"], c["seite_pdf"]), (pfad, gedruckt, physisch))
 
 
 if __name__ == "__main__":

@@ -33,6 +33,9 @@ Vom Test erwartete Schnittstellen (aus der Spec abgeleitet, Namen hier festgeleg
   golden_set.json eines Mehr-Buecher-Bestands: "seiten": [{"buch_id": ..., "seite": n}]
   einlesen.lies_buch_ein(...)         siehe test_einlesen_reparatur.py
   .specify/specs/mehrbuch-bestand/vorabmessung.json   (REQ-MB-23)
+  Pipe: veralteter Mehr-Buecher-Bestand (irgendeine Buchdatei nach dem Bau geaendert) -> Meldung
+        mit "veraltet", kein LLM-Aufruf (REQ-MB-26)
+  REQ-MB-19 Basis: rag.py aus BASIS_COMMIT (letzter Stand vor der Spec, per git show) im selben Lauf
 """
 import contextlib
 import hashlib
@@ -41,7 +44,10 @@ import io
 import json
 import os
 import sqlite3
+import gc
+import importlib.util
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -1032,6 +1038,44 @@ class TestKaputteDeklaration(ZweiBuecher):
                                                              inhaltsart="welt")],
                     {"nord": nord() + [eintrag("west", 7, 70, "Feuer fremd")]})
 
+    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
+    def test_req_mb_10_buch_id_ohne_slug(self):
+        """[REQ-MB-10] buch_id bildet keinen Slug (gleiche Regel wie spiel_id): "Buch A", "../x" -> KonfigFehler, alter Stand bleibt."""
+        for schlecht in ("Buch A", "../x"):
+            with self.subTest(buch_id=schlecht):
+                self.kaputt([buch("nord", "Buch Nord", "alpha"),
+                             buch(schlecht, "Buch Sued", "beta", sprache="en", inhaltsart="welt", quelle="sued.pdf")])
+                self.assertFalse(os.path.exists(os.path.join(self.data, "x")))
+                self.assertFalse(os.path.exists(os.path.join(self.data, SID, "buecher", "Buch A")))
+
+    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
+    def test_req_mb_10_sprache_nicht_in_sprachen(self):
+        """[REQ-MB-10] sprache "xx" (nicht in rag.SPRACHEN) -> KonfigFehler, alter Stand bleibt."""
+        self.assertNotIn("xx", rag.SPRACHEN)
+        self.kaputt([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta", sprache="xx",
+                                                             inhaltsart="welt")])
+
+
+class TestPipeVeraltet(ZweiBuecher):
+    @unittest.skip("devloop: REQ-MB-26 noch nicht implementiert")
+    def test_req_mb_26_geaenderte_zweite_buchdatei_meldet_veraltet(self):
+        """[REQ-MB-26] Index gebaut; Buchdatei sued (nicht die erste) geaendert -> Pipe meldet veraltet; unveraendert -> nicht."""
+        self.lege_zwei_an()
+        self.baue()
+        p = self.pipe(top_k=2)
+        text = self.frage_pipe(p, "Feuer")
+        self.assertNotIn("veraltet", text)
+        self.assertNotIn("Fehler", text)
+        self.assertEqual(len(self.llm_bekam), 1)
+        self.schreibe_buch("sued", sued() + [eintrag("sued", 9, 19, "Wasser suedneu")])     # nach dem Bau
+        text = self.frage_pipe(p, "Feuer")
+        self.assertIn("veraltet", text)
+        self.assertEqual(len(self.llm_bekam), 1, "aus veraltetem Index geantwortet")
+        self.baue()
+        text = self.frage_pipe(p, "Feuer")
+        self.assertNotIn("veraltet", text)
+        self.assertEqual(len(self.llm_bekam), 2)
+
 
 # ===================================================================================
 # E. Nicht-funktional
@@ -1040,18 +1084,21 @@ class TestSynthetisch(FassungsTest):
     """REQ-MB-17: dasselbe Szenario mit umbenannten Bezeichnern liefert dasselbe Ergebnis."""
     NAMEN_A = {"sid": "testwelt", "name": "Testwelt", "buecher": ("ba", "bb", "bg"),
                "titel": ("Erstes Testbuch", "Zweites Testbuch", "Drittes Testbuch"),
-               "fassungen": ("alpha", "beta", "gamma"), "hinweis": HINWEIS, "pfade": ("Regeln", "Welt")}
+               "fassungen": ("alpha", "beta", "gamma"), "hinweis": HINWEIS, "pfade": ("Regeln", "Welt"),
+               "arten": ("regel", "welt")}
     NAMEN_B = {"sid": "andere-welt", "name": "Andere Welt", "buecher": ("rot", "gruen", "blau"),
                "titel": ("Rotes Heft", "Gruenes Heft", "Blaues Heft"),
-               "fassungen": ("v7", "v8", "v9"), "hinweis": "Ausgabe v8 -- bitte umrechnen", "pfade": ("Satzung", "Kunde")}
+               "fassungen": ("v7", "v8", "v9"), "hinweis": "Ausgabe v8 -- bitte umrechnen", "pfade": ("Satzung", "Kunde"),
+               "arten": ("satzung", "kunde")}                        # Inhaltsart-Vokabular ist frei (Lesart)
 
     def szenario(self, n):
         verz = os.path.join(self.tmp.name, n["sid"])
         index = os.path.join(verz, "index.sqlite")
         with mock.patch.multiple(rag, DATA_DIR=verz, INDEX_PATH=index):
             self.data, self.index = verz, index
-            regeln = {"regel": {"massgeblich": [n["fassungen"][0]], "gekennzeichnet": {n["fassungen"][1]: n["hinweis"]}}}
-            self.bestand([buch(b, t, f, inhaltsarten=[((n["pfade"][1],), "welt")])
+            regeln = {n["arten"][0]: {"massgeblich": [n["fassungen"][0]],
+                                      "gekennzeichnet": {n["fassungen"][1]: n["hinweis"]}}}
+            self.bestand([buch(b, t, f, inhaltsart=n["arten"][0], inhaltsarten=[((n["pfade"][1],), n["arten"][1])])
                           for b, t, f in zip(n["buecher"], n["titel"], n["fassungen"])], regeln,
                          sid=n["sid"], name=n["name"])
             for b, (r, w) in zip(n["buecher"], (("mkar", "mkaw"), ("mkbr", "mkbw"), ("mkgr", "mkgw"))):
@@ -1064,19 +1111,21 @@ class TestSynthetisch(FassungsTest):
                 with mock.patch.object(rag, "HYBRID", hybrid):
                     hits = self.suche("Feuer", 6, sid=n["sid"])
                     gefiltert = self.suche("Feuer", 6, sid=n["sid"], filter={"buch_id": n["buecher"][1]})
+                    art = self.suche("Feuer", 6, sid=n["sid"], filter={"inhaltsart": n["arten"][1]})
                 erg[hybrid] = ([(kennung(h, ROLLEN), round(s, 6), n["hinweis"] in rag.fundstelle(h)) for h, s in hits],
-                               [kennung(h, ROLLEN) for h, _ in gefiltert])
+                               [kennung(h, ROLLEN) for h, _ in gefiltert], [kennung(h, ROLLEN) for h, _ in art])
             return erg
 
     @unittest.skip("devloop: REQ-MB-17 noch nicht implementiert")
     def test_req_mb_17_umbenennen_aendert_kein_ergebnis(self):
-        """[REQ-MB-17] Bestand, Buecher, Titel, Fassungen, Hinweis, Pfade umbenannt -> gleiche Treffer, Scores, Hinweise, Filter."""
+        """[REQ-MB-17] Bestand, Buecher, Titel, Fassungen, Hinweis, Pfade, Inhaltsarten umbenannt -> gleiche Treffer, Scores, Hinweise, Filter."""
         a = self.szenario(self.NAMEN_A)
         b = self.szenario(self.NAMEN_B)
         self.assertEqual(a, b)
         self.assertEqual([r for r, _, _ in a[False][0]], ["mkbr", "mkar", "mkgw", "mkaw", "mkbw"])
         self.assertEqual([r for r, _, h in a[False][0] if h], ["mkbr"])
         self.assertEqual(a[False][1], ["mkbr", "mkbw"])
+        self.assertEqual(a[False][2], ["mkgw", "mkaw", "mkbw"])
 
 
 class TestSchutzBuecher(unittest.TestCase):
@@ -1138,6 +1187,25 @@ print(os.path.exists(os.path.join(verz, "buecher", "nord", "knowledge.jsonl")))
         self.assertTrue(any(n.startswith(os.path.join("data", "testwelt", "buecher")) for n in neu), neu)
 
 
+# Letzter Stand von rag.py vor dieser Spec (merge-base des Spec-Branches mit main). Bewusst ein
+# fester Commit: "HEAD von main" waere nach dem Merge schon der neue Code.
+BASIS_COMMIT = "7bf921215086e43420060d2ebbe6e43a148c083b"
+
+
+def lade_basis_rag(verz):
+    """rag.py aus BASIS_COMMIT als eigenes Modul -- der echte alte Ladepfad, keine Nachbildung."""
+    p = subprocess.run(["git", "-C", BASE, "show", f"{BASIS_COMMIT}:rag.py"], capture_output=True, text=True)
+    if p.returncode:
+        raise AssertionError(f"Basis {BASIS_COMMIT} nicht lesbar (Clone ohne Historie?): {p.stderr.strip()}")
+    pfad = os.path.join(verz, "rag_vor_spec.py")
+    with open(pfad, "w", encoding="utf-8") as f:
+        f.write(p.stdout)
+    spec = importlib.util.spec_from_file_location("rag_vor_spec", pfad)
+    modul = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modul)
+    return modul
+
+
 class TestPerformance(BestandTest):
     """REQ-MB-19: Laden + Vektorsuche je Frage, 5 Buecher / 3.000 Haeppchen / 1.024 Dimensionen,
     Filter und Fassungsregel aktiv. Ausgabe: typisch (Median) und Maximum ueber 200 Fragen
@@ -1189,19 +1257,49 @@ class TestPerformance(BestandTest):
         self.assertLessEqual(mx, 45.0)
 
     @unittest.skip("devloop: REQ-MB-19 noch nicht implementiert")
-    def test_req_mb_19_altbestand_nicht_langsamer_als_readme(self):
-        """[REQ-MB-19] Altbestand 2.000 Haeppchen, 1.024 Dim.: Laden + Suche typisch <= 9,1 ms, Maximum <= 13,5 ms (README)."""
+    def test_req_mb_19_altbestand_hoechstens_20_prozent_ueber_dem_stand_vor_der_spec(self):
+        """[REQ-MB-19] Altbestand 2.000 Haeppchen, 1.024 Dim.: typisch und Maximum <= 1,2 x Basis (rag.py vor der Spec, selber Lauf)."""
         meta = rag.lege_spiel_an("Altspiel")
         rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]),
                            [{"id": j, "seite": j // 10 + 1, "typ": "regel", "text": f"Regel {j} " * 20,
                              "spiel": "Altspiel", "spiel_id": "altspiel"} for j in range(2000)])
         self.baue()
         con = self.oeffne()
-        typ, mx = self.miss(lambda i: rag.retrieve(f"Frage {i}", k=4, spiel_id="altspiel", index=con))
-        print(f"\n  REQ-MB-19 Altbestand (2000 Haeppchen, 1024 Dim.): typisch {typ:.2f} ms, max {mx:.2f} ms")
-        self.assertLessEqual(typ, 9.1)
-        self.assertLessEqual(mx, 13.5)
+        basis = lade_basis_rag(self.tmp.name)
+        with mock.patch.multiple(basis, embed=rag.embed, CHUNK_SIZE=400, CHUNK_OVERLAP=150, EMBED_MODEL="bge-m3",
+                                 HYBRID=False, RERANK=False, OLLAMA="http://stub"):
+            def alt(i):
+                return basis.retrieve(f"Frage {i}", k=4, spiel_id="altspiel", index=con)
 
+            def neu(i):
+                return rag.retrieve(f"Frage {i}", k=4, spiel_id="altspiel", index=con)
+            for i in range(3):          # gleiche Treffer -- sonst waere der Vergleich keiner
+                self.assertEqual([(h["seite"], h["text"], round(s, 6)) for h, s in neu(i)],
+                                 [(h["seite"], h["text"], round(s, 6)) for h, s in alt(i)])
+            (typ_a, max_a), (typ_n, max_n) = self.miss_paar(alt, neu)
+        print(f"\n  REQ-MB-19 Altbestand (2000 Haeppchen, 1024 Dim.): Basis typisch {typ_a:.2f} ms, max {max_a:.2f} ms;"
+              f" neu typisch {typ_n:.2f} ms, max {max_n:.2f} ms")
+        self.assertLessEqual(typ_n, 1.2 * typ_a)
+        self.assertLessEqual(max_n, 1.2 * max_a)
+
+    @staticmethod
+    def miss_paar(fa, fb, n=200):
+        """Basis und neuer Code abwechselnd (Reihenfolge je Frage getauscht), GC aus: Drift und
+        Aufwaermen treffen beide gleich. Rueckgabe: ((typisch, max) Basis, (typisch, max) neu)."""
+        fa(-1)
+        fb(-1)
+        ta, tb = [], []
+        gc.collect()
+        gc.disable()
+        try:
+            for i in range(n):
+                for f, t in (((fa, ta), (fb, tb)) if i % 2 == 0 else ((fb, tb), (fa, ta))):
+                    s = time.perf_counter()
+                    f(i)
+                    t.append((time.perf_counter() - s) * 1000)
+        finally:
+            gc.enable()
+        return (statistics.median(ta), max(ta)), (statistics.median(tb), max(tb))
 
 class TestVorabmessung(unittest.TestCase):
     """REQ-MB-23: Messergebnis der Extraktion liegt im Spec-Ordner -- nur Zahlen, kein Buchtext."""

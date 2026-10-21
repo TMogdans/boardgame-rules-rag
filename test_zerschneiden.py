@@ -18,6 +18,7 @@ Vom Test erwartete Schnittstellen (zusaetzlich zu test_mehrbuch.py / test_einles
   Chunk aus lade_spiel: "seiten" = alle (gedruckten) Seiten, ueber die sein Text laeuft;
       "seite" = die erste davon
   Ausgabe von rag.aktualisiere_index: je Buch eine Zeile mit buch_id und Haeppchenzahl
+  Buchdeklaration "vorspann": <Name> (Default "Vorspann", REQ-MB-25)
 """
 import contextlib
 import importlib
@@ -42,9 +43,11 @@ def einlesen():
 
 
 class ZerschneideTest(mb.BestandTest):
-    def lies_ein(self, seiten, liste, bid="nord", layout=None, titel="Buch Nord", weitere=()):
+    def lies_ein(self, seiten, liste, bid="nord", layout=None, titel="Buch Nord", weitere=(), vorspann=None):
         """Buch deklarieren und einlesen; Rueckgabe: Sollabschnitte aus baue_abschnitte (gleiche Eingabe)."""
         extra = {"layout": layout} if layout else {}
+        if vorspann:
+            extra["vorspann"] = vorspann
         buecher = [mb.buch(bid, titel, "alpha", ueberschriften={"quelle": "lesezeichen"},
                            seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True, **extra)]
         buecher += [mb.buch(b, t, "alpha", ueberschriften={"quelle": "lesezeichen"},
@@ -54,7 +57,7 @@ class ZerschneideTest(mb.BestandTest):
             einlesen().lies_buch_ein(mb.SID, b, s, lesezeichen=l)
         einlesen().lies_buch_ein(mb.SID, bid, seiten, lesezeichen=liste)
         return einlesen().baue_abschnitte(seiten, liste, layout=layout, sprache="de", reparatur=True,
-                                          protokoll=einlesen().Protokoll())
+                                          protokoll=einlesen().Protokoll(), **({"vorspann": vorspann} if vorspann else {}))
 
     def chunks(self, size, overlap, ausgabe=None):
         with mock.patch.multiple(rag, CHUNK_SIZE=size, CHUNK_OVERLAP=overlap):
@@ -246,6 +249,28 @@ class TestLayoutImIndex(ZerschneideTest):
             for c in je[pfad]:
                 self.assertTrue(c["text"].startswith(vorsatz), c["text"])
         self.assertIn("Text nach Gamma.", "".join(c["text"] for c in je[("K1", "U1", "Beta")]))
+
+
+class TestVorspannImIndex(ZerschneideTest):
+    SEITEN = {1: [z("Eindeutiger Vorspanntext quorx steht vor jeder Ueberschrift.")] + werte("vs", 4),
+              2: [z("Kapitel", "section_header"), z("Text im Kapitel.")]}
+    LISTE = [eintrag("Kapitel", 2)]
+
+    @unittest.skip("devloop: REQ-MB-25 noch nicht implementiert")
+    def test_req_mb_25_vorspann_als_haeppchen_auffindbar_und_benennbar(self):
+        """[REQ-MB-25] Text vor dem 1. Eintrag ist nach index Haeppchen mit Pfad ["Vorspann"] (lade_spiel, BM25), zerschnitten wie jeder Abschnitt; anderer Name -> dieser."""
+        for name, deklaration in (("Vorspann", None), ("Auftakt", "Auftakt")):
+            with self.subTest(name=name):
+                abschnitte = self.lies_ein(self.SEITEN, self.LISTE, vorspann=deklaration)
+                self.assertEqual(abschnitte[0]["abschnittspfad"], [name])
+                chunks = self.chunks(60, 20)
+                vorspann = self.je_pfad(chunks)[(name,)]
+                self.assertEqual([self.stueck(c) for c in vorspann], rag.zerteile(abschnitte[0]["text"], 60, 20))
+                self.assertGreater(len(vorspann), 1)
+                with mock.patch.multiple(rag, CHUNK_SIZE=60, CHUNK_OVERLAP=20):
+                    folge = rag.bm25_rangfolge(self.oeffne(), "quorx", chunks, 5)
+                self.assertEqual([chunks[i]["abschnittspfad"] for i in folge], [[name]])
+                os.remove(self.buchdatei("nord"))
 
 
 if __name__ == "__main__":
