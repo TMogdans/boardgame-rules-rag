@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** Fassung 6, wartet auf Abnahme. Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft.
+- **Status:** **Abgenommen** durch Tobias am 2026-10-21 (Fassung 6). (Historie: Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft.)
 
 ## User Story
 
@@ -308,7 +308,7 @@ Buch konfigurierbar), werden Layout-Überschriften aus drei Merkmalsquellen best
   `section_header`) für den Rückfall; (ii) eine je Buch deklarierte **Veto-Menge** von Klassen,
   deren Zeilen nie Überschrift sind. Default der Veto-Menge sind mindestens Tabelle samt
   Tabellenzellen, Bildunterschrift, Seitenkopf und Seitenfuß (Docling `table`, `caption`,
-  `page_header`, `page_footer`); eine Deklaration des Buchs ergänzt diese Menge.
+  `page_header`, `page_footer`); eine Veto-Deklaration des Buchs **ergänzt** diese Menge und ersetzt sie nicht.
 
 Optional deklarierte Zeilenmerkmale (eigene Zeile, Höchstlänge) gelten zusätzlich.
 
