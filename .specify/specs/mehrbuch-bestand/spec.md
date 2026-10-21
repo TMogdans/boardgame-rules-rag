@@ -2,8 +2,8 @@
 
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
-- **Tier:** T3 — **vorläufig/advisorisch**, siehe Abschnitt „Tier"
-- **Status:** Entwurf, wartet auf Abnahme durch Tobias (harter Spec-Stopp)
+- **Tier:** T3 — siehe Abschnitt „Tier"
+- **Status:** Entwurf 2, wartet auf Abnahme
 
 ## User Story
 
@@ -26,8 +26,10 @@ nur in den Daten, nie im Code.**
 | **Bestand** | Das heutige Spielverzeichnis `data/<spiel_id>/` samt `spiel.json`. Die `spiel_id` bleibt die Bestands-ID; die Pipe-Zuordnung (`ordne_spiel`, `Spiel: X`) wählt weiter Bestände. |
 | **Buch** | Eine Quelle innerhalb eines Bestands, mit stabiler `buch_id`, Titel, Fassung, Sprache, Quelldatei. |
 | **Fassung** | Allgemeiner Name für Edition/Auflage/Version eines Buchs (z. B. `ED4`, `ED1`, `v3`). Ein freier Text, den nur die Daten deuten. |
-| **Abschnittspfad** | Überschriften-Hierarchie eines Häppchens, z. B. `["Kapitel 4: Disziplinen", "Krieger", "Talente"]`. |
-| **Inhaltsart** | Themenbereich eines Abschnitts, mindestens `regel` und `welt`. Siehe O-2 zum Verhältnis zu `typ` aus `classify.py`. |
+| **Abschnittspfad** | Überschriften-Hierarchie eines Häppchens, z. B. `["Talente", "Talentbeschreibungen", "Ablenken"]`. |
+| **Inhaltsart** | Themenbereich eines Abschnitts (mindestens `regel`, `welt`); eigenes Feld, **orthogonal** zu `typ` aus `classify.py` (regel/flavor/meta bleibt Ballast-Filter für `DROP_TYPES`). |
+| **Überschriften-Liste** | Deklarierte Gliederung eines Buchs: Einträge (Titel, Ebene, Seite) aus PDF-Lesezeichen oder Inhaltsverzeichnis. |
+| **Layout-Überschrift** | Überschrift, die unterhalb der Liste aus Zeilenmerkmalen der Extraktion erkannt wird (REQ-MB-20). |
 | **Altbestand** | Ein Bestand, dessen `spiel.json` keine Bücherliste hat (heutiges Format, ein `quelle_pdf`). |
 
 Unberührt bleibt der Einzeldatei-Weg (`knowledge.jsonl`/`pdfs/` neben `rag.py`, ohne Index).
@@ -38,13 +40,17 @@ Unberührt bleibt der Einzeldatei-Weg (`knowledge.jsonl`/`pdfs/` neben `rag.py`,
 
 **REQ-MB-1** — *Contract*
 Ein Bestand kann in `spiel.json` eine Liste von Büchern deklarieren; jedes Buch hat
-`buch_id` (Slug, im Bestand eindeutig), `titel`, `fassung`, `sprache` (aus `rag.SPRACHEN`)
-und eine Quelldatei; optional eine Standard-Inhaltsart und Inhaltsart-Zuweisungen je
-Abschnittspfad-Präfix (siehe O-3). Ein Altbestand wird gelesen, als hätte er genau ein Buch
-(`buch_id`, Titel und Fassung aus vorhandenen Angaben abgeleitet), **ohne dass eine Datei
-umgeschrieben wird**.
+`buch_id` (Slug, im Bestand eindeutig), `titel`, `fassung`, `sprache` (aus `rag.SPRACHEN`),
+eine Quelldatei, eine Standard-Inhaltsart und optional Inhaltsart-Zuweisungen je
+Abschnittspfad-Präfix (längstes passendes Präfix gewinnt; keine LLM-Klassifikation). Jedes Buch
+liegt in einer eigenen Datei `data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl` mit eigenem
+Fingerprint. Ein Altbestand wird gelesen, als hätte er genau ein Buch (`buch_id`, Titel und
+Fassung aus vorhandenen Angaben abgeleitet), behält seine eine Datei und **keine Datei wird
+umgeschrieben**.
 *Detektor:* synthetischer Bestand mit zwei Büchern → `rag.py index` legt Häppchen beider
-Bücher an; Altbestand-Verzeichnis ist nach `index` byte-gleich (Hash aller Dateien).
+Bücher an; Präfix-Zuweisung `["K2"]`→`welt` bei Standard `regel` ergibt für Häppchen unter
+`K2 › X` `welt`, unter `K1` `regel`; Altbestand-Verzeichnis ist nach `index` byte-gleich
+(Hash aller Dateien).
 
 **REQ-MB-2** — *Contract*
 Jedes Häppchen eines Mehr-Bücher-Bestands trägt im Index und in den von `lade_spiel`
@@ -59,9 +65,12 @@ Retrieval-Ergebnisse, Quellenköpfe im Prompt, Pipe-Fusszeilen, Entscheidungstex
 Eval-/Messausgaben **gleich zum Stand vor dieser Spec** (Gleichstands-Regel wie in
 `test_regression.py`). Die bestehenden Referenzen (`regression_referenz.json`,
 `pipe_referenz.json`, `pipe_verlauf_referenz.json`) und alle bestehenden Tests inklusive
-`test_mutationen.py` und `messung/` bleiben **ohne Änderung ihrer Sollwerte** grün.
-Ob ein Altbestand dabei neu eingebettet werden darf, entscheidet O-4.
-*Detektor:* bestehende Suite unverändert; Diff der Referenzdateien leer.
+`test_mutationen.py` und `messung/` bleiben **ohne Änderung ihrer Sollwerte** grün. Das
+Index-Schema wird per **neuer Spalten** erweitert (Altwerte NULL/abgeleitet); ein vorhandener
+Index-Stand bleibt gültig und wird **nicht** neu eingebettet.
+*Detektor:* bestehende Suite unverändert; Diff der Referenzdateien leer. Migrationstest: ein
+mit dem Code vor dieser Spec gebauter Index (im Test synthetisch erzeugt) → nach Migration
+Embed-Zähler 0 und Abfrage-Ergebnisse gleich denen vor der Migration.
 
 **REQ-MB-4** — *When, Filter vor dem Ranking*
 Wenn eine Suche mit Filter auf `buch_id`, `fassung`, `sprache` und/oder `inhaltsart` läuft,
@@ -73,26 +82,37 @@ ab (keine stille leere Suche).
 Fragevektor ist (Score 1,0) — es erscheint nicht, und die Top-k sind identisch zur Suche in
 einem Bestand, der nur die passenden Häppchen enthält. Gleiches mit BM25-Treffer.
 
-**REQ-MB-5** — *Where, Fassungsregel*
-Wo ein Bestand für eine Inhaltsart erlaubte Fassungen festlegt (z. B. `regel` nur aus
-Fassung `ED4`), sind Häppchen dieser Inhaltsart aus anderen Fassungen **nie** Kandidaten;
-Häppchen anderer Inhaltsarten (z. B. `welt`) kommen weiter aus allen Fassungen. Die Regel
-gilt bei jeder Suche des Bestands (CLI, Eval, Pipe), unabhängig von der Frage, und wirkt wie
-REQ-MB-4 vor dem Ranking.
-*Detektor:* synthetischer Bestand mit Fassungen `A`/`B`, je ein `regel`- und ein
-`welt`-Häppchen mit Score 1,0 → nur `regel@A`, `welt@A`, `welt@B` erreichbar.
+**REQ-MB-5** — *Where, Fassungsregel (zweistufig)*
+Wo ein Bestand für eine Inhaltsart eine Fassungsregel festlegt, nennt sie **maßgebliche**
+Fassungen und optional **gekennzeichnete** Fassungen mit je einem festen Hinweistext
+(z. B. `regel`: maßgeblich `ED4`; gekennzeichnet `ED1` mit „Fassung ED1 — für die maßgebliche
+Fassung umrechnen"). Für Häppchen dieser Inhaltsart gilt:
+- **maßgebliche Fassung** → normaler Kandidat;
+- **gekennzeichnete Fassung** → Kandidat, im Ranking gleich behandelt (kein Bonus/Malus;
+  vorbehaltlich N-2), trägt aber den Hinweis (REQ-MB-21);
+- **jede andere Fassung** → **ausgeschlossen**: nie Kandidat, wirkt wie REQ-MB-4 vor dem Ranking.
+
+Inhaltsarten ohne Regel kommen aus allen Fassungen ohne Hinweis. Die Regel gilt bei jeder
+Suche des Bestands (CLI, Eval, Pipe), unabhängig von der Frage. Hinweistexte und
+Fassungsnamen sind Daten.
+*Detektor:* synthetischer Bestand mit Fassungen `alpha`/`beta`/`gamma`, Regel `regel`:
+maßgeblich `alpha`, gekennzeichnet `beta`; je ein `regel`- und `welt`-Häppchen je Fassung mit
+Score 1,0 → erreichbar `regel@alpha`, `regel@beta` (mit Hinweis), alle drei `welt`; `regel@gamma`
+erscheint in keinem Kandidatenfeld (Vektor, BM25, Reranker). Ranking-Gleichbehandlung: Top-k-
+Reihenfolge gleich der eines Bestands ohne Regel, aus dem `regel@gamma` entfernt ist.
 
 **REQ-MB-6** — *Contract, Fundstelle*
 In einem Mehr-Bücher-Bestand nennen Quellenkopf im Prompt (`baue_kontext`), Pipe-Fusszeile
 und die Seitenangaben des Entscheidungsschritts (C-Text, B-Hinweis, Sprachmodus) je Fundstelle
-**Buch (Titel oder Kurzname), Fassung und Seite**. CLI und Pipe erzeugen dieselben Köpfe aus
-derselben Funktion. Welche Seite (physisch/gedruckt) gilt, entscheidet O-5.
+**Buch (Titel oder Kurzname), Fassung und gedruckte Seite** (REQ-MB-22). CLI und Pipe erzeugen
+dieselben Köpfe aus derselben Funktion.
 *Detektor:* Prompt-Nachrichten und Pipe-Ausgabe für einen synthetischen Zwei-Bücher-Bestand
-mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; für Altbestände greift REQ-MB-3.
+mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; Mutation der Kopf-Funktion
+(liefert Marker) ändert CLI- **und** Pipe-Ausgabe. Altbestände: REQ-MB-3.
 
 **REQ-MB-7** — *If/Then, Messung*
-Golden-Set-Fragen eines Mehr-Bücher-Bestands können erwartete Fundstellen als
-(`buch_id`, Seite) angeben; ein Treffer zählt nur bei passendem Buch. Wenn ein Golden Set
+Golden-Set-Fragen eines Mehr-Bücher-Bestands geben erwartete Fundstellen als
+(`buch_id`, gedruckte Seite) an; ein Treffer zählt nur bei passendem Buch. Wenn ein Golden Set
 eines Mehr-Bücher-Bestands eine Seite ohne Buch angibt, dann bricht `eval`/`messung` mit
 `KonfigFehler` ab (keine stille Wertung gegen ein beliebiges Buch). Altbestände: REQ-MB-3.
 *Detektor:* Frage mit erwarteter Seite 12 in Buch A, Treffer auf Seite 12 in Buch B → verfehlt.
@@ -104,6 +124,7 @@ Wenn die Quelle eines Buchs durch eine andere Fassung oder Auflage ersetzt wird 
 `buch_id`, neue Fassung/Quelldatei, neu eingelesen) und danach `rag.py index` läuft, dann
 enthält der Index für diese `buch_id` nur noch Häppchen der neuen Fassung — null Häppchen
 der alten, auch in FTS — und die Häppchen der übrigen Bücher werden **nicht** neu eingebettet.
+`--ueberschreiben` beim Einlesen wirkt nur auf das genannte Buch.
 *Detektor:* Fake-`embed` zählt eingebettete Texte: genau die Häppchenzahl des ersetzten
 Buchs; Zeilenzählung je `buch_id`/`fassung` in `chunks` und `chunks_fts`.
 
@@ -121,8 +142,11 @@ Bestand mit `KonfigFehler` ab und dessen alter Stand bleibt (wie heute bei kaput
 
 ### C. Einlesen-Reparatur
 
-Die Reparatur ist eine reine Funktion auf dem Seitentext **vor** jedem Whitespace-Zusammenfassen
-und wird je Buch eingeschaltet (für Altbestände und den rohen PDF-Weg aus: REQ-MB-3).
+Die Reparatur ist eine reine Funktion auf den Textzeilen der Extraktion **vor** jedem
+Whitespace-Zusammenfassen und wird je Buch eingeschaltet (für Altbestände und den rohen
+PDF-Weg aus: REQ-MB-3). Reihenfolge: (1) Überschriften-Abgleich auf Zeilen (REQ-MB-12, -20),
+(2) Trennungsreparatur (REQ-MB-11) im Text zwischen den Überschriften — sonst würde der
+gewöhnliche Umbruch (`Wurf⏎Stufe`) Überschriftenzeilen mit dem Folgetext verschmelzen.
 
 **REQ-MB-11** — *Contract, Trennungen*
 Für die folgenden Eingaben (`⏎` = Zeilenumbruch, `·` = U+00AD) liefert die Reparatur genau:
@@ -139,38 +163,73 @@ Für die folgenden Eingaben (`⏎` = Zeilenumbruch, `·` = U+00AD) liefert die R
 | `Schaden - 2` | `Schaden - 2` | freistehender Strich bleibt |
 | `Wurf⏎Stufe` | `Wurf Stufe` | gewöhnlicher Umbruch |
 
-Die Konjunktionsliste ist sprachabhängig und Teil der Daten/Konfiguration (O-6).
-*Detektor:* Tabelle als Testfälle; zusätzlich Zähler „zusammengefügte Trennungen" im
-Einlese-Protokoll.
+Regelwerk nur wie in der Tabelle (keine Wörterbuchprüfung); die Konjunktionsliste ist
+sprachabhängig und Teil der Konfiguration.
+*Detektor:* Tabelle als Testfälle; Einlese-Protokoll zählt „zusammengefügte Trennungen" und
+„Strich behalten" — Zähler auf einer definierten Eingabe mit bekannter Anzahl je Fall exakt.
 
-**REQ-MB-12** — *Where, Überschriften-Quelle*
-Wo ein Buch eine Überschriften-Quelle deklariert, gilt diese als Wahrheit für die
-Abschnittspfade. Der Mechanismus nimmt allgemein eine Liste (Titel, Ebene, Seite); Lieferanten
-sind mindestens **PDF-Lesezeichen** und eine **Inhaltsverzeichnis-Liste** (Titel, Ebene,
-gedruckte Seite + Seitenversatz). Eine kaputte Überschrift im Seitentext, die auf der
-Zielseite unscharf zum Listeneintrag passt, wird im Text durch den Listentitel ersetzt.
-*Detektor:* definierte Eingabe (Seitentexte + Liste): Seite 7 enthält `Bonusw rfel` bzw.
-`A ktionswürfel`, Liste nennt `Bonuswürfel`/`Aktionswürfel` auf Seite 7 → Abschnittspfad und
-Häppchentext enthalten die korrekte Form, die kaputte nicht mehr; eine gleich lautende
-Zeichenfolge auf einer anderen Seite bleibt unangetastet.
+**REQ-MB-12** — *Where, Überschriften-Liste und unscharfer Abgleich*
+Wo ein Buch eine Überschriften-Liste deklariert, gilt sie als Wahrheit für die Ebenen, die sie
+kennt. Der Mechanismus nimmt allgemein eine Liste (Titel, Ebene, Seite); Lieferanten sind
+mindestens **PDF-Lesezeichen** und eine **Inhaltsverzeichnis-Liste** (Titel, Ebene, gedruckte
+Seite, umgerechnet nach REQ-MB-22). Für jeden Eintrag wird auf seiner **Zielseite (± 0)** die
+passende Zeile gesucht und durch den Listentitel ersetzt; sie beginnt den Abschnitt.
+
+*Abgleichregel:* `norm(s)` = Unicode-NFC, alle Leerraumzeichen entfernen, `casefold`.
+Eine Zeile **passt** zu Titel `t`, wenn `norm(zeile)` durch Streichen von höchstens `k`
+Zeichen aus `norm(t)` entsteht (Teilfolge, nur Auslassungen — keine Vertauschungen, keine
+Einfügungen) mit `k = 0` für `len(norm(t)) < 6`, sonst `k = max(1, ⌊len(norm(t)) / 10⌋)`.
+Verglichen wird immer die **ganze Zeile**, nie ein Teilstück. Mehrere passende Zeilen auf der
+Seite: die mit den wenigsten Auslassungen gewinnt, bei Gleichstand die erste in Lesereihenfolge;
+der Gleichstand wird im Protokoll als „mehrdeutig" mit Titel und Seite gezählt. Eine Zeile wird
+höchstens einem Eintrag zugeordnet (Einträge in Listenreihenfolge). Keine passende Zeile →
+REQ-MB-13.
+
+Abgedeckt sind die gemessenen Fehlerklassen (1) fehlende Zeichen und (2) eingeschobene
+Leerzeichen. **Klasse (3) OCR-Vertauschungen** (`DLE I<REATUREN VON BARSALVE`, `LEKTOAAT`,
+`so` für `50`) ist **nicht** Teil von Spec 1: eine Regel mit Vertauschungen träfe bei Abstand 1
+auch echte Nachbarwörter (`Feuerball`/`Feuerwall`, siehe Tabelle); solche Einträge fallen
+sichtbar unter REQ-MB-13.
+
+| Listentitel (Seite 7) | Zeile auf Seite 7 | Ergebnis | Grund |
+|---|---|---|---|
+| `Bonuswürfel` | `Bonusw rfel` | ersetzt → `Bonuswürfel` | 1 Auslassung, k = 1 |
+| `Aktionswürfel` | `A ktionswürfel` | ersetzt | nur Leerzeichen |
+| `Stufen/Aktionswürfel` | `Stufen/Aktionsw rfel` | ersetzt | 1 Auslassung, k = 2 |
+| `Ätherhaut` | `therhaut` | ersetzt | 1 Auslassung, k = 1 |
+| `Bonuswürfel` | `BONUSWÜRFEL` | ersetzt | nur Groß/Klein |
+| `Bonuswürfel` | `Bonusw rf l` | **nicht** ersetzt | 2 Auslassungen > k = 1 |
+| `Bonuswürfel` | `Bonus` | **nicht** ersetzt | 6 Auslassungen |
+| `Bonuswürfel` | `Bonuswürfel einsetzen …` (Fließtext) | **nicht** ersetzt | Zeile länger als Titel |
+| `Feuerball` | `Feuerwall` | **nicht** ersetzt | Vertauschung, keine Auslassung |
+| `Rang` | `Rng` | **nicht** ersetzt | Titel < 6, k = 0 |
+| `Bonuswürfel` | `Bonusw rfel` auf **Seite 8** | **nicht** ersetzt | nicht Zielseite |
+| `Die Kreaturen von Barsaive` | `DLE I<REATUREN VON BARSALVE` | **nicht** ersetzt → REQ-MB-13 | Klasse (3) |
+
+*Detektor:* Tabelle als Testfälle (Seitentexte + Liste → Abschnittspfad und Häppchentext);
+ersetzte Fälle: Pfad und Text enthalten die Listenform, die kaputte nicht mehr; nicht ersetzte:
+Zeile byte-gleich. Gleichstand-Fall: zwei gleich gute Zeilen → erste gewinnt, Protokoll
+„mehrdeutig = 1".
 
 **REQ-MB-13** — *If/Then*
 Wenn ein Listeneintrag auf seiner Zielseite nicht gefunden wird, dann beginnt sein Abschnitt
 am Anfang der Zielseite, und der Eintrag erscheint im Einlese-Protokoll mit Titel und Seite
-(Zähler gefunden/nicht gefunden). Kein Eintrag verschwindet still.
+(Zähler gefunden/nicht gefunden/mehrdeutig). Kein Eintrag verschwindet still.
 *Detektor:* Liste mit einem Eintrag ohne Gegenstück → Abschnitt vorhanden, Protokoll nennt ihn.
 
 ### D. Zerschneiden nach Überschriften
 
 **REQ-MB-14** — *Contract, Abschnittsgrenzen*
-Bei Büchern mit Überschriften-Quelle enthält kein Häppchen Text aus zwei verschiedenen
-(Blatt-)Abschnitten; auch die Überlappung (`CHUNK_OVERLAP`) reicht nie über eine
-Abschnittsgrenze. Ein Abschnitt, der kürzer als `CHUNK_SIZE` ist, ergibt genau ein Häppchen;
-ein längerer wird innerhalb des Abschnitts nach `CHUNK_SIZE`/`CHUNK_OVERLAP` geteilt. Ob der
-Titelvorsatz (REQ-MB-15) zur Größe zählt und ob kurze Geschwister zusammengelegt werden,
-entscheidet O-7.
+Bei Büchern mit Überschriften-Liste enthält kein Häppchen Text aus zwei verschiedenen
+(Blatt-)Abschnitten — Blätter sind auch Layout-Abschnitte (REQ-MB-20); auch die Überlappung
+(`CHUNK_OVERLAP`) reicht nie über eine Abschnittsgrenze. `CHUNK_SIZE` gilt für den Text
+**ohne** Titelvorsatz (REQ-MB-15). Ein Abschnitt, der kürzer als `CHUNK_SIZE` ist, ergibt genau
+ein Häppchen (keine Zusammenlegung kurzer Geschwister); ein längerer wird innerhalb des
+Abschnitts nach `CHUNK_SIZE`/`CHUNK_OVERLAP` **zeichengenau wie heute** (`zerteile`) geteilt.
+Das Protokoll weist die Häppchenzahl je Buch aus.
 *Detektor:* synthetisches Buch mit markierten Abschnittstexten; jedes Häppchen ist Teilstring
-genau eines Abschnitts (ohne Vorsatz).
+genau eines Abschnitts (ohne Vorsatz); Abschnitt der Länge `CHUNK_SIZE` + 1 → 2 Häppchen,
+Textteile gleich `zerteile` auf dem Abschnittstext; zwei 50-Zeichen-Geschwister → 2 Häppchen.
 
 **REQ-MB-15** — *Contract, Titel trägt mit*
 Jeder Häppchentext — der eingebettete wie der im Prompt — beginnt mit seinem Abschnittspfad,
@@ -187,106 +246,123 @@ die Fundstelle nennt die erste, eine Golden-Set-Erwartung trifft bei jeder davon
 
 **REQ-MB-17** — *Architektur*
 Jede Wirkung dieser Spec ist mit einem synthetischen Bestand erreichbar, dessen Namen,
-Buchtitel, Fassungen und Inhaltsarten-Zuweisungen keinen Bezug zu Earthdawn haben; es gibt
-keinen Code-Pfad, der nur bei bestimmten Bestands- oder Buchnamen wirkt.
+Buchtitel, Fassungen, Hinweistexte und Inhaltsarten-Zuweisungen keinen Bezug zu Earthdawn
+haben; es gibt keinen Code-Pfad, der nur bei bestimmten Bestands- oder Buchnamen wirkt.
 *Detektor:* sämtliche Tests dieser Spec laufen mit einem Bestand `testwelt` und Fassungen
-`alpha`/`beta`; Umbenennen aller Bezeichner in den Testdaten ändert kein Ergebnis.
+`alpha`/`beta`/`gamma`; Umbenennen aller Bezeichner in den Testdaten ändert kein Ergebnis.
 
 **REQ-MB-18** — *Architektur, Urheberrecht*
 Kein Test liest echte Bücher oder `DATA_DIR`-Inhalte; alle Testdaten sind synthetisch und
 werden im Test erzeugt. Einlese-Ergebnisse geschützter Bücher entstehen nur unter
 `DATA_DIR`/`pdfs/` (gitignored). `test_schutz.py` deckt die neuen Schreibpfade (Bücherdateien,
-Einlese-Protokoll) mit ab.
+Einlese-Protokoll) mit ab. Die Vorabmessung (REQ-MB-23) legt im Repo nur Seitennummern und
+Zahlen ab, keinen Buchtext.
 *Detektor:* `test_schutz.py` mit Mutation „Bücherdatei neben den Code schreiben" wird rot.
 
 **REQ-MB-19** — *Performance*
 Laden und Vektorsuche in einem Bestand mit 5 Büchern und zusammen 3.000 Häppchen
-(1.024 Dimensionen, Embedding gefakt, mit aktivem Filter nach REQ-MB-4/-5): **typisch ≤ 15 ms,
-Maximum ≤ 30 ms** je Frage über 200 Fragen; Altbestände nicht langsamer als heute
-(README: 2.000 Häppchen typisch 9,1 ms, max 13,5). Zahlen sind Vorschlag, siehe O-8.
+(1.024 Dimensionen, Embedding gefakt, mit aktiver Filter- und Fassungsregel nach
+REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 30 ms** je Frage über 200 Fragen; Altbestände nicht
+langsamer als heute (README: 2.000 Häppchen typisch 9,1 ms, max 13,5).
 *Detektor:* Messskript mit typisch und Maximum, wie die README-Messung.
+
+### F. Ergänzungen (Entwurf 2)
+
+**REQ-MB-20** — *Where, Layout-Überschriften unterhalb der Liste*
+Wo ein Buch Layout-Merkmale für Überschriften deklariert (allgemeiner Mechanismus; Merkmale je
+Buch konfigurierbar, z. B. Schriftgröße von–bis, Schnitt fett, eigene Zeile, Höchstlänge,
+Layout-Klasse der Extraktion), gilt eine Zeile als Layout-Überschrift genau dann, wenn sie
+**alle** deklarierten Merkmale erfüllt und nicht schon einem Listeneintrag zugeordnet ist
+(REQ-MB-12). Sie erhält die Ebene ihres umschließenden Listenabschnitts + 1, verfeinert dessen
+Abschnittspfad und beginnt einen Unterabschnitt bis zur nächsten Layout- oder Listenüberschrift.
+Layout-Überschriften werden **nicht** gegen die Liste abgeglichen oder ersetzt und erzeugen
+keine Ebenen oberhalb der Liste. Das Protokoll zählt erkannte Layout-Überschriften je
+Listenabschnitt.
+Anlass (gemessen): im Zielbuch ist „Talentbeschreibungen" **ein** Lesezeichen für S. 76–107;
+die Talentnamen stehen nur im Text.
+*Detektor:* synthetisches Buch, Liste auf 2 Ebenen (`K1 › U1`), darin Zeilen `Alpha`, `Beta`
+mit den Merkmalen und je Text → Pfade `K1 › U1 › Alpha` bzw. `… › Beta`, jedes Häppchen eines
+Unterabschnitts beginnt mit dessen Namen (REQ-MB-15). Negativfall: eine kurze Fließtextzeile
+`Gamma` ohne die Merkmale (eigene Zeile, aber andere Schriftgröße) bleibt Fließtext in `Beta`.
+Protokoll: `U1` = 2. Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von
+REQ-MB-12 unverändert).
+
+**REQ-MB-21** — *Contract, Hinweis gekennzeichneter Fassungen*
+Ein Häppchen einer gekennzeichneten Fassung (REQ-MB-5) trägt seinen deklarierten Hinweistext
+im Quellenkopf des Prompts und in seiner Fundstelle (CLI-Quellenausgabe, Pipe-Fusszeile).
+Kopf und Fundstelle kommen in CLI und Pipe aus **derselben** Funktion wie REQ-MB-6;
+maßgebliche und ungeregelte Häppchen tragen keinen Hinweis.
+*Detektor:* synthetischer Bestand aus REQ-MB-5 → Prompt und Pipe-Ausgabe enthalten den
+Hinweistext genau bei `regel@beta`, nicht bei `regel@alpha`/`welt@*`. Mutation der
+Hinweis-Funktion (liefert Marker) ändert CLI- **und** Pipe-Ausgabe; Änderung des Hinweistexts
+in den Daten ändert beide Ausgaben ohne Code-Änderung.
+
+**REQ-MB-22** — *Contract, gedruckte Seite*
+Fundstelle und Golden-Set-Seite eines Mehr-Bücher-Bestands ist die **gedruckte** Seite; die
+physische PDF-Seite wird zusätzlich gespeichert. Quelle je Buch deklariert: PDF-Seitenlabels
+**oder** ein Seitenversatz (gedruckt = physisch − Versatz) als Rückfall. Optional deklarierte
+Kontrollpunkte (physisch → gedruckt) werden beim Einlesen geprüft; widersprechen die Labels
+einem Kontrollpunkt, bricht das Einlesen mit `KonfigFehler` ab (Hinweis: Versatz deklarieren).
+Seiten ohne arabische Zahl als Label (z. B. römisch) tragen keine gedruckte Seite; ihre
+Fundstelle nennt „PDF-S. n". Altbestände bleiben physisch (REQ-MB-3).
+*Detektor:* synthetisches PDF mit Labels (i, ii, 1, 2, …) → Häppchen von physisch 3 trägt
+gedruckt 1, physisch 3; dasselbe mit Versatz 2 ohne Labels → gleiches Ergebnis; falsche Labels
++ Kontrollpunkt → `KonfigFehler`; Seite „ii" → Fundstelle „PDF-S. 2".
+
+**REQ-MB-23** — *Vorbedingung, Extraktionsweg*
+Fließtext wird über Docling-Layout (Lesereihenfolge) **ohne LLM-Verbalisierung** extrahiert,
+Tabellen roh. Vor der Implementierung von Abschnitt C/D wird an **10 festgelegten
+Stichprobenseiten** des Zielbuchs gemessen (davon ≥ 3 Zweispaltenseiten mit Tabelle, ≥ 2 aus
+„Talentbeschreibungen"), von Hand gegen das PDF gezählt:
+- **L** = Anteil der Absätze in richtiger Lesereihenfolge — Ziel ≥ 95 %;
+- **T** = Tabellenzeilen, die in einen Fließtext-Absatz geraten — Ziel 0;
+- **H** = auf den Talentseiten erkannte / vorhandene Talentnamen und Fehltreffer, mit den
+  geplanten Merkmalen nach REQ-MB-20 — Ziel alle erkannt, 0 Fehltreffer.
+
+Verfehlt eine Zahl ihr Ziel, wird **vor** dem Weiterbauen mit Tobias über den Weg entschieden
+(spaltenbewusste Extraktion ohne Docling oder Spaltensatz in Spec 2).
+*Detektor:* Messergebnis mit Seitenliste und L/T/H liegt im Spec-Ordner (nur Zahlen, REQ-MB-18),
+bevor ein Commit Abschnitt C/D implementiert.
 
 ## Abgrenzung (nicht in Spec 1)
 
 - Hausregeln als Markdown (Art neu/ergänzt/ersetzt, Bezug, feste Mitlieferung) — eigene Spec.
 - Zahlentreue: Schablonen-Serialisierung für Werteblöcke, Zahlenprüfung nach LLM-Verbalisierung.
+- OCR-Vertauschungen im Überschriften-Abgleich (Fehlerklasse 3, REQ-MB-12).
 - FTS5-Trigram bzw. Komposita-Suche.
 - Earthdawn-Testsatz (Golden Set) — Daten, nicht Code; folgt nach Spec 1.
 - Übersetzungs-/Suchfassung für englische Bände (Throal).
 - Automatische Erkennung, ob eine *Frage* eine Regel- oder Weltfrage ist.
 
-## Offene Fragen (Entscheidung durch Tobias)
+## Entscheidungen (Tobias, 2026-10-21)
 
-**O-1 Ablage der Bücher im Bestand**
-(a) je Buch eine eigene Datei `data/<id>/buecher/<buch_id>/knowledge.jsonl`, Fingerprint je Buch;
-(b) eine `knowledge.jsonl` je Bestand mit Feld `buch_id`, Fingerprint je Bestand, Ersatz per Filter-Neuschreiben;
-(c) wie (b), aber Fingerprint über die Zeilen je Buch.
-*Empfehlung (a):* REQ-MB-8/-9 folgen direkt aus Datei-Hashes; Ersetzen = eine Datei ersetzen;
-`--ueberschreiben` wirkt nur auf ein Buch. Altbestände behalten ihre eine Datei (REQ-MB-1).
+- **O-1 (a)** je Buch eigene `knowledge.jsonl` + Fingerprint — Ersetzen/Inkrementell folgen direkt aus Datei-Hashes (MB-1, -8, -9).
+- **O-2 (a)** `inhaltsart` orthogonal zu `typ` — sonst löscht `DROP_TYPES=flavor` Weltwissen (Begriffe).
+- **O-3 (a)** Standard je Buch + Präfix-Zuweisung — deterministisch, prüfbar (MB-1).
+- **O-4 (b)** neue Spalten, Altstände gültig, Migration getestet — kein Neu-Einbetten ohne Textänderung (MB-3).
+- **O-5 (b)** gedruckte Seite, physische zusätzlich; Labels mit Versatz als Rückfall — mit dem Buch in der Hand zählt die gedruckte Seite (MB-22).
+- **O-6 (a)** Trennungsregeln wie MB-11 + Protokoll-Zähler — Wörterbuch erst, wenn eine Stichprobe Fehlzusammenfügungen zeigt (MB-11).
+- **O-7 (a)** `CHUNK_SIZE` ohne Vorsatz, keine Zusammenlegung, zeichengenau — Wirkung der Grenzen getrennt messbar (MB-14).
+- **O-8 (a)** Docling-Layout ohne Verbalisierung, Tabellen roh, Vorabmessung — Verbalisierung gehört zur Zahlentreue-Spec (MB-23). Performance-Zahlen MB-19 unverändert übernommen.
+- **O-9 (b)** keine Tier-Map — ohne CI keine Neuberechnung, jeder Merge wird ohnehin abgenommen (Tier).
 
-**O-2 Inhaltsart vs. `typ` aus `classify.py`**
-(a) eigenes Feld `inhaltsart` (regel/welt/…), orthogonal zu `typ` (regel/flavor/meta = Ballast-Filter für `DROP_TYPES`);
-(b) `typ` um `welt` erweitern; (c) `flavor` als `welt` umdeuten.
-*Empfehlung (a):* Welttext ist bei Earthdawn gesuchter Inhalt, `flavor` ist Ballast —
-zusammengelegt würde `DROP_TYPES=flavor` Weltwissen löschen, und die Klassifikator-Garantien
-(`test_classify.py`, Sollwerte) blieben nicht unverändert.
+### Neu offen (durch Entwurf 2)
 
-**O-3 Wie bekommt ein Abschnitt seine Inhaltsart?**
-(a) Deklaration: Standard je Buch + Zuweisung je Abschnittspfad-Präfix in `spiel.json`;
-(b) LLM-Klassifikation je Abschnitt (wie `classify.py`); (c) (a) mit (b) als Vorschlag, den die Deklaration übersteuert.
-*Empfehlung (a)* für Spec 1: deterministisch, prüfbar, bei Lesezeichen-Gliederung pro Kapitel
-wenige Zeilen; (b)/(c) später, falls Mischkapitel häufig sind.
+**N-1 Woher kommen die Layout-Merkmale (REQ-MB-20)?** Docling liefert Lesereihenfolge und
+Layout-Klassen (z. B. Abschnittsüberschrift), aber nicht zwingend Schriftgröße/Schnitt.
+(a) nur Docling-Layout-Klasse; (b) Schriftinformation zusätzlich aus pdfplumber, je Zeile
+zugeordnet; (c) erst messen (H in REQ-MB-23 für (a)), (b) nur bei Verfehlen.
+*Empfehlung (c):* ein Extraktionsweg weniger, falls (a) reicht; das Kriterium bleibt gleich,
+nur die Merkmalsquelle wechselt.
 
-**O-4 Index-Schema und Altbestände**
-(a) `INDEX_SCHEMA` hochzählen → alle Stände ungültig, alles wird einmal neu eingebettet;
-(b) Schema-Erweiterung per neuer Spalten mit Altwerten (NULL/abgeleitet), Altstände bleiben gültig, kein Neu-Einbetten;
-(c) neue Tabelle für Buch-Metadaten, `chunks` nur um `buch_id` erweitert, sonst wie (b).
-*Empfehlung (b):* Altbestände ändern ihre Texte nicht, ein Neu-Einbetten wäre reiner Aufwand
-und würde die README-Aussage „nur was sich geändert hat" verletzen. Kostet eine Migration,
-die selbst getestet werden muss (Index von vorher → Abfrage-Ergebnis gleich).
-
-**O-5 Welche Seite ist die Fundstelle?**
-(a) physische PDF-Seite wie heute; (b) gedruckte Seite (aus PDF-Seitenlabels oder Seitenversatz je Buch), physische zusätzlich gespeichert;
-(c) beides in der Fundstelle („S. 112 (PDF 114)").
-*Empfehlung (b):* Mit dem Buch in der Hand zählt die gedruckte Seite; Golden Sets eines
-Mehr-Bücher-Bestands schreiben dann gedruckte Seiten. Altbestände bleiben physisch (REQ-MB-3).
-
-**O-6 Trennungs-Heuristik**
-(a) Regeln wie in REQ-MB-11 (Kleinbuchstabe → zusammen, außer vor Konjunktion; Groß/Ziffer → Strich bleibt);
-(b) zusätzlich Wörterbuchprüfung gegen das Vokabular des Buchs (zusammengesetztes Wort kommt anderswo ungetrennt vor);
-(c) nur (b).
-*Empfehlung (a)* jetzt, mit Protokoll-Zähler; (b) erst, wenn eine Stichprobe der ~3.200
-Trennungen Fehlzusammenfügungen zeigt.
-
-**O-7 Häppchengröße bei Abschnitten**
-(a) `CHUNK_SIZE` gilt für den Text ohne Titelvorsatz, keine Zusammenlegung kurzer Abschnitte;
-(b) `CHUNK_SIZE` inklusive Vorsatz; (c) wie (a), kurze Geschwister unter gemeinsamem Elternpfad bis `CHUNK_SIZE` zusammenlegen.
-Innerhalb eines Abschnitts schneidet `zerteile` wie heute zeichengenau (auch mitten im Wort) — alternativ an Wortgrenzen.
-*Empfehlung (a), zeichengenau wie heute:* ein Werteblock bleibt bei seinem Namen, und die
-Wirkung der Abschnittsgrenzen ist getrennt von einer Schnitt-Änderung messbar. Häppchenzahl
-im Protokoll ausweisen.
-
-**O-8 Spaltensatz und Extraktionsweg in Spec 1**
-Der Zweispaltensatz lässt Tabellen bei einfacher Extraktion neben Fließtext laufen; ohne
-Lösung verletzen Häppchen REQ-MB-14 inhaltlich, obwohl sie formal im richtigen Abschnitt liegen.
-(a) Docling-Layout (Lesereihenfolge) ohne LLM-Verbalisierung für Fließtext, Tabellen roh;
-(b) spaltenbewusste Text-Extraktion (pdfplumber/pypdf-Layout) ohne Docling;
-(c) Spaltensatz aus Spec 1 herausnehmen, zusammen mit Zahlentreue/Werteblöcken in Spec 2.
-*Empfehlung (a)* mit Messung an 10 Stichprobenseiten vorab; LLM-Verbalisierung gehört zur
-Zahlentreue-Spec. Außerdem: Performance-Zahlen in REQ-MB-19 bestätigen oder ändern.
-
-**O-9 Tier-Map fehlt im Repo**
-Siehe unten. (a) `.devloop/tier-map.json` in einem eigenen kleinen Schritt vor der
-Implementierung anlegen; (b) ohne Map bleiben, Tier bleibt konservativ T3.
-*Empfehlung (a)* — sonst ist jede Änderung T3 und die Stufung wertlos.
+**N-2 Rang gekennzeichneter Fassungen (REQ-MB-5).** (a) gleich behandelt (so im Kriterium);
+(b) bei gleicher Abschnittspfad-Endung maßgebliche Fassung vor gekennzeichneter;
+(c) fester Score-Malus. *Empfehlung (a)* für Spec 1: der Hinweis macht die Fassung sichtbar,
+eine Rangregel ändert die Messung und ist erst mit einem Earthdawn-Golden-Set bewertbar.
 
 ## Tier
 
-**T3 (vorläufig/advisorisch).** Abgeleitet mit
-`node /Users/tmogdans/Code/devloop/dist/cli/derive-tier.js`. Im Repo gibt es **keine
-Tier-Map** (`.devloop/`, `tools/`, Wurzel: nichts gefunden, Exit 2). Mit leerer Regelmenge
-greift die konservative devloop-Regel „unbekannter Pfad → höchste Stufe": voraussichtlich
-berührte Pfade `rag.py`, `auto_ingest.py`, `ingest.py`, `classify.py`, `openwebui_pipe.py`,
-`messung/retrieval.py`, `README.md`, neues Einlese-Modul, neue Tests → **T3**. Inhaltlich passt
-das: Index-Schema, Pipe-Schnittstelle und Fundstellen-Contract werden berührt. Ohne CI-Anker
-gibt es keine server-seitige Neuberechnung; maßgeblich ist Tobias' Abnahme.
+**T3**, ohne Tier-Map (Entscheidung O-9 b). `derive-tier.js` findet keine Map (Exit 2), die
+devloop-Regel „unbekannter Pfad → höchste Stufe" greift; inhaltlich passend (Index-Schema,
+Pipe-Schnittstelle, Fundstellen-Contract). Ohne CI-Anker keine server-seitige Neuberechnung;
+maßgeblich ist Tobias' Abnahme jedes Merges.
