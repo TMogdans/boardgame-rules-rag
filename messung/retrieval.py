@@ -8,7 +8,9 @@ Retrieval messen, ohne Antwortmodell -- zuerst hier, dann erst das LLM.
 
 trefferquote  je Spiel mit Golden Set: bei wie vielen beantwortbaren Fragen liegt mindestens eine
               erwartete Seite im Top-k? Fragen mit erwartet_verweigerung oder ohne "seiten" zaehlen
-              nicht (sie haben keine erwartete Fundstelle). Stellschrauben per Umgebung wie im Eval
+              nicht (sie haben keine erwartete Fundstelle). GOLDEN_DATEI waehlt eine andere Golden-Set-
+              Datei im Spielordner (z. B. Praxisfragen); bei Ketten wird nur die letzte Nachricht
+              gesucht (ohne die live beantworteten Zwischenschritte -- die misst nur der Lauf). Stellschrauben per Umgebung wie im Eval
               (HYBRID, TOP_K, RERANK, CHUNK_SIZE, DROP_TYPES ...); die Konfiguration steht in der
               ersten Zeile der Ausgabe.
 verzeichnis   Anteil der Top-k-Treffer, die von Vision-Seiten stammen bzw. wie ein Inhaltsverzeichnis
@@ -35,14 +37,14 @@ VZ = re.compile(r"(\.{3,}|…|\s)\s*\d{1,3}\s*$")
 
 def spiele_mit_golden_set(data_dir=None):
     return [s for s in rag.liste_spiele(data_dir)
-            if os.path.exists(os.path.join(rag.spiel_verzeichnis(s, data_dir), "golden_set.json"))]
+            if os.path.exists(os.path.join(rag.spiel_verzeichnis(s, data_dir), rag.golden_datei()))]
 
 
 def _oeffne(data_dir):
     """Index auf Stand bringen (wie der Eval) und oeffnen; Rueckgabe: (Spiele, Verbindung)."""
     ids = spiele_mit_golden_set(data_dir)
     if not ids:
-        raise rag.KonfigFehler("Kein Spiel mit golden_set.json im Datenverzeichnis.")
+        raise rag.KonfigFehler(f"Kein Spiel mit {rag.golden_datei()} im Datenverzeichnis.")
     rag.aktualisiere_index(ids, data_dir=data_dir, ausgabe=lambda *_: None)
     return ids, rag.oeffne_index()
 
@@ -50,7 +52,7 @@ def _oeffne(data_dir):
 def trefferquote(data_dir=None, ausgabe=print):
     """{"je_spiel": {sid: (treffer, n)}, "gesamt": (treffer, n), "verfehlt": ["sid/id", ...]}."""
     ids, con = _oeffne(data_dir)
-    je_spiel, verfehlt = {}, []
+    je_spiel, verfehlt, je_typ = {}, [], {}
     try:
         for sid in ids:
             gs = rag.lade_golden_set(sid, data_dir)
@@ -63,6 +65,9 @@ def trefferquote(data_dir=None, ausgabe=print):
                 ok = bool({h["seite"] for h, _ in hits} & set(f["seiten"]))
                 g += ok
                 n += 1
+                je_typ.setdefault(f.get("typ") or "?", [0, 0])
+                je_typ[f.get("typ") or "?"][0] += ok
+                je_typ[f.get("typ") or "?"][1] += 1
                 if not ok:
                     verfehlt.append(f"{sid}/{f['id']}")
             je_spiel[sid] = (g, n)
@@ -71,7 +76,10 @@ def trefferquote(data_dir=None, ausgabe=print):
         con.close()
     gesamt = (sum(g for g, _ in je_spiel.values()), sum(n for _, n in je_spiel.values()))
     ausgabe(f"GESAMT {gesamt[0]}/{gesamt[1]}  verfehlt: {verfehlt}")
-    return {"je_spiel": je_spiel, "gesamt": gesamt, "verfehlt": verfehlt}
+    if any(t in rag.PRAXIS_TYPEN for t in je_typ):
+        ausgabe("  je Typ: " + "  ".join(f"{t} {g}/{n}" for t, (g, n) in je_typ.items()))
+    return {"je_spiel": je_spiel, "gesamt": gesamt, "verfehlt": verfehlt,
+            "je_typ": {t: tuple(v) for t, v in je_typ.items()}}
 
 
 def verzeichnis_anteil(pfad_aus, data_dir=None, schwelle=0.5, ausgabe=print):

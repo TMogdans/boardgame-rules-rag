@@ -519,10 +519,10 @@ class TestDeployment(PipeIndexBasis):
         self.pipe.valves.RAG_DIR = verz
 
     def test_zu_alte_schnittstelle(self):
-        self.clone_mit("SCHNITTSTELLE = 7", "SCHNITTSTELLE = 6")
+        self.clone_mit("SCHNITTSTELLE = 8", "SCHNITTSTELLE = 7")
         text = self.frage("Geld", spiel="FCM")
         self.assertIn("passt nicht zu dieser Pipe", text)
-        self.assertIn("Schnittstelle 6", text)
+        self.assertIn("Schnittstelle 7", text)
         self.assertNotIn("AttributeError", text)
 
     def test_fehlende_funktion(self):

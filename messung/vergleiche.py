@@ -3,7 +3,7 @@
 """
 Vergleicht bewertete Messlaeufe (urteile.jsonl, siehe bewerte.py).
 
-    python messung/vergleiche.py NAME=LAUF1,LAUF2 NAME2=LAUF3,LAUF4 [--basis NAME] [--min-laeufe 2]
+    python messung/vergleiche.py NAME=LAUF1,LAUF2 NAME2=LAUF3,LAUF4 [--basis NAME] [--min-laeufe 2] [--je-typ]
 
 Ein Setting ist eine Gruppe von Laufverzeichnissen mit DERSELBEN Konfiguration
 (Wiederholungen). Ein Argument ohne "=" ist ein Setting aus einem einzigen Lauf.
@@ -16,6 +16,12 @@ Kennzahlen (bewusst ohne Mittelwerte; immer typisch = Median und Maximum):
   gleichgerichtet                                Fragen, die sich gegenueber dem Basis-Setting in allen
                                                  Wiederholungen beider Settings in dieselbe Richtung aendern
 
+--je-typ schluesselt dieselben Zaehler und die Treffsicherheit zusaetzlich je Fragetyp (fakt, ablauf,
+kette ...) auf, damit Praxisfragen getrennt von den Faktenfragen sichtbar sind. Der Typ steht in
+urteile.jsonl (schreibt bewerte.py); kommen ablauf/kette vor, ist --je-typ von selbst an. Alte
+urteile.jsonl ohne Typ zaehlen unter "?". Ohne --je-typ (und ohne Praxis-Typen) bleibt die Ausgabe
+wie bisher.
+
 Rangfolge der Urteile fuer "gleichgerichtet": falsch < unsicher < teilweise < richtig.
 Eine Frage gilt als verbessert, wenn JEDER Lauf des Settings besser bewertet ist als JEDER
 Lauf der Basis (min(Setting) > max(Basis)); verschlechtert entsprechend spiegelbildlich.
@@ -27,6 +33,7 @@ import os
 import statistics
 import sys
 
+PRAXIS_TYPEN = ("ablauf", "kette")
 KLASSEN = ("richtig", "teilweise", "falsch", "unsicher")
 ALLE_URTEILE = KLASSEN + ("unparsebar",)
 RANG = {"falsch": 0, "unsicher": 1, "teilweise": 2, "richtig": 3}
@@ -50,7 +57,7 @@ def lies_lauf(verz):
             schluessel = (d["spiel_id"], d["frage_id"])
             if schluessel in lauf:
                 raise VergleichFehler(f"{pfad}: Frage {schluessel} doppelt.")
-            lauf[schluessel] = {"urteil": d["urteil"], "t": d.get("t_antwort")}
+            lauf[schluessel] = {"urteil": d["urteil"], "t": d.get("t_antwort"), "typ": d.get("typ") or "?"}
     if not lauf:
         raise VergleichFehler(f"{pfad} ist leer.")
     return lauf
@@ -120,6 +127,25 @@ def gleichgerichtet(basis, setting):
     return besser, schlechter
 
 
+def je_typ_kennzahlen(laeufe):
+    """{typ: {"n", "je_lauf": [kennzahlen_lauf ...], "treffsicherheit_min/max"}}; Typen nach erstem Auftreten.
+
+    Die Fragen eines Typs sind in allen Laeufen dieselben (pruefe_gleiche_fragen), der Typ kommt
+    aus dem ersten Lauf.
+    """
+    typen = {}
+    for k in sorted(laeufe[0]):
+        typen.setdefault(laeufe[0][k]["typ"], []).append(k)
+    erg = {}
+    for typ, schluessel in typen.items():
+        je_lauf = [kennzahlen_lauf({k: l[k] for k in schluessel}) for l in laeufe]
+        quoten = [x["treffsicherheit"]["quote"] for x in je_lauf if x["treffsicherheit"]["quote"] is not None]
+        erg[typ] = {"n": len(schluessel), "je_lauf": je_lauf,
+                    "treffsicherheit_min": min(quoten) if quoten else None,
+                    "treffsicherheit_max": max(quoten) if quoten else None}
+    return erg
+
+
 def setting_kennzahlen(name, laeufe):
     pruefe_gleiche_fragen(laeufe, name)
     je_lauf = [kennzahlen_lauf(l) for l in laeufe]
@@ -129,10 +155,12 @@ def setting_kennzahlen(name, laeufe):
             "treffsicherheit_min": min(quoten) if quoten else None,
             "treffsicherheit_max": max(quoten) if quoten else None,
             "zeit": median_max(e["t"] for l in laeufe for e in l.values()),
-            "stabil_richtig": s_richtig, "stabil_falsch": s_falsch}
+            "stabil_richtig": s_richtig, "stabil_falsch": s_falsch,
+            "je_typ": je_typ_kennzahlen(laeufe)}
 
 
-def vergleiche(settings, basis_name=None, min_laeufe=2):
+def vergleiche(settings, basis_name=None, min_laeufe=2, je_typ=None):
+    """je_typ: None = automatisch (an, sobald ablauf/kette vorkommen), True/False = erzwungen."""
     """settings: {name: [lauf, ...]} (Reihenfolge = Ausgabe). Rueckgabe: Kennzahlen + Paarvergleiche."""
     if not settings:
         raise VergleichFehler("Keine Laeufe angegeben.")
@@ -149,7 +177,9 @@ def vergleiche(settings, basis_name=None, min_laeufe=2):
             paare[n] = None   # keine Aussage: zu wenige Wiederholungen
         else:
             paare[n] = gleichgerichtet(settings[basis_name], settings[n])
-    return {"basis": basis_name, "settings": kz, "paare": paare, "min_laeufe": min_laeufe}
+    if je_typ is None:
+        je_typ = any(t in PRAXIS_TYPEN for s in kz.values() for t in s["je_typ"])
+    return {"basis": basis_name, "settings": kz, "paare": paare, "min_laeufe": min_laeufe, "je_typ": je_typ}
 
 
 def _q(t):
@@ -158,6 +188,21 @@ def _q(t):
 
 def _s(x):
     return "-" if x is None else f"{x:.1f}s"
+
+
+def _je_typ_zeilen(s):
+    z = ["  -- je Typ --",
+         f"  {'Typ':<10} {'Lauf':>4} {'n':>4} {'richtig':>8} {'teilw.':>7} {'falsch':>7} {'unsich.':>8} "
+         f"{'unpars.':>8} {'Treffs.':>8}"]
+    for typ, t in s["je_typ"].items():
+        for i, k in enumerate(t["je_lauf"], 1):
+            c = k["zaehler"]
+            z.append(f"  {typ:<10} {i:>4} {k['n']:>4} {c['richtig']:>8} {c['teilweise']:>7} {c['falsch']:>7} "
+                     f"{c['unsicher']:>8} {c['unparsebar']:>8} {_q(k['treffsicherheit']):>8}")
+        if t["treffsicherheit_min"] is not None and s["laeufe"] > 1:
+            z.append(f"  {typ:<10} Treffsicherheit ueber die Laeufe: Minimum {t['treffsicherheit_min']:.3f}, "
+                     f"Maximum {t['treffsicherheit_max']:.3f}")
+    return z
 
 
 def formatiere(erg):
@@ -182,6 +227,8 @@ def formatiere(erg):
             z.append(f"  stabil richtig: {len(s['stabil_richtig'])}   stabil falsch: {len(s['stabil_falsch'])}")
             if s["stabil_falsch"]:
                 z.append("    stabil falsch: " + ", ".join(f"{a}/{b}" for a, b in s["stabil_falsch"]))
+        if erg.get("je_typ"):
+            z += _je_typ_zeilen(s)
         z.append("")
     for n, p in erg["paare"].items():
         kopf = f"== {n} gegen Basis {erg['basis']}"
@@ -217,10 +264,12 @@ def parse_argumente(argv):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    basis, min_laeufe, rest = None, 2, []
+    basis, min_laeufe, rest, je_typ = None, 2, [], None
     while argv:
         a = argv.pop(0)
-        if a in ("--basis", "--min-laeufe"):
+        if a == "--je-typ":
+            je_typ = True
+        elif a in ("--basis", "--min-laeufe"):
             if not argv:
                 print(f"{a} braucht einen Wert.", file=sys.stderr)
                 return 2
@@ -236,7 +285,7 @@ def main(argv=None):
         return 2
     try:
         settings = {n: [lies_lauf(v) for v in verz] for n, verz in parse_argumente(rest).items()}
-        print(formatiere(vergleiche(settings, basis, min_laeufe)), end="")
+        print(formatiere(vergleiche(settings, basis, min_laeufe, je_typ)), end="")
     except (VergleichFehler, OSError, json.JSONDecodeError, ValueError) as e:
         print(f"Abbruch: {e}", file=sys.stderr)
         return 1

@@ -3,8 +3,8 @@
 """
 Bewertet Messlaeufe: jede antworten.jsonl gegen das Golden Set, per judge.bewerte.
 
-    python messung/bewerte.py [--golden VERZEICHNIS] [--modus anthropic] [--modell NAME] \\
-        LAUF/antworten.jsonl [LAUF2/antworten.jsonl ...]
+    python messung/bewerte.py [--golden VERZEICHNIS] [--golden-datei NAME] [--modus anthropic] \\
+        [--modell NAME] LAUF/antworten.jsonl [LAUF2/antworten.jsonl ...]
 
 Ein Argument darf auch ein Laufverzeichnis sein (dann gilt LAUF/antworten.jsonl).
 Schreibt urteile.jsonl neben jede antworten.jsonl: die Zeile des Laufs plus urteil,
@@ -13,6 +13,10 @@ begruendung (Rohtext des Bewerters), Token-Zahlen und das Flag "deterministisch"
 
 Golden Sets: <golden>/<spiel_id>/golden_set.json (Layout des Datenverzeichnisses)
 oder <golden>/<spiel_id>.json. Default fuer --golden: DATA_DIR bzw. data/ des Repos.
+--golden-datei NAME waehlt eine andere Datei im Spielordner (<golden>/<spiel_id>/NAME, z. B.
+golden_praxis.json). Ohne die Option gilt die Datei, die meta.json des Laufs festhielt
+(GOLDEN_DATEI beim Lauf), sonst golden_set.json -- Urteile laufen so gegen dieselbe Datei
+wie die Messung. Ketten: die Zwischenantworten aus "verlauf" gehen nicht an den Bewerter.
 Vor dem ersten Modellaufruf werden ALLE Fragen aufgeloest: eine unbekannte Frage
 bricht den Lauf ab, bevor Geld ausgegeben ist.
 """
@@ -35,26 +39,40 @@ def lies_jsonl(pfad):
         return [json.loads(z) for z in f if z.strip()]
 
 
-def lade_fragen(golden_verz, spiel_id):
+STANDARD_DATEI = "golden_set.json"
+
+
+def golden_datei_des_laufs(pfad_antworten):
+    """Golden-Set-Datei, mit der der Lauf gemessen wurde (meta.json), sonst der Standard."""
+    meta = os.path.join(os.path.dirname(os.path.abspath(pfad_antworten)), "meta.json")
+    try:
+        with open(meta, encoding="utf-8") as f:
+            return json.load(f).get("golden_datei") or STANDARD_DATEI
+    except (OSError, ValueError, AttributeError):
+        return STANDARD_DATEI
+
+
+def lade_fragen(golden_verz, spiel_id, datei=STANDARD_DATEI):
     """{frage_id: Frage} eines Spiels aus dem Golden-Set-Verzeichnis."""
-    kandidaten = (os.path.join(golden_verz, spiel_id, "golden_set.json"),
-                  os.path.join(golden_verz, spiel_id + ".json"))
+    kandidaten = [os.path.join(golden_verz, spiel_id, datei)]
+    if datei == STANDARD_DATEI:
+        kandidaten.append(os.path.join(golden_verz, spiel_id + ".json"))
     for pfad in kandidaten:
         if os.path.isfile(pfad):
             with open(pfad, encoding="utf-8") as f:
                 gs = json.load(f)
             return {q["id"]: q for q in gs["fragen"]}
     raise BewerteFehler(f"Kein Golden Set fuer Spiel {spiel_id!r} unter {golden_verz} "
-                        f"(gesucht: {spiel_id}/golden_set.json, {spiel_id}.json).")
+                        f"(gesucht: {', '.join(os.path.relpath(k, golden_verz) for k in kandidaten)}).")
 
 
-def loese_fragen_auf(zeilen, golden_verz, quelle=""):
+def loese_fragen_auf(zeilen, golden_verz, quelle="", datei=STANDARD_DATEI):
     """Golden-Set-Frage je Zeile; bricht bei unbekanntem Spiel oder unbekannter Frage ab."""
     cache, aufgeloest = {}, []
     for i, z in enumerate(zeilen, 1):
         sid = z["spiel_id"]
         if sid not in cache:
-            cache[sid] = lade_fragen(golden_verz, sid)
+            cache[sid] = lade_fragen(golden_verz, sid, datei)
         if z["frage_id"] not in cache[sid]:
             raise BewerteFehler(f"{quelle} Zeile {i}: Frage {z['frage_id']!r} ist nicht im Golden Set "
                                 f"von {sid!r} -- Golden Set und Lauf passen nicht zusammen.")
@@ -62,15 +80,17 @@ def loese_fragen_auf(zeilen, golden_verz, quelle=""):
     return aufgeloest
 
 
-def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeilen=None, fragen=None):
+def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeilen=None, fragen=None,
+                 datei=None):
     """urteile.jsonl neben antworten.jsonl. Rueckgabe: Pfad."""
     zeilen = zeilen if zeilen is not None else lies_jsonl(pfad_antworten)
-    fragen = fragen if fragen is not None else loese_fragen_auf(zeilen, golden_verz, pfad_antworten)
+    datei = datei or golden_datei_des_laufs(pfad_antworten)
+    fragen = fragen if fragen is not None else loese_fragen_auf(zeilen, golden_verz, pfad_antworten, datei)
     ziel = os.path.join(os.path.dirname(os.path.abspath(pfad_antworten)), "urteile.jsonl")
     with open(ziel, "w", encoding="utf-8") as aus:
         for z, q in zip(zeilen, fragen):
             r = judge.bewerte(modus, modell, q, z["antwort"])
-            aus.write(json.dumps({**z, "urteil": r["urteil"], "begruendung": r.get("rohtext"),
+            aus.write(json.dumps({**z, "typ": q.get("typ"), "urteil": r["urteil"], "begruendung": r.get("rohtext"),
                                   "input_tokens": r.get("input_tokens"),
                                   "output_tokens": r.get("output_tokens"),
                                   "deterministisch": bool(r.get("deterministisch"))},
@@ -83,7 +103,7 @@ def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeil
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     opt = {"--golden": os.environ.get("DATA_DIR") or os.path.join(BASE, "data"),
-           "--modus": "anthropic", "--modell": None}
+           "--modus": "anthropic", "--modell": None, "--golden-datei": None}
     pfade = []
     while argv:
         a = argv.pop(0)
@@ -107,10 +127,12 @@ def main(argv=None):
         geladen = []
         for p in pfade:
             zeilen = lies_jsonl(p)
-            geladen.append((p, zeilen, loese_fragen_auf(zeilen, opt["--golden"], p)))
-        for p, zeilen, fragen in geladen:
-            print(f"== {p}", file=sys.stderr)
-            print(bewerte_lauf(p, opt["--golden"], opt["--modus"], modell, zeilen=zeilen, fragen=fragen))
+            datei = opt["--golden-datei"] or golden_datei_des_laufs(p)
+            geladen.append((p, zeilen, datei, loese_fragen_auf(zeilen, opt["--golden"], p, datei)))
+        for p, zeilen, datei, fragen in geladen:
+            print(f"== {p}  (Golden Set: {datei})", file=sys.stderr)
+            print(bewerte_lauf(p, opt["--golden"], opt["--modus"], modell, zeilen=zeilen, fragen=fragen,
+                               datei=datei))
     except (BewerteFehler, judge.JudgeAbbruch, OSError, json.JSONDecodeError) as e:
         print(f"Abbruch: {e}", file=sys.stderr)
         return 1
