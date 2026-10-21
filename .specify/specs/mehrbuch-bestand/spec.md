@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** Fassung 5 (nach Vorab-Messung), wartet auf Abnahme. Fassung 4 abgenommen durch Tobias am 2026-10-21.
+- **Status:** Fassung 6, wartet auf Abnahme. Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft.
 
 ## User Story
 
@@ -150,6 +150,8 @@ Whitespace-Zusammenfassen und wird je Buch eingeschaltet (für Altbestände und 
 PDF-Weg aus: REQ-MB-3). Reihenfolge: (1) Überschriften-Abgleich auf Zeilen (REQ-MB-12, -20),
 (2) Trennungsreparatur (REQ-MB-11) im Text zwischen den Überschriften — sonst würde der
 gewöhnliche Umbruch (`Wurf⏎Stufe`) Überschriftenzeilen mit dem Folgetext verschmelzen.
+Zeilen im Kopf- oder Fußrand (Position nach REQ-MB-20) werden in (1) erkannt und gezählt, nehmen
+aber weder am Listenabgleich (REQ-MB-12) teil noch gelangen sie in einen Häppchentext (REQ-MB-28).
 
 **REQ-MB-11** — *Contract, Trennungen*
 Für die folgenden Eingaben (`⏎` = Zeilenumbruch, `·` = U+00AD) liefert die Reparatur genau:
@@ -177,6 +179,10 @@ kennt. Der Mechanismus nimmt allgemein eine Liste (Titel, Ebene, Seite); Liefera
 mindestens **PDF-Lesezeichen** und eine **Inhaltsverzeichnis-Liste** (Titel, Ebene, gedruckte
 Seite, umgerechnet nach REQ-MB-22). Für jeden Eintrag wird auf seiner **Zielseite (± 0)** die
 passende Zeile gesucht und durch den Listentitel ersetzt; sie beginnt den Abschnitt.
+Wo das Buch einen Kopf- und/oder Fußrand deklariert (Position nach REQ-MB-20), sind Zeilen im
+Rand vom Abgleich **ausgenommen**: sie passen zu keinem Eintrag, sind kein Kandidat für die
+Auswahl unter mehreren Zeilen und zählen nicht für „mehrdeutig". Ohne Randangabe gilt der Abgleich
+wie bisher über alle Zeilen der Seite.
 
 *Abgleichregel:* `norm(s)` = Unicode-NFC, alle Leerraumzeichen entfernen, `casefold`.
 Eine Zeile **passt** zu Titel `t`, wenn `norm(zeile)` durch Streichen von höchstens `k`
@@ -212,6 +218,11 @@ sichtbar unter REQ-MB-13.
 *Detektor:* Tabelle als Testfälle (Seitentexte + Liste → Abschnittspfad und Häppchentext);
 ersetzte Fälle: Pfad und Text enthalten die Listenform, die kaputte nicht mehr; nicht ersetzte:
 Zeile byte-gleich. Gleichstand-Fall: zwei gleich gute Zeilen → erste gewinnt, Protokoll
+„mehrdeutig = 1". Rand-Fall: Kopfrand deklariert; auf Seite 7 steht im Kopfrand der Kolumnentitel
+`Bonuswürfel` (in Lesereihenfolge zuerst), im Satzspiegel die echte Überschrift `Bonuswürfel`,
+Lesezeichen `Bonuswürfel` → Seite 7 → der Abschnitt beginnt an der Zeile im Satzspiegel (der Text
+zwischen Kolumnentitel und echter Überschrift liegt nicht im Abschnitt `Bonuswürfel`), Protokoll
+„mehrdeutig = 0", „gefunden = 1". Gegenprobe: dieselbe Seite ohne Randangabe → erste Zeile gewinnt,
 „mehrdeutig = 1".
 
 **REQ-MB-13** — *If/Then*
@@ -293,24 +304,30 @@ Buch konfigurierbar), werden Layout-Überschriften aus drei Merkmalsquellen best
   erfüllt; trifft sie mehrere, gilt die kleinste n.
 - **Position:** Kopf- und Fußrand je Buch als Abstand in PDF-Punkten von der oberen bzw. unteren
   Seitenkante. Eine Zeile liegt im Rand, wenn ihr vertikaler Mittelpunkt darin liegt.
-- **Layout-Klasse** der Docling-Extraktion (deklarierte Überschriften-Klasse, z. B. `section_header`).
+- **Layout-Klasse** der Docling-Extraktion: (i) die deklarierte Überschriften-Klasse (z. B.
+  `section_header`) für den Rückfall; (ii) eine je Buch deklarierte **Veto-Menge** von Klassen,
+  deren Zeilen nie Überschrift sind. Default der Veto-Menge sind mindestens Tabelle samt
+  Tabellenzellen, Bildunterschrift, Seitenkopf und Seitenfuß (Docling `table`, `caption`,
+  `page_header`, `page_footer`); eine Deklaration des Buchs ergänzt diese Menge.
 
 Optional deklarierte Zeilenmerkmale (eigene Zeile, Höchstlänge) gelten zusätzlich.
 
-*Kombinationsregel.* Eine Zeile ist genau dann Layout-Überschrift der Stufe n, wenn alle vier
+*Kombinationsregel.* Eine Zeile ist genau dann Layout-Überschrift der Stufe n, wenn alle fünf
 Bedingungen gelten:
 1. *notwendig:* sie liegt nicht im Kopf- oder Fußrand;
-2. *notwendig:* sie ist nicht schon einem Listeneintrag zugeordnet (REQ-MB-12);
-3. *notwendig:* sie erfüllt alle deklarierten Zeilenmerkmale;
-4. entweder (a) ihr ist eine Schrift zugeordnet und diese trifft Stufe n — zusammen mit 1–3
-   **hinreichend, unabhängig von der Layout-Klasse**; oder (b) ihr ist keine Schrift zugeordnet
-   und ihre Layout-Klasse ist die deklarierte Überschriften-Klasse — dann Stufe 1
-   (**Rückfall**, im Protokoll gezählt).
+2. *notwendig:* ihre Layout-Klasse gehört nicht zur Veto-Menge des Buchs;
+3. *notwendig:* sie ist nicht schon einem Listeneintrag zugeordnet (REQ-MB-12);
+4. *notwendig:* sie erfüllt alle deklarierten Zeilenmerkmale;
+5. entweder (a) ihr ist eine Schrift zugeordnet und diese trifft Stufe n — zusammen mit 1–4
+   **hinreichend**; die Layout-Klasse wirkt hier nur über das Veto (Bedingung 2), nicht als
+   Voraussetzung; oder (b) ihr ist keine Schrift zugeordnet und ihre Layout-Klasse ist die
+   deklarierte Überschriften-Klasse — dann Stufe 1 (**Rückfall**, im Protokoll gezählt).
 
 Folgerungen: Eine Zeile mit zugeordneter Schrift, die keine Stufe trifft, ist **nie**
 Überschrift, auch mit Überschriften-Klasse (die Klasse allein ist nicht hinreichend). Eine Zeile
-im Rand ist nie Überschrift, auch mit passender Schrift und Klasse. Deklariert ein Buch keine
-Schriftstufen, entscheidet für alle Zeilen 4(b), also die Klasse allein (Stand Fassung 4).
+im Rand oder mit einer Klasse der Veto-Menge ist nie Überschrift, auch mit passender Schrift.
+Deklariert ein Buch keine Schriftstufen, entscheidet für alle Zeilen außerhalb von Rand und Veto
+5(b), also die Klasse allein (Stand Fassung 4).
 
 *Ebene und Pfad.* Eine Layout-Überschrift der Stufe n liegt n Ebenen unter ihrem umschließenden
 Listenabschnitt. Ihr Abschnittspfad ist der Pfad des Listenabschnitts, danach die im selben
@@ -323,8 +340,9 @@ zerteilt damit kein Talent der Stufe 1 in zwei gleichrangige Abschnitte.
 
 Layout-Überschriften werden **nicht** gegen die Liste abgeglichen oder ersetzt und erzeugen keine
 Ebenen oberhalb der Liste. Das Protokoll zählt erkannte Layout-Überschriften je Listenabschnitt
-(alle Stufen zusammen), außerdem je Stufe, die Rückfälle nach 4(b) und die Zeilen, die nur wegen
-des Rands (Bedingung 1) keine Überschrift wurden, obwohl 4(a) oder 4(b) zuträfe.
+(alle Stufen zusammen), außerdem je Stufe, die Rückfälle nach 5(b), die Zeilen, die nur wegen
+des Rands (Bedingung 1) keine Überschrift wurden, obwohl 5(a) oder 5(b) zuträfe, und die Zeilen,
+die nur wegen des Vetos (Bedingung 2) keine Überschrift wurden, obwohl 5(a) zuträfe.
 Anlass (gemessen): im Zielbuch ist „Talentbeschreibungen" **ein** Lesezeichen für S. 76–107;
 die Talentnamen stehen nur im Text. Die Klasse allein reicht nicht (Vorab-Messung, Entscheidung
 N-1 revidiert).
@@ -345,6 +363,11 @@ Position, zwei Schriftstufen deklariert:
 - (e) Zeile `Epsilon` mit Überschriften-Klasse, aber Fließtextschrift → bleibt Fließtext (Klasse
   nicht hinreichend).
 - (f) Rückfall: Zeile ohne zugeordnete Schrift mit Überschriften-Klasse → Stufe 1, Rückfall-Zähler = 1.
+- (g) Veto Tabelle: fette Tabellenzeile `Zeta` (Klasse `table`) mit Schrift der Stufe 1 → keine
+  Überschrift, kein Pfad enthält `Zeta`, ihr Text bleibt im umgebenden Abschnitt; Veto-Zähler = 1.
+  Gegenprobe: dieselbe Zeile mit Klasse `text` → Überschrift `… › Zeta`.
+- (h) Veto Bildunterschrift: Zeile `Eta` mit Klasse `caption` und Schrift der Stufe 1 → keine
+  Überschrift, kein Pfad enthält `Eta`.
 - Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von REQ-MB-12 unverändert).
 
 **REQ-MB-21** — *Contract, Hinweis gekennzeichneter Fassungen*
@@ -378,7 +401,8 @@ Stichprobenseiten** des Zielbuchs gemessen (davon ≥ 3 Zweispaltenseiten mit Ta
 - **T** = Tabellenzeilen, die in einen Fließtext-Absatz geraten — Ziel 0;
 - **H** wird nicht auf den Stichprobenseiten, sondern über **alle Seiten des Abschnitts
   „Talentbeschreibungen"** (physisch 76–107, 149 Talente) gemessen, mit den Merkmalen nach
-  REQ-MB-20 (Fassung 5: Klasse, Schrift, Rand) — Ziel alle erkannt, 0 Fehltreffer:
+  REQ-MB-20 (Klasse, Schrift, Rand; ab Fassung 6 zusätzlich Veto-Menge) — Ziel alle erkannt,
+  0 Fehltreffer:
   - **vorhanden** = Talente auf diesen Seiten. Die Zählung darf automatisch über einen
     dokumentierten Anker erfolgen (Werteblock, der mit „Stufe:" beginnt); jedes Talent, bei dem
     der Anker nicht greift oder mehrdeutig ist, wird von Hand geprüft und mitgezählt;
@@ -392,7 +416,8 @@ Verfehlt eine Zahl ihr Ziel, wird **vor** dem Weiterbauen mit Tobias über den W
 (spaltenbewusste Extraktion ohne Docling oder Spaltensatz in Spec 2; bei H über die
 Merkmalsdeklaration nach REQ-MB-20).
 
-*Format `vorabmessung.json`* (nur Zahlen außer `docling_version`, REQ-MB-18):
+*Format `vorabmessung.json`* (nur Zahlen außer `docling_version` und `pdfplumber_version`,
+REQ-MB-18; beide Zeichenketten mit der jeweils bei der Messung verwendeten Version):
 `seiten` (die 10 Stichprobenseiten für L und T), `zweispalten_mit_tabelle` (⊆ `seiten`, ≥ 3),
 `talentseiten` (**alle** physischen Seiten von „Talentbeschreibungen", Grundlage von H; davon
 ≥ 2 auch in `seiten`), `L` `{richtig, absaetze}`, `T` (Zahl), `H` `{erkannt, vorhanden,
@@ -404,10 +429,19 @@ Messergebnis `vorabmessung.json` notiert, und die Messung gilt nur für diese Ve
 (`requirements-ingest.txt` ist heute ungepinnt). Das Einlese-Protokoll notiert die beim Einlesen
 verwendete Docling-Version; weicht sie von der im Messergebnis notierten ab, bricht das Einlesen
 eines Buchs mit Docling mit `KonfigFehler` ab (keine stille Abweichung). Fehlt `vorabmessung.json` oder enthält sie keine Docling-Version, bricht das Einlesen eines Buchs mit Docling ebenfalls mit `KonfigFehler` ab (kein stilles Überspringen des Versionsvergleichs).
+Dasselbe gilt für pdfplumber: Messung und Ingestion mit Schriftinfo (Buch deklariert
+Schriftstufen, REQ-MB-20) laufen mit derselben pdfplumber-Version; sie steht als
+`pdfplumber_version` im Messergebnis, das Einlese-Protokoll notiert die verwendete Version, und
+eine abweichende oder fehlende Version (bzw. fehlende `vorabmessung.json`) bricht das Einlesen
+eines Buchs mit Schriftinfo mit `KonfigFehler` ab.
 *Detektor:* Messergebnis im obigen Format mit Seitenlisten, L/T/H und Docling-Version liegt im
 Spec-Ordner (nur Zahlen, REQ-MB-18), bevor ein Commit Abschnitt C/D implementiert. Versionsprüfung ohne echtes
 Docling, Version injiziert: gleiche Version → Einlesen läuft, Protokoll nennt sie; abweichende
 Version → `KonfigFehler`, keine Buchdatei geschrieben bzw. alte unverändert. Ohne `vorabmessung.json` bzw. ohne Docling-Version darin → `KonfigFehler` beim Einlesen mit Docling, keine Buchdatei geschrieben bzw. alte unverändert.
+Gleiche drei Fälle für `pdfplumber_version` (Version injiziert, Buch mit Schriftstufen): gleich →
+Einlesen läuft, Protokoll nennt sie; abweichend bzw. fehlend → `KonfigFehler`, keine Buchdatei
+geschrieben bzw. alte unverändert; ein Buch ohne Schriftstufen liest trotz fehlender
+`pdfplumber_version` ein. Messergebnis-Format: `pdfplumber_version` ist eine Zeichenkette.
 
 ### G. Ergänzungen (Fassung 4, Lücken aus spec-to-tests)
 
@@ -456,6 +490,37 @@ ohne Text-Kinder → die Zeilenfolge ist `Vor`, Kind 1, Kind 2, `Nach`, jeder Ma
 nach `index` findet BM25 bzw. `lade_spiel` jeden Marker in einem Häppchen; Protokoll-Zähler = 2.
 Mutation: Adapter durchläuft Bild-Elemente nicht → Test rot.
 
+### I. Ergänzungen (Fassung 6)
+
+**REQ-MB-28** — *Where, Randzeilen verwerfen*
+Wo ein Buch einen Kopf- und/oder Fußrand deklariert (Position nach REQ-MB-20), gelangen Zeilen
+im Rand (Kolumnentitel, Seitenzahlen) in **keinen** Häppchentext — weder eingebettet noch im
+Prompt — und in keinen Abschnittspfad. Das Einlese-Protokoll zählt die verworfenen Randzeilen
+je Buch. Bücher ohne Randangabe und Altbestände bleiben unverändert (REQ-MB-3).
+*Detektor:* synthetisches Buch, zwei Seiten, je Seite Kopfzeile mit Marker `KOPFMARKE-n`,
+Fußzeile mit Marker `FUSSMARKE-n` und Fließtext mit eigenem Marker; Kopf- und Fußrand deklariert
+→ nach `index` enthält kein Häppchen (BM25 bzw. `lade_spiel`) und kein Pfad einen Kopf- oder
+Fußmarker, jeder Fließtextmarker ist auffindbar, Protokoll-Zähler = 4. Zwei Bücher im Bestand,
+nur eines mit Randangabe → Zähler nur bei diesem, das andere enthält seine Kopf-/Fußmarker wie
+vor dieser Änderung (Häppchentexte gleich dem Lauf ohne Randangabe). Mutation: Randzeilen nur
+zählen, nicht verwerfen → Test rot.
+
+**REQ-MB-29** — *Contract, Zuordnung der pdfplumber-Zeichen zu den Extraktionszeilen*
+Für ein Buch mit Schriftinfo werden jeder Extraktionszeile die pdfplumber-Zeichen zugeordnet,
+die auf derselben Seite zu dieser Zeile gehören; daraus ergeben sich ihre Schrift (Mehrheit nach
+REQ-MB-20, ohne eindeutige Mehrheit keine Schrift) und ihre Lage für die Randprüfung. Zeichen
+einer anderen Zeile — auch einer gleich hohen Zeile der Nachbarspalte — gehen nicht in die
+Mehrheit ein.
+*Detektor:* der Test erzeugt ein synthetisches PDF mit gesteuerten Schriften (Größen und
+Schnitte), z. B. per `reportlab` (reine Testabhängigkeit, darf in der Testumgebung wie
+`pdfplumber` vorausgesetzt werden), und dazu die Extraktionszeilen mit ihrer Lage:
+- Zeile ganz in Schrift X (z. B. 14 pt fett) → Schrift X;
+- gemischte Zeile mit Mehrheit X und einem kürzeren Teil in Schrift Y → Schrift X;
+- Zeile mit gleich vielen Zeichen in X und Y → keine zugeordnete Schrift;
+- zwei Spalten mit gleich hohen Zeilen in Schrift X (links) und Y (rechts) → links X, rechts Y;
+- Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht.
+Mutation: Zuordnung ohne Spaltentrennung (alle Zeichen gleicher Höhe) → Spaltenfall rot.
+
 ## Lesarten (festgelegt)
 
 Von Tobias bestätigt (Fassung 4):
@@ -474,6 +539,8 @@ Von Tobias bestätigt (Fassung 4):
 - Tabellen an falscher Stelle in der Lesereihenfolge (Tabelle hinter allen Absätzen der Seite,
   dadurch unter der letzten Überschrift der Seite statt unter ihrer eigenen; gemessen S. 22) —
   gehört zu Spec 2 (Werteblöcke/Tabellen).
+- Falsche Lesereihenfolge neben Bildern (gemessen S. 94, rechte Spalte) — Spec 2, zusammen mit
+  den Tabellen.
 - OCR-Vertauschungen im Überschriften-Abgleich (Fehlerklasse 3, REQ-MB-12).
 - FTS5-Trigram bzw. Komposita-Suche.
 - Earthdawn-Testsatz (Golden Set) — Daten, nicht Code; folgt nach Spec 1.
@@ -494,6 +561,11 @@ Von Tobias bestätigt (Fassung 4):
 - **N-1 (c)** Layout-Merkmale zuerst nur aus der Docling-Layout-Klasse, pdfplumber-Schriftinfo nur bei verfehltem H — ein Extraktionsweg weniger, falls die Klasse reicht (MB-20, -23).
 - **N-1 revidiert nach Vorab-Messung** (Docling 2.131.0, 2026-10-21): Klasse allein verfehlt H — Stichprobe 11/11 erkannt, aber 2 Fehltreffer (Kolumnentitel); über alle 32 Talentseiten 182 `section_header`, davon 25 Kolumnentitel, 147/149 Talentnamen (2 neben Bildern als `text`), 7 Zwischenüberschriften innerhalb von Talenten und 1 Tabellentitel auf Talent-Ebene. Neu: Klasse + pdfplumber-Schrift (Stufen) + Kopf-/Fußrand, Schrift hinreichend, Klasse nur Rückfall; H über alle Talentseiten; Text aus Bild-Elementen übernehmen (MB-20, -23, -27). L 111/114 = 97,4 % und T = 0 erfüllt.
 - **N-2 (a)** gekennzeichnete Fassungen im Ranking gleich behandelt — eine Rangregel ändert die Messung und ist erst mit einem Earthdawn-Golden-Set bewertbar (MB-5).
+- **F6-1** Layout-Klasse mit Vetorolle: Zeilen einer Veto-Klasse (mindestens Tabelle/Zelle, Bildunterschrift, Seitenkopf, Seitenfuß) sind nie Überschrift; sonst entscheidet die Schrift, Rückfall auf die Klasse bleibt (MB-20).
+- **F6-2** Rand auch beim Listenabgleich: Randzeilen sind kein Kandidat und zählen nicht für „mehrdeutig" (MB-12).
+- **F6-3** Randzeilen werden verworfen und je Buch gezählt; ohne Randangabe unverändert (MB-28).
+- **F6-4** pdfplumber-Version wie die Docling-Version gemessen und geprüft; Zuordnung der Zeichen zu den Zeilen eigenes Kriterium mit synthetischem PDF (`reportlab` als Testabhängigkeit) (MB-23, -29).
+- **F6-5** Falsche Lesereihenfolge neben Bildern (S. 94) in Spec 2, zusammen mit den Tabellen (Abgrenzung).
 
 ## Tier
 
