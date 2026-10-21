@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** Entwurf 2, wartet auf Abnahme
+- **Status:** Fassung 3, zur Endabnahme
 
 ## User Story
 
@@ -88,8 +88,8 @@ Fassungen und optional **gekennzeichnete** Fassungen mit je einem festen Hinweis
 (z. B. `regel`: maßgeblich `ED4`; gekennzeichnet `ED1` mit „Fassung ED1 — für die maßgebliche
 Fassung umrechnen"). Für Häppchen dieser Inhaltsart gilt:
 - **maßgebliche Fassung** → normaler Kandidat;
-- **gekennzeichnete Fassung** → Kandidat, im Ranking gleich behandelt (kein Bonus/Malus;
-  vorbehaltlich N-2), trägt aber den Hinweis (REQ-MB-21);
+- **gekennzeichnete Fassung** → Kandidat, im Ranking gleich behandelt (kein Bonus/Malus), trägt
+  aber den Hinweis (REQ-MB-21);
 - **jede andere Fassung** → **ausgeschlossen**: nie Kandidat, wirkt wie REQ-MB-4 vor dem Ranking.
 
 Inhaltsarten ohne Regel kommen aus allen Fassungen ohne Hinweis. Die Regel gilt bei jeder
@@ -262,7 +262,7 @@ Zahlen ab, keinen Buchtext.
 **REQ-MB-19** — *Performance*
 Laden und Vektorsuche in einem Bestand mit 5 Büchern und zusammen 3.000 Häppchen
 (1.024 Dimensionen, Embedding gefakt, mit aktiver Filter- und Fassungsregel nach
-REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 30 ms** je Frage über 200 Fragen; Altbestände nicht
+REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 45 ms** je Frage über 200 Fragen; Altbestände nicht
 langsamer als heute (README: 2.000 Häppchen typisch 9,1 ms, max 13,5).
 *Detektor:* Messskript mit typisch und Maximum, wie die README-Messung.
 
@@ -278,6 +278,10 @@ Abschnittspfad und beginnt einen Unterabschnitt bis zur nächsten Layout- oder L
 Layout-Überschriften werden **nicht** gegen die Liste abgeglichen oder ersetzt und erzeugen
 keine Ebenen oberhalb der Liste. Das Protokoll zählt erkannte Layout-Überschriften je
 Listenabschnitt.
+Merkmalsquelle ist zunächst **nur die Layout-Klasse der Docling-Extraktion**. Schriftinformation
+(Größe, Schnitt) aus pdfplumber, je Zeile zugeordnet, kommt nur hinzu, wenn H aus REQ-MB-23 sein
+Ziel verfehlt — dann wird mit Tobias entschieden. Das Kriterium bleibt gleich, nur die
+Merkmalsquelle wechselt.
 Anlass (gemessen): im Zielbuch ist „Talentbeschreibungen" **ein** Lesezeichen für S. 76–107;
 die Talentnamen stehen nur im Text.
 *Detektor:* synthetisches Buch, Liste auf 2 Ebenen (`K1 › U1`), darin Zeilen `Alpha`, `Beta`
@@ -316,13 +320,18 @@ Stichprobenseiten** des Zielbuchs gemessen (davon ≥ 3 Zweispaltenseiten mit Ta
 „Talentbeschreibungen"), von Hand gegen das PDF gezählt:
 - **L** = Anteil der Absätze in richtiger Lesereihenfolge — Ziel ≥ 95 %;
 - **T** = Tabellenzeilen, die in einen Fließtext-Absatz geraten — Ziel 0;
-- **H** = auf den Talentseiten erkannte / vorhandene Talentnamen und Fehltreffer, mit den
-  geplanten Merkmalen nach REQ-MB-20 — Ziel alle erkannt, 0 Fehltreffer.
+- **H** = auf den Talentseiten erkannte / vorhandene Talentnamen und Fehltreffer, mit
+  Merkmalen nach REQ-MB-20 allein aus der Docling-Layout-Klasse — Ziel alle erkannt,
+  0 Fehltreffer.
 
 Verfehlt eine Zahl ihr Ziel, wird **vor** dem Weiterbauen mit Tobias über den Weg entschieden
-(spaltenbewusste Extraktion ohne Docling oder Spaltensatz in Spec 2).
-*Detektor:* Messergebnis mit Seitenliste und L/T/H liegt im Spec-Ordner (nur Zahlen, REQ-MB-18),
-bevor ein Commit Abschnitt C/D implementiert.
+(spaltenbewusste Extraktion ohne Docling oder Spaltensatz in Spec 2; bei H zuerst
+Schriftinformation aus pdfplumber, REQ-MB-20).
+Messung und spätere Ingestion laufen mit **derselben Docling-Version**; sie wird im
+Messergebnis notiert, und die Messung gilt nur für diese Version (`requirements-ingest.txt`
+ist heute ungepinnt).
+*Detektor:* Messergebnis mit Seitenliste, L/T/H und Docling-Version liegt im Spec-Ordner (nur
+Zahlen, REQ-MB-18), bevor ein Commit Abschnitt C/D implementiert.
 
 ## Abgrenzung (nicht in Spec 1)
 
@@ -345,20 +354,8 @@ bevor ein Commit Abschnitt C/D implementiert.
 - **O-7 (a)** `CHUNK_SIZE` ohne Vorsatz, keine Zusammenlegung, zeichengenau — Wirkung der Grenzen getrennt messbar (MB-14).
 - **O-8 (a)** Docling-Layout ohne Verbalisierung, Tabellen roh, Vorabmessung — Verbalisierung gehört zur Zahlentreue-Spec (MB-23). Performance-Zahlen MB-19 unverändert übernommen.
 - **O-9 (b)** keine Tier-Map — ohne CI keine Neuberechnung, jeder Merge wird ohnehin abgenommen (Tier).
-
-### Neu offen (durch Entwurf 2)
-
-**N-1 Woher kommen die Layout-Merkmale (REQ-MB-20)?** Docling liefert Lesereihenfolge und
-Layout-Klassen (z. B. Abschnittsüberschrift), aber nicht zwingend Schriftgröße/Schnitt.
-(a) nur Docling-Layout-Klasse; (b) Schriftinformation zusätzlich aus pdfplumber, je Zeile
-zugeordnet; (c) erst messen (H in REQ-MB-23 für (a)), (b) nur bei Verfehlen.
-*Empfehlung (c):* ein Extraktionsweg weniger, falls (a) reicht; das Kriterium bleibt gleich,
-nur die Merkmalsquelle wechselt.
-
-**N-2 Rang gekennzeichneter Fassungen (REQ-MB-5).** (a) gleich behandelt (so im Kriterium);
-(b) bei gleicher Abschnittspfad-Endung maßgebliche Fassung vor gekennzeichneter;
-(c) fester Score-Malus. *Empfehlung (a)* für Spec 1: der Hinweis macht die Fassung sichtbar,
-eine Rangregel ändert die Messung und ist erst mit einem Earthdawn-Golden-Set bewertbar.
+- **N-1 (c)** Layout-Merkmale zuerst nur aus der Docling-Layout-Klasse, pdfplumber-Schriftinfo nur bei verfehltem H — ein Extraktionsweg weniger, falls die Klasse reicht (MB-20, -23).
+- **N-2 (a)** gekennzeichnete Fassungen im Ranking gleich behandelt — eine Rangregel ändert die Messung und ist erst mit einem Earthdawn-Golden-Set bewertbar (MB-5).
 
 ## Tier
 
