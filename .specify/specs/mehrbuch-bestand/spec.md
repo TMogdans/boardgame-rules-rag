@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** Fassung 4 (Lücken aus spec-to-tests), wartet auf Abnahme
+- **Status:** **Abgenommen** durch Tobias am 2026-10-21 (Fassung 4)
 
 ## User Story
 
@@ -27,7 +27,7 @@ nur in den Daten, nie im Code.**
 | **Buch** | Eine Quelle innerhalb eines Bestands, mit stabiler `buch_id`, Titel, Fassung, Sprache, Quelldatei. |
 | **Fassung** | Allgemeiner Name für Edition/Auflage/Version eines Buchs (z. B. `ED4`, `ED1`, `v3`). Ein freier Text, den nur die Daten deuten. |
 | **Abschnittspfad** | Überschriften-Hierarchie eines Häppchens, z. B. `["Talente", "Talentbeschreibungen", "Ablenken"]`. |
-| **Inhaltsart** | Themenbereich eines Abschnitts (mindestens `regel`, `welt`); eigenes Feld, **orthogonal** zu `typ` aus `classify.py` (regel/flavor/meta bleibt Ballast-Filter für `DROP_TYPES`). |
+| **Inhaltsart** | Themenbereich eines Abschnitts (z. B. `regel`, `welt` (Vokabular frei)); eigenes Feld, **orthogonal** zu `typ` aus `classify.py` (regel/flavor/meta bleibt Ballast-Filter für `DROP_TYPES`). |
 | **Überschriften-Liste** | Deklarierte Gliederung eines Buchs: Einträge (Titel, Ebene, Seite) aus PDF-Lesezeichen oder Inhaltsverzeichnis. |
 | **Layout-Überschrift** | Überschrift, die unterhalb der Liste aus Zeilenmerkmalen der Extraktion erkannt wird (REQ-MB-20). |
 | **Altbestand** | Ein Bestand, dessen `spiel.json` keine Bücherliste hat (heutiges Format, ein `quelle_pdf`). |
@@ -343,11 +343,11 @@ Messung und spätere Ingestion laufen mit **derselben Docling-Version**; sie wir
 Messergebnis `vorabmessung.json` notiert, und die Messung gilt nur für diese Version
 (`requirements-ingest.txt` ist heute ungepinnt). Das Einlese-Protokoll notiert die beim Einlesen
 verwendete Docling-Version; weicht sie von der im Messergebnis notierten ab, bricht das Einlesen
-eines Buchs mit Docling mit `KonfigFehler` ab (keine stille Abweichung).
+eines Buchs mit Docling mit `KonfigFehler` ab (keine stille Abweichung). Fehlt `vorabmessung.json` oder enthält sie keine Docling-Version, bricht das Einlesen eines Buchs mit Docling ebenfalls mit `KonfigFehler` ab (kein stilles Überspringen des Versionsvergleichs).
 *Detektor:* Messergebnis mit Seitenliste, L/T/H und Docling-Version liegt im Spec-Ordner (nur
 Zahlen, REQ-MB-18), bevor ein Commit Abschnitt C/D implementiert. Versionsprüfung ohne echtes
 Docling, Version injiziert: gleiche Version → Einlesen läuft, Protokoll nennt sie; abweichende
-Version → `KonfigFehler`, keine Buchdatei geschrieben bzw. alte unverändert.
+Version → `KonfigFehler`, keine Buchdatei geschrieben bzw. alte unverändert. Ohne `vorabmessung.json` bzw. ohne Docling-Version darin → `KonfigFehler` beim Einlesen mit Docling, keine Buchdatei geschrieben bzw. alte unverändert.
 
 ### G. Ergänzungen (Fassung 4, Lücken aus spec-to-tests)
 
