@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-21 (Fassung 3 + MB-20-Negativfall)
+- **Status:** Fassung 4 (Lücken aus spec-to-tests), wartet auf Abnahme
 
 ## User Story
 
@@ -40,7 +40,7 @@ Unberührt bleibt der Einzeldatei-Weg (`knowledge.jsonl`/`pdfs/` neben `rag.py`,
 
 **REQ-MB-1** — *Contract*
 Ein Bestand kann in `spiel.json` eine Liste von Büchern deklarieren; jedes Buch hat
-`buch_id` (Slug, im Bestand eindeutig), `titel`, `fassung`, `sprache` (aus `rag.SPRACHEN`),
+`buch_id` (Slug nach derselben Regel wie `spiel_id`, im Bestand eindeutig), `titel`, `fassung`, `sprache` (aus `rag.SPRACHEN`),
 eine Quelldatei, eine Standard-Inhaltsart und optional Inhaltsart-Zuweisungen je
 Abschnittspfad-Präfix (längstes passendes Präfix gewinnt; keine LLM-Klassifikation). Jedes Buch
 liegt in einer eigenen Datei `data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl` mit eigenem
@@ -135,10 +135,13 @@ Daten der anderen Bücher desselben Bestands byte-gleich.
 *Detektor:* Embed-Zähler 0 beim zweiten Lauf; Dateihashes der anderen Bücher vor/nach Ingestion.
 
 **REQ-MB-10** — *If/Then*
-Wenn die Deklaration doppelte `buch_id`s enthält, zwei Bücher dieselbe Quelldatei nennen
-oder Häppchen eine nicht deklarierte `buch_id` tragen, dann bricht `index` für diesen
-Bestand mit `KonfigFehler` ab und dessen alter Stand bleibt (wie heute bei kaputten Spielen).
-*Detektor:* je Fall ein synthetischer Bestand; Index-Inhalt vorher = nachher.
+Wenn die Deklaration doppelte `buch_id`s enthält, zwei Bücher dieselbe Quelldatei nennen,
+eine `buch_id` keinen Slug bildet (gleiche Regel wie `spiel_id`), eine `sprache` nicht in
+`rag.SPRACHEN` liegt oder Häppchen eine nicht deklarierte `buch_id` tragen, dann bricht `index`
+für diesen Bestand mit `KonfigFehler` ab und dessen alter Stand bleibt (wie heute bei kaputten
+Spielen).
+*Detektor:* je Fall ein synthetischer Bestand (u. a. `buch_id` `"Buch A"` bzw. `"../x"`,
+`sprache` `"xx"`); `KonfigFehler`, Index-Inhalt vorher = nachher.
 
 ### C. Einlesen-Reparatur
 
@@ -213,9 +216,14 @@ Zeile byte-gleich. Gleichstand-Fall: zwei gleich gute Zeilen → erste gewinnt, 
 
 **REQ-MB-13** — *If/Then*
 Wenn ein Listeneintrag auf seiner Zielseite nicht gefunden wird, dann beginnt sein Abschnitt
-am Anfang der Zielseite, und der Eintrag erscheint im Einlese-Protokoll mit Titel und Seite
-(Zähler gefunden/nicht gefunden/mehrdeutig). Kein Eintrag verschwindet still.
-*Detektor:* Liste mit einem Eintrag ohne Gegenstück → Abschnitt vorhanden, Protokoll nennt ihn.
+direkt hinter der Zeile des in **Listenreihenfolge** vorangehenden gefundenen Eintrags auf
+derselben Zielseite; gibt es auf dieser Seite keinen solchen, am Anfang der Zielseite. Die
+Reihenfolge der Überschriften-Liste ist maßgeblich. Der Eintrag erscheint im Einlese-Protokoll
+mit Titel und Seite (Zähler gefunden/nicht gefunden/mehrdeutig). Kein Eintrag verschwindet still.
+*Detektor:* (a) Liste mit einem Eintrag ohne Gegenstück, als erster seiner Seite → Abschnitt
+beginnt am Seitenanfang, Protokoll nennt ihn; (b) Seite mit gefundenem Eintrag `A`, danach
+Fließtext, Liste `A`, `B` (B ohne Gegenstück) → Abschnitt `B` beginnt direkt hinter der Zeile
+`A` (der Fließtext liegt in `B`, nicht in `A`), Protokoll nennt `B`.
 
 ### D. Zerschneiden nach Überschriften
 
@@ -262,9 +270,13 @@ Zahlen ab, keinen Buchtext.
 **REQ-MB-19** — *Performance*
 Laden und Vektorsuche in einem Bestand mit 5 Büchern und zusammen 3.000 Häppchen
 (1.024 Dimensionen, Embedding gefakt, mit aktiver Filter- und Fassungsregel nach
-REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 45 ms** je Frage über 200 Fragen; Altbestände nicht
-langsamer als heute (README: 2.000 Häppchen typisch 9,1 ms, max 13,5).
-*Detektor:* Messskript mit typisch und Maximum, wie die README-Messung.
+REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 45 ms** je Frage über 200 Fragen. Altbestände sind
+nicht langsamer als der Stand vor dieser Spec, gemessen **auf derselben Maschine** (Referenzlauf
+des alten Codes bzw. im selben Testlauf gemessene Basis): typisch und Maximum je höchstens
+**+20 %** gegenüber der Basis. Die README-Zahlen (2.000 Häppchen typisch 9,1 ms, max 13,5) dienen
+nur noch zur Information, nicht als Sollwert.
+*Detektor:* Messskript mit typisch und Maximum, wie die README-Messung; für Altbestände Basis
+und neuer Code im selben Lauf auf derselben Maschine, Vergleich gegen Basis × 1,2.
 
 ### F. Ergänzungen (Entwurf 2)
 
@@ -328,10 +340,54 @@ Verfehlt eine Zahl ihr Ziel, wird **vor** dem Weiterbauen mit Tobias über den W
 (spaltenbewusste Extraktion ohne Docling oder Spaltensatz in Spec 2; bei H zuerst
 Schriftinformation aus pdfplumber, REQ-MB-20).
 Messung und spätere Ingestion laufen mit **derselben Docling-Version**; sie wird im
-Messergebnis notiert, und die Messung gilt nur für diese Version (`requirements-ingest.txt`
-ist heute ungepinnt).
+Messergebnis `vorabmessung.json` notiert, und die Messung gilt nur für diese Version
+(`requirements-ingest.txt` ist heute ungepinnt). Das Einlese-Protokoll notiert die beim Einlesen
+verwendete Docling-Version; weicht sie von der im Messergebnis notierten ab, bricht das Einlesen
+eines Buchs mit Docling mit `KonfigFehler` ab (keine stille Abweichung).
 *Detektor:* Messergebnis mit Seitenliste, L/T/H und Docling-Version liegt im Spec-Ordner (nur
-Zahlen, REQ-MB-18), bevor ein Commit Abschnitt C/D implementiert.
+Zahlen, REQ-MB-18), bevor ein Commit Abschnitt C/D implementiert. Versionsprüfung ohne echtes
+Docling, Version injiziert: gleiche Version → Einlesen läuft, Protokoll nennt sie; abweichende
+Version → `KonfigFehler`, keine Buchdatei geschrieben bzw. alte unverändert.
+
+### G. Ergänzungen (Fassung 4, Lücken aus spec-to-tests)
+
+**REQ-MB-24** — *Contract, PDF-Adapter für Lesezeichen und Seitenlabels*
+Lesezeichen (Lieferant der Überschriften-Liste, REQ-MB-12) und Seitenlabels (Quelle der
+gedruckten Seite, REQ-MB-22) werden beim Einlesen aus der **PDF-Datei selbst** gelesen. Die
+Lesezeichen ergeben die Liste (Titel, Ebene nach Verschachtelung, physische Zielseite) in
+Dokumentreihenfolge; die Labels ergeben je physischer Seite ihr Label.
+*Detektor:* der Test erzeugt ein synthetisches PDF mit Lesezeichen auf **2 Ebenen** und
+Seitenlabels (römisch, dann arabisch mit Versatz, z. B. `i`, `ii`, `1`, `2`, …) → die gelesene
+Liste stimmt in Titel, Ebene, Seite und Reihenfolge, die gelesenen Labels bzw. daraus ermittelten
+gedruckten Seiten stimmen je physischer Seite. `pypdf` (aus `requirements-serve.txt`) darf in der
+Testumgebung vorausgesetzt werden.
+
+**REQ-MB-25** — *Contract, Vorspann*
+Text vor dem ersten Listeneintrag eines Buchs mit Überschriften-Liste wird nicht verworfen,
+sondern bildet einen Abschnitt mit dem Pfad `["Vorspann"]`. Der Name ist Datum/Konfiguration
+(Default „Vorspann"); der Abschnitt wird wie jeder andere zerschnitten (REQ-MB-14, -15, -16).
+*Detektor:* synthetisches Buch mit eindeutigem Text vor dem ersten Eintrag → dieser Text ist
+nach `index` als Häppchen mit Pfad `["Vorspann"]` auffindbar (BM25 bzw. `lade_spiel`); mit
+anders konfiguriertem Namen trägt das Häppchen diesen Namen.
+
+**REQ-MB-26** — *When, Veraltet-Prüfung der Pipe*
+Die Prüfung der Pipe, ob der Index veraltet ist, liest heute ein einzelnes `knowledge.jsonl` je
+Spiel. Für einen Mehr-Bücher-Bestand berücksichtigt sie **alle Buchdateien** des Bestands: wenn
+sich eine Buchdatei nach dem Index-Bau ändert, meldet die Pipe den Bestand als veraltet (wie
+heute bei der Einzeldatei). Altbestände verhalten sich unverändert (REQ-MB-3).
+*Detektor:* Zwei-Bücher-Bestand, `index` gebaut; eine Buchdatei (nicht die erste) danach
+ändern → Pipe meldet veraltet; unverändert → Pipe meldet nicht veraltet.
+
+## Lesarten (festgelegt)
+
+Von Tobias bestätigt (Fassung 4):
+
+- **MB-2** „falsche Deklaration im Aufruf": `spiel.json` wird nach dem Index-Bau verfälscht; `lade_spiel` liefert trotzdem die Zeilenwerte des Index.
+- **MB-11** Die Zähler zählen nur die eindeutigen Fälle der Tabelle; die Konjunktionsliste ist ein Konfigurationsparameter je Sprache.
+- **MB-14** „Protokoll" der Häppchenzahl = Ausgabe des Index-Laufs je Buch.
+- **MB-17** Earthdawn-Wörter in den Spec-Tabellen sind Testdaten, kein Code-Bezug.
+- **Inhaltsart** Das Vokabular ist frei; `regel`/`welt` sind nur Beispiele.
+- **MB-18** Die Code-Mutation „Bücherdatei neben den Code schreiben" wird mit der Implementierung in `test_mutationen.py` ergänzt.
 
 ## Abgrenzung (nicht in Spec 1)
 
