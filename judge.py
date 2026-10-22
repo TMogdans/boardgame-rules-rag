@@ -274,18 +274,18 @@ def _normalisiere(text):
     return t
 
 
-# Mehr-Buecher-Bestand (rag.fundstelle): "Titel (Fassung), S. 12" bzw. "..., Seite 12", ohne arabische
-# Seitenzahl "PDF-S. 2"/"PDF-Seite 2", optional "(Hinweistext)"; getrennt mit ";" bzw. "und" (REQ-MB-6).
-_BUCH_FUNDSTELLE = r"[^;()\n]+?\s\([^()\n]*\),\s+(?:pdf-)?(?:s\.|seite)\s*\d+(?:\s+\([^()\n]*\))?"
-
-
-def _verweigerung_regex():
+def _verweigerung_regex(buch_fundstelle=None):
     def liste(item, verbinder):
         return rf"{item}(?:(?:{verbinder}){item})*"
     # Chat: "S. 14, S. 12"; Sprache: "Seite 14, Seite 12 und Seite 4"
     fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
-                   + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + "|"
-                   + liste(_BUCH_FUNDSTELLE, r"\s*;\s*|\s+und\s+") + r")\.?)?")
+                   + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + r")\.?)?")
+    if buch_fundstelle:
+        # Mehr-Buecher-Bestand (REQ-MB-6, F9-2): NUR Fundstellen in der exakten Form von rag.fundstelle
+        # fuer ein deklariertes Buch, getrennt mit "; " bzw. " und "
+        fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
+                       + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + "|"
+                       + liste(buch_fundstelle, r"; | und ") + r")\.?)?")
     teile = []
     for satz in VERWEIGERUNGS_SAETZE_FEST:
         n = re.escape(_normalisiere(satz))
@@ -296,28 +296,53 @@ def _verweigerung_regex():
 
 
 _VERWEIGERUNG_RE = _verweigerung_regex()
+_BUCH_RE_CACHE = {}
 
 
-def ist_fester_verweigerungssatz(antwort):
-    """True, wenn die Antwort ausschliesslich ein fester Verweigerungssatz ist (siehe oben)."""
-    return bool(_VERWEIGERUNG_RE.match(_normalisiere(antwort)))
+def _buch_fundstelle(buecher):
+    """Regex fuer genau die Fundstellen, die rag.fundstelle fuer die deklarierten Buecher erzeugt:
+    "<Titel> (<Fassung>), S. n" | "..., Seite n" | "..., PDF-S. n" | "..., PDF-Seite n", optional mit
+    " (<Hinweistext>)" aus "hinweise" des Buchs (gekennzeichnete Fassung, REQ-MB-21)."""
+    teile = []
+    for b in buecher:
+        kopf = re.escape(_normalisiere(f"{b.get('titel') or b['buch_id']} ({b.get('fassung')}),")) + " "
+        hinweise = "|".join(re.escape(_normalisiere(h)) for h in b.get("hinweise") or [])
+        teile.append(kopf + r"(?:pdf-)?(?:s\. |seite )\d+" + (rf"(?: \((?:{hinweise})\))?" if hinweise else ""))
+    return "(?:" + "|".join(teile) + ")" if teile else None
 
 
-def deterministisches_urteil(frage, antwort):
+def _regex_fuer(buecher):
+    if not buecher:
+        return _VERWEIGERUNG_RE
+    schluessel = json.dumps([{k: b.get(k) for k in ("buch_id", "titel", "fassung", "hinweise")} for b in buecher],
+                            sort_keys=True, ensure_ascii=False)
+    if schluessel not in _BUCH_RE_CACHE:
+        _BUCH_RE_CACHE[schluessel] = _verweigerung_regex(_buch_fundstelle(buecher))
+    return _BUCH_RE_CACHE[schluessel]
+
+
+def ist_fester_verweigerungssatz(antwort, buecher=None):
+    """True, wenn die Antwort ausschliesslich ein fester Verweigerungssatz ist (siehe oben).
+    buecher: Deklaration eines Mehr-Buecher-Bestands (wie rag.lies_buecher); ohne sie wie vor der Spec."""
+    return bool(_regex_fuer(buecher).match(_normalisiere(antwort)))
+
+
+def deterministisches_urteil(frage, antwort, buecher=None):
     """Urteil-dict ohne Modellaufruf, oder None, wenn die Antwort mehr als den festen Satz enthaelt."""
-    if not ist_fester_verweigerungssatz(antwort):
+    if not ist_fester_verweigerungssatz(antwort, buecher):
         return None
     return {"urteil": "richtig" if frage.get("erwartet_verweigerung") else "unsicher",
             "probs": None, "rest": None, "rohtext": _VERWEIGERUNG_GRUND,
             "input_tokens": 0, "output_tokens": 0, "sekunden": 0.0, "deterministisch": True}
 
 
-def bewerte(modus, modell, frage, antwort):
+def bewerte(modus, modell, frage, antwort, buecher=None):
     """Ein Urteil. Rueckgabe: dict(urteil, probs, rest, rohtext, sekunden).
 
     Zuerst die deterministische Vorstufe (kein Modellaufruf, "deterministisch": True).
+    buecher: Buecherdeklaration des Bestands (Mehr-Buecher-Bestand, REQ-MB-6), sonst None.
     """
-    fest = deterministisches_urteil(frage, antwort)
+    fest = deterministisches_urteil(frage, antwort, buecher)
     if fest is not None:
         return fest
     prompt = baue_prompt(frage, antwort, modus)
@@ -555,8 +580,9 @@ def lade_golden(golden_dir, spiel_ids, suffix=GOLDEN_SUFFIX_DEFAULT):
     return golden
 
 
-def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None):
-    """Alle Eintraege bewerten. Rueckgabe: Liste der Einzelurteile."""
+def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None, buecher=None):
+    """Alle Eintraege bewerten. Rueckgabe: Liste der Einzelurteile.
+    buecher: {spiel_id: Buecherdeklaration} fuer Mehr-Buecher-Bestaende (REQ-MB-6, F9a-1)."""
     fehlend = [(e["spiel_id"], e["frage_id"]) for e in eintraege
                if e["frage_id"] not in golden.get(e["spiel_id"], {})]
     if fehlend:
@@ -564,7 +590,8 @@ def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None):
     einzel = []
     for i, e in enumerate(eintraege, 1):
         frage = golden[e["spiel_id"]][e["frage_id"]]
-        r = bewerter(modus, modell, frage, e["antwort"])
+        b = (buecher or {}).get(e["spiel_id"])
+        r = bewerter(modus, modell, frage, e["antwort"], buecher=b) if b else bewerter(modus, modell, frage, e["antwort"])
         einzel.append({
             "spiel_id": e["spiel_id"], "frage_id": e["frage_id"], "label": e["label"],
             "fehlerart": e.get("fehlerart"), "strittig": bool(e.get("strittig")),
@@ -658,6 +685,8 @@ def main(argv=None):
     e.add_argument("--modell", default=None)
     e.add_argument("--ausgabe", default=None, help="JSON-Datei (Default: eichlauf_<modus>.json)")
     e.add_argument("--limit", type=int, default=None, help="nur die ersten N Eintraege (Rauchtest)")
+    e.add_argument("--daten", default=os.environ.get("DATA_DIR") or None,
+                   help="Datenverzeichnis mit <spiel_id>/spiel.json: Buecherdeklaration fuer Mehr-Buecher-Bestaende")
     a = ap.parse_args(argv)
 
     modell = a.modell or (ANTHROPIC_DEFAULT if a.modus == "anthropic" else OLLAMA_DEFAULT)
@@ -670,7 +699,8 @@ def main(argv=None):
         if a.limit:
             eintraege = eintraege[:a.limit]
         golden = lade_golden(a.golden_dir, [x["spiel_id"] for x in eintraege], a.golden_suffix)
-        einzel = eichen(eintraege, golden, a.modus, modell, log=lambda s: print(s, file=sys.stderr))
+        buecher = {sid: b for sid in golden if (b := rag.buecher_fuer_judge(sid, a.daten))}
+        einzel = eichen(eintraege, golden, a.modus, modell, log=lambda s: print(s, file=sys.stderr), buecher=buecher)
     except JudgeAbbruch as ex:
         print(f"ABBRUCH: {ex}", file=sys.stderr)
         return 2

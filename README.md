@@ -290,7 +290,7 @@ oder neues Buch wird allein eingebettet, die anderen nicht.
     "ueberschriften": {"quelle": "lesezeichen"},
     "seitenzahlen": {"quelle": "versatz", "versatz": 1, "kontrollpunkte": {"20": 19}},
     "layout": {"klasse": "section_header", "veto": [],
-               "stufen": [{"groesse": [6.5, 7.5], "fett": true, "kapitaelchen": true},
+               "stufen": [{"groesse": [6.5, 7.5], "fett": true, "kapitaelchen": true, "kursiv": false},
                           {"groesse": [6.5, 7.5], "fett": true, "kapitaelchen": true, "kursiv": true}]},
     "rand": {"kopf": 36, "fuss": 25}, "vorspann": "Vorspann", "reparatur": true}],
  "fassungsregeln": {"regel": {"massgeblich": ["v3"],
@@ -309,7 +309,10 @@ oder neues Buch wird allein eingebettet, die anderen nicht.
 - `seitenzahlen`: `labels` (PDF-Seitenlabels) oder `versatz` (gedruckt = physisch - versatz);
   `kontrollpunkte` {physisch: gedruckt} werden geprueft. Fundstelle ist die gedruckte Seite,
   ohne arabische Zahl "PDF-S. n".
-- `layout`: Ueberschriften unterhalb der Liste. Eine Zeile mit Schrift einer `stufen`-Angabe
+- `layout`: Ueberschriften unterhalb der Liste. Eine Zeile trifft die KLEINSTE Stufe, deren Angaben
+  sie alle erfuellt -- deshalb muss eine Stufe, die tiefer liegende ausschliessen soll, das
+  unterscheidende Merkmal ausdruecklich nennen (im Beispiel `"kursiv": false` in Stufe 1; ohne es
+  faengt Stufe 1 auch die kursiven Zwischenueberschriften und Stufe 2 wird nie erreicht). Eine Zeile mit Schrift einer `stufen`-Angabe
   (Groesse von-bis, optional `fett`/`kursiv`/`kapitaelchen`, `laufweite`) ist hinreichend;
   ohne zugeordnete Schrift entscheidet die Klasse `klasse` (Rueckfall). Nie Ueberschrift: Zeilen
   im Rand und Klassen der Veto-Menge (immer `table`, `caption`, `page_header`, `page_footer`,
@@ -319,9 +322,7 @@ oder neues Buch wird allein eingebettet, die anderen nicht.
 - `reparatur`: Trennungen an Zeilenenden (`true` oder `{"konjunktionen": [...]}`).
 - `layout` und `rand` werden gegen ihr Schema geprueft (unbekannte Schluessel, falsche Typen,
   leere Stufen, Bereiche mit von > bis -> Abbruch vor dem Schreiben). Listentitel, Praefixe und
-  alle Pfadelemente werden normalisiert (NFC, Leerraum -> ein Leerzeichen). Eine zugeordnete
-  Listenueberschrift zieht Elemente, die vor ihr geliefert wurden, aber unter ihr liegen, hinter
-  sich (Protokoll "umsortiert"). Auf dem Docling-Weg bleibt der Elementtext an Zeilenenden und
+  alle Pfadelemente werden normalisiert (NFC, Leerraum -> ein Leerzeichen). Auf dem Docling-Weg bleibt der Elementtext an Zeilenenden und
   Strichen unveraendert (nur U+00AD im Wort faellt); das Protokoll zaehlt Verdachtsfaelle
   (Binnen-Grossbuchstabe, Strichrest) mit Seiten. `DROP_TYPES` gilt nur fuer Altbestaende.
 

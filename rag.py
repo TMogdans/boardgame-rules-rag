@@ -526,6 +526,24 @@ def lies_buecher(spiel_id, data_dir=None):
              "sprache": meta.get("sprache"), "quelle": quelle, "inhaltsart": None, "altbestand": True}]
 
 
+def buecher_fuer_judge(spiel_id, data_dir=None):
+    """Buecherdeklaration fuer den Judge (REQ-MB-6): wie lies_buecher, je Buch dazu die Hinweistexte
+    gekennzeichneter Fassungen ("hinweise"). None fuer Altbestaende oder ohne spiel.json."""
+    try:
+        verz = spiel_verzeichnis(spiel_id, data_dir)
+    except KonfigFehler:
+        return None
+    if not os.path.exists(os.path.join(verz, "spiel.json")):
+        return None
+    meta = lies_spiel(spiel_id, data_dir)
+    if not ist_mehrbuch(meta):
+        return None
+    regeln = pruefe_fassungsregeln(meta.get("fassungsregeln"))
+    return [dict(b, hinweise=sorted({r["gekennzeichnet"][b["fassung"]] for r in regeln.values()
+                                     if b["fassung"] in r["gekennzeichnet"]}))
+            for b in pruefe_buecher(meta)]
+
+
 def inhaltsart_fuer(buch, pfad):
     """Inhaltsart eines Abschnittspfads: laengstes passendes Pfad-Praefix, sonst der Standard des Buchs."""
     beste, laenge = buch["inhaltsart"], -1

@@ -67,7 +67,6 @@ class Protokoll:
         self.docling_version = None             # REQ-MB-23
         self.pdfplumber_version = None
         self.abschnitte = 0
-        self.umsortiert = 0                     # REQ-MB-31
         self.binnen_grossbuchstabe = {"anzahl": 0, "seiten": []}   # REQ-MB-32
         self.strichrest = {"anzahl": 0, "seiten": []}
 
@@ -330,20 +329,12 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
             davor = [m for m in range(i) if liste[m]["seite"] == s and m in gefunden_bei]
             nicht[i] = gefunden_bei[davor[-1]] if davor else None
 
-    # 2b. Listenueberschriften nach Lage einsortieren (REQ-MB-31) -- der Abgleich lief auf der
-    # urspruenglichen Folge, Abschnitte, REQ-MB-13 und -20 arbeiten auf der umsortierten
-    reihe = list(range(len(zeilen)))
-    for i in range(len(liste)):
-        if i in gefunden_bei:
-            reihe = _einsortieren(reihe, gefunden_bei[i], zeilen, p)
-    neu = {alt: pos for pos, alt in enumerate(reihe)}
-    zeilen = [zeilen[k] for k in reihe]
     starts = []
     for i, e in enumerate(liste):
         if i in gefunden_bei:
-            starts.append((neu[gefunden_bei[i]], 1, i))
+            starts.append((gefunden_bei[i], 1, i))
         else:
-            starts.append((neu[nicht[i]] + 1 if nicht[i] is not None else seitenanfang(e["seite"]), 0, i))
+            starts.append((nicht[i] + 1 if nicht[i] is not None else seitenanfang(e["seite"]), 0, i))
 
     # Pfade aus der Liste (Wahrheit fuer ihre Ebenen); eine uebersprungene Ebene bleibt leer
     pfade, stapel = {}, []
@@ -390,29 +381,6 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
                 abschnitte.append(a)
     p.abschnitte = len(abschnitte)
     return abschnitte
-
-
-def _hat_lage(z):
-    return all(z.get(k) is not None for k in ("x0", "x1", "oben", "unten"))
-
-
-def _einsortieren(reihe, j, zeilen, p):
-    """REQ-MB-31: Elemente derselben Seite, die VOR der Listenueberschrift j geliefert wurden, aber
-    unter ihr liegen (Mittelpunkt unter ihrer Unterkante, waagrecht ueberlappend), hinter j."""
-    s, u = zeilen[j]
-    if not _hat_lage(u):
-        return reihe
-    pos = reihe.index(j)
-
-    def darunter(k):
-        sk, e = zeilen[k]
-        return (sk == s and _hat_lage(e) and (e["oben"] + e["unten"]) / 2 > u["unten"]
-                and e["x0"] < u["x1"] and u["x0"] < e["x1"])
-    weg = [k for k in reihe[:pos] if darunter(k)]
-    if not weg:
-        return reihe
-    p.umsortiert += len(weg)
-    return [k for k in reihe[:pos] if k not in weg] + [j] + weg + reihe[pos + 1:]
 
 
 def _baue_text(pfad, kopf, kopfzeile, rumpf, zeilen, reparatur, konj, p, zeilenenden=True):
@@ -759,11 +727,12 @@ def zeilen_aus_docling(doc, protokoll=None):
                 bild_ebene = ebene
             continue
         text = _text_von(item, doc)
-        prov = (getattr(item, "prov", None) or [None])[0]
+        provs = getattr(item, "prov", None) or []
+        prov = provs[0] if provs else None
         if not text or not text.strip() or prov is None:
             continue
         zeile = {"text": text, "klasse": klasse}
-        _lage_aus_docling(zeile, prov, doc)
+        _lage_aus_docling(zeile, [q for q in provs if q.page_no == prov.page_no], doc)
         if bild_ebene is not None:
             zeile["aus_bild"] = True
             if protokoll is not None:
@@ -772,14 +741,22 @@ def zeilen_aus_docling(doc, protokoll=None):
     return seiten
 
 
-def _lage_aus_docling(zeile, prov, doc):
-    """bbox (PDF-Punkte, Ursprung oben links wie pdfplumber) und Seitenhoehe, falls vorhanden."""
-    bbox, pages = getattr(prov, "bbox", None), getattr(doc, "pages", None)
-    if bbox is None or not pages or prov.page_no not in pages:
+def _lage_aus_docling(zeile, provs, doc):
+    """Lage (PDF-Punkte, Ursprung oben links wie pdfplumber) und Seitenhoehe, falls vorhanden. Mehrere
+    Kaesten des Elements auf derselben Seite: ihre Vereinigung (REQ-MB-29, F9-3)."""
+    pages = getattr(doc, "pages", None)
+    seite = provs[0].page_no
+    kaesten = [q.bbox for q in provs if getattr(q, "bbox", None) is not None]
+    if not kaesten or not pages or seite not in pages:
         return
-    hoehe = float(pages[prov.page_no].size.height)
-    b = bbox.to_top_left_origin(page_height=hoehe) if hasattr(bbox, "to_top_left_origin") else bbox
-    zeile.update(x0=float(b.l), x1=float(b.r), oben=float(b.t), unten=float(b.b), seitenhoehe=hoehe)
+    hoehe = float(pages[seite].size.height)
+    oben_links = []
+    for bbox in kaesten:
+        b = bbox.to_top_left_origin(page_height=hoehe) if hasattr(bbox, "to_top_left_origin") else bbox
+        oben_links.append(b)
+    zeile.update(x0=float(min(b.l for b in oben_links)), x1=float(max(b.r for b in oben_links)),
+                 oben=float(min(b.t for b in oben_links)), unten=float(max(b.b for b in oben_links)),
+                 seitenhoehe=hoehe)
 
 
 # ---------- REQ-MB-29: pdfplumber-Zeichen den Zeilen zuordnen ----------

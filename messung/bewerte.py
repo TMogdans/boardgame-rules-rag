@@ -28,6 +28,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
 import judge  # noqa: E402
+import rag  # noqa: E402
 
 
 class BewerteFehler(Exception):
@@ -87,9 +88,13 @@ def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeil
     datei = datei or golden_datei_des_laufs(pfad_antworten)
     fragen = fragen if fragen is not None else loese_fragen_auf(zeilen, golden_verz, pfad_antworten, datei)
     ziel = os.path.join(os.path.dirname(os.path.abspath(pfad_antworten)), "urteile.jsonl")
+    # Buecherdeklaration je Bestand ueber die spiel_id (REQ-MB-6, F9a-1); Altbestand: keine
+    buecher = {sid: rag.buecher_fuer_judge(sid, golden_verz) for sid in {z["spiel_id"] for z in zeilen}}
     with open(ziel, "w", encoding="utf-8") as aus:
         for z, q in zip(zeilen, fragen):
-            r = judge.bewerte(modus, modell, q, z["antwort"])
+            b = buecher[z["spiel_id"]]
+            r = (judge.bewerte(modus, modell, q, z["antwort"], buecher=b) if b
+                 else judge.bewerte(modus, modell, q, z["antwort"]))
             aus.write(json.dumps({**z, "typ": q.get("typ"), "urteil": r["urteil"], "begruendung": r.get("rohtext"),
                                   "input_tokens": r.get("input_tokens"),
                                   "output_tokens": r.get("output_tokens"),
