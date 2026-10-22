@@ -1,0 +1,84 @@
+{
+  "docling_version": "2.131.0",
+  "pdfplumber_version": "0.11.10",
+  "gemessen_am": "2026-10-22",
+  "zielbuch": {"seiten": 314, "format_pt": [595.28, 841.89], "versatz": 1, "rand_pt": {"kopf": 36, "fuss": 25}},
+  "basis": {
+    "elemente": 8174, "randzeilen": 718, "abschnitte": 539, "haeppchen_800_150": 2638,
+    "abschnittstext_zeichen": 1535444, "liste_gefunden": 144, "liste_nicht_gefunden": 4,
+    "layout_stufe_1": 386, "layout_stufe_2": 5,
+    "verdacht_binnen_grossbuchstabe": 63, "verdacht_strichrest": 50
+  },
+  "spaltenraster": {
+    "spalten_pt": [[35, 292], [304, 560]], "toleranz_pt": 4,
+    "zeilen_x0_spitzen": {"35": 9292, "304": 6873, "44": 1978, "312": 1922},
+    "zeilen_x1_spitzen": {"292": 6422, "560": 6873},
+    "seiten_zweispaltig": 294, "seiten_ohne_fliesstext": 10, "seiten_gemischt": 10,
+    "seiten_gemischt_liste": [10, 58, 72, 268, 307, 308, 309, 310, 311, 313],
+    "gerade_und_ungerade_seiten_gleich": true
+  },
+  "lesefolge": {
+    "regel": "raster",
+    "seiten_andere_folge": 100, "seiten_andere_folge_ohne_werteblockzeilen": 55,
+    "elemente_in_anderen_abschnitt": 58,
+    "abschnitte_andere_elementmenge_alt": 21, "abschnitte_andere_elementmenge_neu": 20,
+    "abschnitte_beteiligt": 25, "seiten_mit_abschnittswechsel": [22, 37, 53, 76, 94, 100, 114, 172, 177, 190, 191],
+    "urteil_seiten": {"besser": 10, "strittig": 1, "schlechter": 0, "strittig_seiten": [53]},
+    "urteil_abschnitte": {"besser": 23, "strittig": 2, "schlechter": 0},
+    "innere_umstellung": {"abschnitte": 193, "nur_werteblockzeilen": 156, "spaltenruecksprung_docling": 25, "nicht_beurteilt": 12, "stichprobe_besser": [27, 121, 293]},
+    "ueberschrift_nach_inhalt": {"docling": 3, "raster": 0, "seiten": [76, 114, 190], "abschnittskoepfe": 538},
+    "tabelle_falscher_abschnitt": {"docling": 1, "raster": 0, "seiten": [22]},
+    "seiten_mit_inhaltsbild": 154, "andere_folge_mit_bild": 35, "andere_folge_ohne_bild": 20,
+    "variante_kasten_einzug_12pt": {"elemente_verschoben": 55, "neu_falsch": [20], "grund": "zentrierte Ueberschrift = Kasten"},
+    "zeit_ms_je_seite": {"typisch": 0.018, "maximum": 0.171}
+  },
+  "striche": {
+    "zeilenende_quelle": {
+      "grossbuchstabe_folgt": {"strich_behalten": 38, "zusammengezogen": 20, "nicht_gefunden": 5},
+      "ziffer_davor": {"zusammengezogen": 2},
+      "konjunktion_folgt": {"strich_leerzeichen": 5, "zusammengezogen": 4},
+      "kleinbuchstabe_folgt": {"zusammengezogen": 4616, "strich_leerzeichen": 28, "leerzeichen_ohne_strich": 9, "nicht_gefunden": 1},
+      "spalten_oder_seitenende": 67,
+      "echte_striche": 69, "echte_zusammengezogen": 26
+    },
+    "regel_zeilenende": {"stellen": 59, "strich_wiederhergestellt": 40, "zusammengefuegt_strich_leerzeichen": 11, "zusammengefuegt_leerzeichen": 8,
+                         "abschnitte": 49, "besser": 59, "schlechter": 0,
+                         "verdacht_nachher": {"binnen_grossbuchstabe": 28, "strichrest": 39}},
+    "elementgrenze": {"elemente_mit_strich_am_ende": 36, "folge_klein": 30, "folge_gross": 5, "folge_konjunktion": 1},
+    "regel_strichrest": {"stellen": 39, "abschnitte": 32, "besser": 33, "schlechter_ohne_konjunktionsergaenzung": 5, "ungeklaert": 1,
+                         "fehlende_konjunktionen": ["als", "beziehungsweise"], "verdacht_strichrest_nachher": 0}
+  },
+  "zierschrift_umlaut": {"elemente": 4, "seiten": [9, 10, 20, 216], "abschnitte_geaendert": 4, "besser": 4, "schlechter": 0,
+                         "liste_gefunden_vorher": 144, "liste_gefunden_nachher": 146, "nicht_loesbar": [1, 216]},
+  "steuerzeichen": {"u0007": 739, "abschnitte": 241, "seiten": 78},
+  "zeichenersetzung_docling": {"gedankenstrich_quelle": 691, "gedankenstrich_haeppchen": 0, "aufzaehlungspunkt_quelle": 115},
+  "zahlen": {
+    "quelle": 8490, "fehlend": 199, "fehlend_gar_nicht": 178, "fehlend_seltener": 21,
+    "fehlend_gar_nicht_seiten": {"3": 85, "4": 65, "37": 9, "117": 4, "130": 3, "139": 5, "221": 3, "225": 4},
+    "zusaetzlich": 820, "zusaetzlich_erfunden": 1, "zusaetzlich_vervielfacht": 819,
+    "zusaetzlich_seiten": {"49": 162, "301": 162, "20": 154, "300": 116, "303": 108, "306": 108},
+    "listennummern_fehlend": 24, "listennummern_seiten": [37, 130, 139, 221, 225], "listenmarker_docling_geprueft": {"seite": 139, "vorhanden": 5, "von": 5}
+  },
+  "textverlust": {"zeichen_quelle": 1153626, "ohne_docling_kasten": 7255, "seiten": {"3": 4062, "4": 3082, "117": 108, "14": 3}},
+  "tabellen": {
+    "anzahl": 79, "seiten": 58, "rasterzeilen": 1196, "zellen": 5741, "leere_zellen": 455,
+    "markdown_zeichen": 261238, "markdown_zeichen_ohne_fuellung": 95127, "anteil_am_buchtext": 0.170,
+    "laenge_median": 1361, "laenge_max": 27521, "ueber_chunk_size": 52,
+    "haeppchen_mit_tabelle": 366, "haeppchen_ohne_tabellenkopf": 316,
+    "ohne_fuellung": {"haeppchen": 2383, "mit_tabelle": 186, "ohne_tabellenkopf": 131},
+    "spannzellen_doppelung": {"tabellen": 50, "zellen": 271},
+    "zahlen_im_kasten": {"quelle": 3498, "markdown": 4156, "fehlend": 7, "zusaetzlich": 665, "fehlend_seiten": {"40": 6, "308": 1}},
+    "doppelt_mit_bildkindern": {"tabellen": 1, "seite": 20, "elemente": 41},
+    "werteblock_als_tabelle": [96, 117, 118, 118],
+    "index_als_tabelle_seiten": [307, 308, 309, 310, 311, 312, 313],
+    "schablone_zeilenlaenge": {"zeilen": 1117, "typisch": 85, "p95": 177, "maximum": 712, "hoechstens_150": 938}
+  },
+  "werteblock": {
+    "talente": 149, "zauber": 216,
+    "paare": 2652, "intakt": 2620, "getrennt": 9, "getrennt_seiten": [114, 117, 118, 119],
+    "zeichenersetzung": 16, "messartefakt_laufweite": 5, "wert_nicht_in_zeile": 2,
+    "kreaturenwerte": "nicht im Zielbuch"
+  },
+  "pdfplumber_volltext_prototyp": {"elemente": 6037, "wortfolge_gleich": 5819, "anders": 218},
+  "laufzeit_s_je_seite": {"docling_typisch": 0.315, "docling_maximum": 3.978, "docling_zweithoechste": 2.984, "docling_summe": 152, "schriftzuordnung_buch": 25.1}
+}
