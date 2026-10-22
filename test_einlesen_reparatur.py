@@ -1004,6 +1004,67 @@ class TestRandzeilen(mb.BestandTest):
 
 
 # ===================================================================================
+# Fassung 8: Randgrenze inklusiv (REQ-MB-12, -20, -28)
+# ===================================================================================
+def grenzzeile(text, mitte, klasse="section_header", schrift=S1):
+    d = {"text": text, "klasse": klasse, "oben": mitte - 5, "unten": mitte + 5}
+    if schrift is not None:
+        d["schrift"] = dict(schrift)
+    return d
+
+
+class TestRandgrenzeInklusiv(unittest.TestCase):
+    """Kopfrand 50, Fussrand 40 bei Seitenhoehe 800 (Grenze 760): Mittelpunkt genau auf der Grenze ist Rand,
+    0,01 pt weiter innen nicht. Faengt: Vergleich "<=" bzw. ">=" durch "<" bzw. ">" ersetzt."""
+    RAND = {"kopf": 50, "fuss": 40}
+
+    def baue(self, kopf_mitte, fuss_mitte):
+        e = einlesen()
+        p = e.Protokoll()
+        seiten = {1: [grenzzeile("Kolumne", kopf_mitte), grenzzeile("K1", 100),
+                      grenzzeile("Text K1.", 120, "text", FT), grenzzeile("Fussstufe", fuss_mitte)]}
+        abschnitte = e.baue_abschnitte(seiten, [eintrag("K1", 1)], layout={"klasse": "section_header", "stufen": STUFEN},
+                                       rand=self.RAND, seitenhoehe=SEITENHOEHE, protokoll=p)
+        return [a["abschnittspfad"] for a in abschnitte], " ".join(a["text"] for a in abschnitte), p
+
+    @unittest.skip("devloop: REQ-MB-20 neu in Fassung 8")
+    def test_req_mb_20_mittelpunkt_auf_der_grenze_ist_rand(self):
+        """[REQ-MB-20] Kopf-/Fusszeile (Stufe 1) mit Mittelpunkt genau auf der Grenze: keine Ueberschrift, Rand-Zaehler 2; Grenze +-0,01 pt nach innen: beide Ueberschrift."""
+        pfade, _, p = self.baue(50.0, 760.0)
+        self.assertEqual(pfade, [["K1"]])
+        self.assertEqual(p.rand_verhindert, 2)
+        pfade, _, p = self.baue(50.01, 759.99)
+        self.assertIn(["K1", "Fussstufe"], pfade)
+        self.assertEqual(p.rand_verhindert, 0)
+
+    @unittest.skip("devloop: REQ-MB-28 neu in Fassung 8")
+    def test_req_mb_28_grenzzeile_verworfen_und_gezaehlt(self):
+        """[REQ-MB-28] Mittelpunkt genau auf der Grenze: Zeile verworfen und gezaehlt (2); Grenze + 0,01 pt nach innen: Zeile bleibt, Zaehler 0."""
+        _, text, p = self.baue(50.0, 760.0)
+        self.assertNotIn("Kolumne", text)
+        self.assertNotIn("Fussstufe", text)
+        self.assertEqual(p.randzeilen, 2)
+        _, text, p = self.baue(50.01, 759.99)
+        self.assertIn("Kolumne", text)
+        self.assertIn("Fussstufe", text)
+        self.assertEqual(p.randzeilen, 0)
+
+    @unittest.skip("devloop: REQ-MB-12 neu in Fassung 8")
+    def test_req_mb_12_grenzzeile_ist_kein_kandidat(self):
+        """[REQ-MB-12] Kolumnentitel "Bonuswürfel" mit Mittelpunkt genau auf der Kopfrandgrenze ist kein Kandidat (mehrdeutig 0); 0,01 pt innen schon (mehrdeutig 1)."""
+        e = einlesen()
+        for mitte, mehrdeutig in ((50.0, []), (50.01, [("Bonuswürfel", 1)])):
+            with self.subTest(mitte=mitte):
+                p = e.Protokoll()
+                seiten = {1: [grenzzeile("Bonuswürfel", mitte), grenzzeile("Bonuswürfel", 200),
+                              grenzzeile("Text.", 220, "text", FT)]}
+                e.baue_abschnitte(seiten, [eintrag("Bonuswürfel", 1)], rand={"kopf": 50}, seitenhoehe=SEITENHOEHE,
+                                  protokoll=p)
+                self.assertEqual(p.mehrdeutig, mehrdeutig)
+                self.assertEqual(p.gefunden, [("Bonuswürfel", 1)])
+
+
+# ===================================================================================
 # Fassung 7 -- Docling-Weg mit Attrappe (REQ-MB-11, -32)
 # ===================================================================================
 import docling_attrappe as da  # noqa: E402

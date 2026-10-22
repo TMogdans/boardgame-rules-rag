@@ -14,8 +14,6 @@ Docstring. Nur synthetische Daten. Der Docling-Weg laeuft mit der Attrappe docli
 Vom Test benutzte Schnittstellen der Implementierung (aus einlesen.py gelesen):
   einlesen.lies_pdf_ein(spiel_id, buch_id, pdf=..., ueberschreiben=..., ausgabe=...) -> Protokoll
   einlesen.VORABMESSUNG (Pfad des Messergebnisses, im Test auf eine Temp-Datei gelegt)
-  messung.lauf.fuehre_aus(ausgabe, args, data_dir=None) -> antworten.jsonl
-  judge.ist_fester_verweigerungssatz(text), judge.deterministisches_urteil(frage, text)
 """
 import contextlib
 import importlib
@@ -32,7 +30,6 @@ if BASE not in sys.path:
     sys.path.insert(0, BASE)
 import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
-import judge  # noqa: E402
 import test_mehrbuch as mb  # noqa: E402
 import test_zerschneiden as zs  # noqa: E402
 import docling_attrappe as da  # noqa: E402
@@ -263,49 +260,6 @@ class TestDoclingAdapter(mb.BestandTest):
         self.assertIn(["Kapitel", "Talent Alpha"], pfade)
         talent = next(e for e in self.buchtext() if e["abschnittspfad"] == ["Kapitel", "Talent Alpha"])
         self.assertIn("alphamarke", talent["text"])
-
-
-# ===================================================================================
-# 4. Messung: Judge und antworten.jsonl im Mehr-Buecher-Bestand (REQ-MB-6, -7)
-# ===================================================================================
-class FundstellenBasis(mb.BestandTest):
-    def setUp(self):
-        super().setUp()
-        self.bestand([mb.buch("nord", "Buch Nord", "alpha"), mb.buch("sued", "Buch Sued", "beta")])
-        self.schreibe_buch("nord", [mb.eintrag("nord", 1, 12, "Feuer Feuer Wasser nordzwoelf"),
-                                    mb.eintrag("nord", 2, 30, "Wasser Erde nordfueller")])
-        self.schreibe_buch("sued", [mb.eintrag("sued", 1, 12, "Feuer suedzwoelf"),
-                                    mb.eintrag("sued", 2, 31, "Erde suedfueller")])
-        self.baue()
-        self.hits = self.suche("Feuer", 2)
-
-
-class TestMessungMehrbuch(FundstellenBasis):
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-6")
-    def test_req_mb_6_judge_erkennt_festen_satz_mit_buch_fundstellen(self):
-        """[REQ-MB-6] Der feste C-Text eines Mehr-Buecher-Bestands (Chat und Sprache) ist fuer den Judge ein fester Verweigerungssatz. Faengt: Judge-Muster kennt nur "S. n"/"Seite n" (Mehrbuch-C-Text geht ans Modell)."""
-        for sprache in (False, True):
-            with self.subTest(sprache=sprache):
-                text = rag.entscheid_text_nichts(self.hits, sprache=sprache)
-                self.assertIn("Buch Nord", text)
-                self.assertTrue(judge.ist_fester_verweigerungssatz(text), text)
-                urteil = judge.deterministisches_urteil({"erwartet_verweigerung": True}, text)
-                self.assertEqual(urteil["urteil"], "richtig")
-
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-7")
-    def test_req_mb_7_antworten_jsonl_nennt_das_buch(self):
-        """[REQ-MB-7] messung/lauf: "abgerufen" in antworten.jsonl nennt je Treffer das Buch -- Seite 12 aus nord und sued unterscheidbar. Faengt: nur h["seite"] protokollieren."""
-        lauf = importlib.import_module("messung.lauf")
-        self.schreibe_golden([{"id": 1, "frage": "Feuer", "typ": "fakt", "erwartet": "-", "keywords": [],
-                               "seiten": [{"buch_id": "nord", "seite": 12}]}])
-        aus = os.path.join(self.tmp.name, "lauf")
-        with mock.patch.object(rag, "answer", lambda *a: "Antwort."), contextlib.redirect_stdout(io.StringIO()):
-            lauf.fuehre_aus(aus, args=(SID,))
-        zeilen = [json.loads(x) for x in open(os.path.join(aus, "antworten.jsonl"), encoding="utf-8")]
-        self.assertEqual(len(zeilen), 1)
-        abgerufen = zeilen[0]["abgerufen"]
-        self.assertTrue(all(isinstance(a, dict) for a in abgerufen), abgerufen)
-        self.assertLessEqual({("nord", 12), ("sued", 12)}, {(a.get("buch_id"), a.get("seite")) for a in abgerufen})
 
 
 # ===================================================================================

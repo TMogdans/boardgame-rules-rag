@@ -35,6 +35,8 @@ Vom Test erwartete Schnittstellen (aus der Spec abgeleitet, Namen hier festgeleg
   .specify/specs/mehrbuch-bestand/vorabmessung.json   (REQ-MB-23)
   Pipe: veralteter Mehr-Buecher-Bestand (irgendeine Buchdatei nach dem Bau geaendert) -> Meldung
         mit "veraltet", kein LLM-Aufruf (REQ-MB-26)
+  REQ-MB-6 (Fassung 8): judge.ist_fester_verweigerungssatz / deterministisches_urteil; messung.lauf.fuehre_aus
+      schreibt in antworten.jsonl "abgerufen" als [{"buch_id", "seite"}] je Fundstelle (Mehrbuch)
   REQ-MB-19 Basis: rag.py aus BASIS_COMMIT (letzter Stand vor der Spec, per git show) im selben Lauf
 """
 import contextlib
@@ -62,6 +64,7 @@ if BASE not in sys.path:
     sys.path.insert(0, BASE)
 import testumgebung  # noqa: F401,E402  -- zuerst: alle Standardpfade der Skripte ins Temp-Verzeichnis
 import rag  # noqa: E402
+import judge  # noqa: E402
 import openwebui_pipe as op  # noqa: E402
 from test_openwebui_pipe import sammle, ollama_ndjson  # noqa: E402
 
@@ -827,6 +830,33 @@ class TestFundstelle(BestandTest):
         self.assertEqual(rag.entscheid_text_nichts(self.hits).count("Buch "), 2)
 
     @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
+    def test_req_mb_6_judge_wertet_festen_satz_mit_buch_als_verweigerung(self):
+        """[REQ-MB-6] (a) Fester Satz mit Buch-Fundstellen (Chat und Sprache) -> Judge: Verweigerung, gleich dem Altbestand-Fall; mit Antworttext -> keine."""
+        frage = {"erwartet_verweigerung": True}
+        alt = judge.deterministisches_urteil(frage, "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 12.")
+        self.assertIsNotNone(alt)
+        for sprache in (False, True):
+            with self.subTest(sprache=sprache):
+                text = rag.entscheid_text_nichts(self.hits, sprache=sprache)
+                self.assertIn("Buch Nord", text)
+                self.assertTrue(judge.ist_fester_verweigerungssatz(text), text)
+                self.assertEqual(judge.deterministisches_urteil(frage, text), alt)
+                mit_antwort = "Feuer verdient man in Phase 4. " + text
+                self.assertFalse(judge.ist_fester_verweigerungssatz(mit_antwort))
+                self.assertIsNone(judge.deterministisches_urteil(frage, mit_antwort))
+
+    @unittest.skip("devloop: REQ-MB-6 neu in Fassung 8")
+    def test_req_mb_6_sprachmodus_seite_ausgeschrieben(self):
+        """[REQ-MB-6] (c) Sprachmodus: "Seite 12", kein "S. 12", Buch und Fassung dabei (C-Text, B-Hinweis, fundstelle)."""
+        for text in (rag.entscheid_text_nichts(self.hits, sprache=True), rag.entscheid_hinweis(self.hits, sprache=True),
+                     rag.fundstelle(self.hits[0][0], sprache=True)):
+            with self.subTest(text=text):
+                self.assertIn("Seite 12", text)
+                self.assertNotIn("S. 12", text)
+                self.assertIn("Buch", text)
+                self.assertRegex(text, "alpha|beta")
+
+    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_mutation_der_kopf_funktion_aendert_cli_und_pipe(self):
         """[REQ-MB-6] fundstelle liefert einen Marker -> Prompt, CLI-Ausgabe, Entscheid-Text, Pipe-Fusszeile und -Prompt zeigen ihn."""
         p = self.pipe(top_k=2)
@@ -885,6 +915,20 @@ class TestMessung(BestandTest):
         self.assertEqual(erg["verfehlt"], [f"{SID}/1"])
 
     @unittest.skip("devloop: REQ-MB-7 noch nicht implementiert")
+    def test_req_mb_7_unbekannter_zusatzschluessel_ist_konfigfehler(self):
+        """[REQ-MB-7] Fundstelle {"buch_id", "seite", "notiz"} -> KonfigFehler in eval und messung; ohne notiz gueltig."""
+        retrieval = importlib.import_module("messung.retrieval")
+        mit = dict(self.fragen[0], seiten=[{"buch_id": "nord", "seite": 12, "notiz": "x"}])
+        self.schreibe_golden([mit])
+        with self.assertRaises(rag.KonfigFehler) as ctx:
+            self.eval()
+        self.assertIn("notiz", str(ctx.exception))
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(rag.KonfigFehler):
+            retrieval.trefferquote(ausgabe=lambda *_: None)
+        self.schreibe_golden([dict(self.fragen[1])])
+        self.assertEqual([s["kategorie"] for s in self.eval()], [rag.KAT_GETROFFEN])
+
+    @unittest.skip("devloop: REQ-MB-7 noch nicht implementiert")
     def test_req_mb_7_seite_ohne_buch_ist_konfigfehler(self):
         """[REQ-MB-7] Golden Set eines Mehr-Buecher-Bestands mit Seite ohne Buch -> KonfigFehler in eval und messung."""
         fragen = [dict(self.fragen[1], seiten=[12])]
@@ -894,6 +938,48 @@ class TestMessung(BestandTest):
         retrieval = importlib.import_module("messung.retrieval")
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(rag.KonfigFehler):
             retrieval.trefferquote(ausgabe=lambda *_: None)
+
+
+class TestMesslaufMitBuch(BestandTest):
+    """REQ-MB-6 (b): messung/lauf.py protokolliert Fundstellen mit Buch; Altbestand-Zeile unveraendert."""
+
+    def lauf(self, sid):
+        lauf = importlib.import_module("messung.lauf")
+        aus = os.path.join(self.tmp.name, f"lauf-{sid}")
+        with mock.patch.object(rag, "answer", lambda *a: "Antwort."), mock.patch("time.perf_counter", return_value=1.0), \
+                contextlib.redirect_stdout(io.StringIO()):
+            lauf.fuehre_aus(aus, args=(sid,))
+        with open(os.path.join(aus, "antworten.jsonl"), encoding="utf-8") as f:
+            return f.read().splitlines()
+
+    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
+    def test_req_mb_6_antworten_jsonl_mit_buch_je_fundstelle(self):
+        """[REQ-MB-6] (b) Zwei Buecher mit Seite 12: "abgerufen" nennt je Fundstelle buch_id und Seite, unterscheidbar."""
+        self.bestand([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta")])
+        self.schreibe_buch("nord", [eintrag("nord", 1, 12, "Feuer Feuer Wasser nordzwoelf")])
+        self.schreibe_buch("sued", [eintrag("sued", 1, 12, "Feuer suedzwoelf")])
+        self.schreibe_golden([{"id": 1, "frage": "Feuer", "typ": "fakt", "erwartet": "-", "keywords": [],
+                               "seiten": [{"buch_id": "nord", "seite": 12}]}])
+        (zeile,) = [json.loads(z) for z in self.lauf(SID)]
+        abgerufen = zeile["abgerufen"]
+        self.assertTrue(all(isinstance(a, dict) for a in abgerufen), abgerufen)
+        paare = [(a.get("buch_id"), a.get("seite")) for a in abgerufen]
+        self.assertEqual(sorted(paare), [("nord", 12), ("sued", 12)])
+
+    @unittest.skip("devloop: REQ-MB-6 neu in Fassung 8")
+    def test_req_mb_6_antworten_jsonl_altbestand_byte_gleich(self):
+        """[REQ-MB-6] (b) Altbestand: Zeile in antworten.jsonl byte-gleich zum Format vor der Aenderung (abgerufen = Seitenliste)."""
+        meta = rag.lege_spiel_an("Altspiel")
+        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]), ALT)
+        with open(os.path.join(self.data, "altspiel", "golden_set.json"), "w", encoding="utf-8") as f:
+            json.dump({"spiel_id": "altspiel", "fragen": [{"id": 1, "frage": "Feuer", "typ": "fakt", "erwartet": "-",
+                                                           "keywords": [], "seiten": [11]}]}, f)
+        (zeile,) = self.lauf("altspiel")
+        hits = self.suche("Feuer", rag.TOP_K, sid="altspiel")
+        soll = {"spiel_id": "altspiel", "frage_id": 1, "frage": "Feuer", "antwort": "Antwort.",
+                "abgerufen": [h["seite"] for h, _ in hits], "scores": [round(float(s), 4) for _, s in hits],
+                "entscheid": None, "probs": None, "t_antwort": 0.0}
+        self.assertEqual(zeile, json.dumps(soll, ensure_ascii=False))
 
 
 # ===================================================================================
