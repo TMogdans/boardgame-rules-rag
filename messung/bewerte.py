@@ -92,9 +92,10 @@ def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeil
     buecher = {sid: rag.buecher_fuer_judge(sid, golden_verz) for sid in {z["spiel_id"] for z in zeilen}}
     with open(ziel, "w", encoding="utf-8") as aus:
         for z, q in zip(zeilen, fragen):
-            b = buecher[z["spiel_id"]]
-            r = (judge.bewerte(modus, modell, q, z["antwort"], buecher=b) if b
-                 else judge.bewerte(modus, modell, q, z["antwort"]))
+            if buecher[z["spiel_id"]]:          # Mehr-Buecher-Bestand
+                r = judge.bewerte(modus, modell, q, z["antwort"], buecher=buecher[z["spiel_id"]])
+            else:                               # Altbestand: Aufruf wie vor der Spec
+                r = judge.bewerte(modus, modell, q, z["antwort"])
             aus.write(json.dumps({**z, "typ": q.get("typ"), "urteil": r["urteil"], "begruendung": r.get("rohtext"),
                                   "input_tokens": r.get("input_tokens"),
                                   "output_tokens": r.get("output_tokens"),

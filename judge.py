@@ -281,11 +281,11 @@ def _verweigerung_regex(buch_fundstelle=None):
     fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
                    + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + r")\.?)?")
     if buch_fundstelle:
-        # Mehr-Buecher-Bestand (REQ-MB-6, F9-2): NUR Fundstellen in der exakten Form von rag.fundstelle
-        # fuer ein deklariertes Buch, getrennt mit "; " bzw. " und "
-        fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
-                       + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + "|"
-                       + liste(buch_fundstelle, r"; | und ") + r")\.?)?")
+        # Mehr-Buecher-Bestand (REQ-MB-6, F9-2): dazu NUR Fundstellen in der exakten Form von
+        # rag.fundstelle fuer ein deklariertes Buch, getrennt mit "; " bzw. " und "
+        ende = r")\.?)?"
+        assert fundstellen.endswith(ende)
+        fundstellen = fundstellen[:-len(ende)] + "|" + liste(buch_fundstelle, r"; | und ") + ende
     teile = []
     for satz in VERWEIGERUNGS_SAETZE_FEST:
         n = re.escape(_normalisiere(satz))
@@ -342,7 +342,10 @@ def bewerte(modus, modell, frage, antwort, buecher=None):
     Zuerst die deterministische Vorstufe (kein Modellaufruf, "deterministisch": True).
     buecher: Buecherdeklaration des Bestands (Mehr-Buecher-Bestand, REQ-MB-6), sonst None.
     """
-    fest = deterministisches_urteil(frage, antwort, buecher)
+    if buecher:
+        fest = deterministisches_urteil(frage, antwort, buecher)
+    else:                                  # Altbestand: genau die Vorstufe von vor der Spec
+        fest = deterministisches_urteil(frage, antwort)
     if fest is not None:
         return fest
     prompt = baue_prompt(frage, antwort, modus)
