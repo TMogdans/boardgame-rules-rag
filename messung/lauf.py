@@ -136,13 +136,19 @@ def fuehre_aus(ausgabe, args=("--alle",), data_dir=None, ueberschreiben=False, e
         akt["calls"].append((dt, ent if ent else (None, None)))
         return ans
 
+    def _abgerufen(hits):
+        """Altbestand: Seitenliste wie bisher. Mehr-Buecher-Bestand: {buch_id, seite} je Fundstelle (REQ-MB-6)."""
+        if any("buch_id" in h for h, _ in hits):
+            return [{"buch_id": h["buch_id"], "seite": h["seite"]} for h, _ in hits]
+        return [h["seite"] for h, _ in hits]
+
     def antworte(f, suche):
         akt["calls"] = []
         erg = orig_frage(f, suche)
         calls = akt["calls"]   # ein Eintrag je Antwort; der letzte gehoert der bewerteten Frage
         dt, (opt, probs) = calls[-1]
         zeile = {"spiel_id": akt["spiel"], "frage_id": f["id"], "frage": f["frage"], "antwort": erg["antwort"],
-                 "abgerufen": [h["seite"] for h, _ in erg["hits"]],
+                 "abgerufen": _abgerufen(erg["hits"]),
                  "scores": [round(float(s), 4) for _, s in erg["hits"]],
                  "entscheid": opt, "probs": probs, "t_antwort": dt}
         if f.get("verlauf"):   # Kette: die live beantworteten Zwischenschritte

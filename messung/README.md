@@ -40,7 +40,7 @@ CHUNK_SIZE=400 DROP_TYPES=flavor,meta messung/modelle.sh -o $LAEUFE/modelle -d $
 | Datei | Zweck |
 |---|---|
 | `lauf.py` | `rag.py eval` (Default `--alle`, oder Spiel-IDs) mit Antwortprotokoll `antworten.jsonl` (Antwort, abgerufene Seiten, Scores, Option des Entscheidungsschritts, `t_antwort`) und `meta.json` (Modell, wirksame Stellschrauben, gesetzte Env-Werte, git-Commit von `rag.py` samt Aenderungsflag, Start/Ende). Ein Lauf ist damit ohne die Konsolenausgabe nachvollziehbar. Ueberschreibt nie einen vorhandenen Lauf. |
-| `bewerte.py` | Bewertet `antworten.jsonl` mit `judge.bewerte` und schreibt `urteile.jsonl` daneben. Alle Fragen werden vor dem ersten Modellaufruf aufgeloest; eine unbekannte Frage bricht ab, bevor etwas bezahlt ist. |
+| `bewerte.py` | Bewertet `antworten.jsonl` mit `judge.bewerte` und schreibt `urteile.jsonl` daneben. Alle Fragen werden vor dem ersten Modellaufruf aufgeloest; eine unbekannte Frage bricht ab, bevor etwas bezahlt ist. Mehr-Buecher-Bestaende: die Buecherdeklaration kommt aus `<golden>/<spiel_id>/spiel.json`; bei flacher Golden-Kopie `--daten <Datenverzeichnis>` angeben (sonst Warnung auf stderr, feste Saetze gehen ans Modell). |
 | `vergleiche.py` | Tabelle ueber Settings: Zaehler je Urteil, Treffsicherheit = richtig / (alle - unsicher), stabil richtig/falsch ueber Wiederholungen, Laufzeit typisch (Median) und Maximum, Fragen, die sich gegenueber der Basis in **allen** Laeufen gleichgerichtet aendern. Keine Mittelwerte. |
 | `retrieval.py` | `trefferquote`: Trefferquote je Spiel fuer die Env-Konfiguration. `verzeichnis --aus X.jsonl`: Anteil Vision-/Verzeichnis-artiger Chunks im Top-k (ohne Regelheft-Text in der Ausgabe). |
 | `modelle.sh` | N Modelle x M Laeufe (`-n`, Default 2) ueber `lauf.py`. |

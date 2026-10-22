@@ -1,6 +1,14 @@
-# Ingestion (venv 2, SEPARAT!) -- fuer ingest.py
+# Ingestion (venv 2, SEPARAT!) -- fuer ingest.py und einlesen.py
 #
 # Docling in einer eigenen venv halten. Zusammen mit sentence-transformers in
 # einer Umgebung kollidieren die transformers-Versionen (Dependency-Hell).
-docling
+#
+# docling und pdfplumber GEPINNT: die Vorab-Messung (REQ-MB-23,
+# .specify/specs/mehrbuch-bestand/vorabmessung.json) gilt nur fuer genau diese
+# Versionen; einlesen.py bricht bei einer anderen Version ab. Wer aktualisiert,
+# misst neu und traegt die Version im Messergebnis nach.
+docling==2.131.0
+pdfplumber==0.11.10
+# Lesezeichen und Seitenlabels aus der PDF-Datei (einlesen.py, REQ-MB-24)
+pypdf
 requests

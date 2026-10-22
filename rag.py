@@ -431,6 +431,170 @@ def lies_spiel_chunks(spiel_id, data_dir=None):
     return roh
 
 
+# ---------- Mehr-Buecher-Bestand (Spec mehrbuch-bestand) ----------
+# Ein Bestand (data/<spiel_id>/) kann in spiel.json eine Liste "buecher" deklarieren; jedes Buch
+# liegt in data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl mit eigenem Fingerprint. Ohne
+# "buecher" ist es ein Altbestand: eine knowledge.jsonl, gelesen wie bisher (REQ-MB-3).
+# Titel, Fassungen, Inhaltsarten und Hinweistexte sind Daten -- kein Code-Pfad kennt Namen.
+FILTER_FELDER = ("buch_id", "fassung", "sprache", "inhaltsart")
+PFAD_TRENNER = " › "
+VORSPANN_STANDARD = "Vorspann"
+
+
+def ist_mehrbuch(meta):
+    """Deklariert spiel.json eine Buecherliste? (sonst Altbestand)"""
+    return isinstance(meta.get("buecher"), list)
+
+
+def pruefe_buch_id(buch_id):
+    """buch_id: Slug nach derselben Regel wie spiel_id -- sie wird zum Verzeichnisnamen."""
+    if not isinstance(buch_id, str) or not SPIEL_ID_MUSTER.fullmatch(buch_id):
+        raise KonfigFehler(
+            f"Ungueltige buch_id {buch_id!r}: erlaubt sind Kleinbuchstaben, Ziffern und einzelne "
+            "Bindestriche (gleiche Regel wie spiel_id).")
+    return buch_id
+
+
+def buch_pfad(spiel_id, buch_id, data_dir=None):
+    """data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl"""
+    return os.path.join(spiel_verzeichnis(spiel_id, data_dir), "buecher", pruefe_buch_id(buch_id),
+                        "knowledge.jsonl")
+
+
+def _text_feld(b, feld, pflicht=True):
+    wert = b.get(feld)
+    if wert is None and not pflicht:
+        return None
+    if not isinstance(wert, str) or not wert.strip():
+        raise KonfigFehler(f"Buch {b.get('buch_id')!r}: Feld {feld!r} fehlt oder ist leer.")
+    return wert
+
+
+def pruefe_buecher(meta):
+    """Buecherliste aus spiel.json pruefen (REQ-MB-1, -10); Rueckgabe: die Liste in Deklarationsfolge."""
+    buecher = meta.get("buecher")
+    if not isinstance(buecher, list) or not buecher:
+        raise KonfigFehler(f"{meta.get('spiel_id')}: 'buecher' muss eine nicht leere Liste sein.")
+    ids, quellen = set(), {}
+    for b in buecher:
+        if not isinstance(b, dict):
+            raise KonfigFehler(f"{meta.get('spiel_id')}: Eintrag {b!r} in 'buecher' ist kein Objekt.")
+        bid = pruefe_buch_id(b.get("buch_id"))
+        if bid in ids:
+            raise KonfigFehler(f"{meta.get('spiel_id')}: buch_id {bid!r} ist doppelt deklariert.")
+        ids.add(bid)
+        for feld in ("titel", "fassung", "quelle", "inhaltsart"):
+            _text_feld(b, feld)
+        if b.get("sprache") not in SPRACHEN:
+            raise KonfigFehler(f"Buch {bid!r}: Sprache {b.get('sprache')!r} unbekannt; bekannt: "
+                               f"{', '.join(SPRACHEN)}.")
+        quelle = os.path.normpath(b["quelle"])
+        if quelle in quellen:
+            raise KonfigFehler(f"Buch {bid!r} und {quellen[quelle]!r} nennen dieselbe Quelldatei {b['quelle']!r}.")
+        quellen[quelle] = bid
+        for z in b.get("inhaltsarten") or []:
+            if (not isinstance(z, dict) or not isinstance(z.get("praefix"), list) or not z["praefix"]
+                    or not all(isinstance(t, str) for t in z["praefix"]) or not isinstance(z.get("inhaltsart"), str)):
+                raise KonfigFehler(f"Buch {bid!r}: Inhaltsart-Zuweisung {z!r} braucht 'praefix' (Liste von "
+                                   "Ueberschriften) und 'inhaltsart'.")
+    return buecher
+
+
+def pruefe_fassungsregeln(regeln):
+    """{inhaltsart: {"massgeblich": [fassung, ...], "gekennzeichnet": {fassung: Hinweistext}}} (REQ-MB-5)."""
+    regeln = regeln or {}
+    if not isinstance(regeln, dict):
+        raise KonfigFehler(f"'fassungsregeln' muss ein Objekt sein, nicht {type(regeln).__name__}.")
+    for art, r in regeln.items():
+        if (not isinstance(r, dict) or not isinstance(r.get("massgeblich", []), list)
+                or not isinstance(r.get("gekennzeichnet", {}), dict)
+                or not all(isinstance(t, str) and t.strip() for t in r.get("gekennzeichnet", {}).values())):
+            raise KonfigFehler(f"Fassungsregel fuer {art!r}: 'massgeblich' ist eine Liste von Fassungen, "
+                               "'gekennzeichnet' ein Objekt Fassung -> Hinweistext.")
+    return {art: {"massgeblich": list(r.get("massgeblich", [])), "gekennzeichnet": dict(r.get("gekennzeichnet", {}))}
+            for art, r in regeln.items()}
+
+
+def lies_buecher(spiel_id, data_dir=None):
+    """Buecher eines Bestands. Ein Altbestand gilt als genau ein Buch (aus spiel.json abgeleitet)."""
+    meta = lies_spiel(spiel_id, data_dir)
+    if ist_mehrbuch(meta):
+        return pruefe_buecher(meta)
+    quelle = meta.get("quelle_pdf")
+    return [{"buch_id": spiel_id, "titel": meta["name"],
+             "fassung": os.path.splitext(quelle)[0] if quelle else None,
+             "sprache": meta.get("sprache"), "quelle": quelle, "inhaltsart": None, "altbestand": True}]
+
+
+def buecher_fuer_judge(spiel_id, data_dir=None):
+    """Buecherdeklaration fuer den Judge (REQ-MB-6): wie lies_buecher, je Buch dazu die Hinweistexte
+    gekennzeichneter Fassungen ("hinweise"). None fuer Altbestaende oder ohne spiel.json."""
+    try:
+        verz = spiel_verzeichnis(spiel_id, data_dir)
+    except KonfigFehler:
+        return None
+    if not os.path.exists(os.path.join(verz, "spiel.json")):
+        return None
+    meta = lies_spiel(spiel_id, data_dir)
+    if not ist_mehrbuch(meta):
+        return None
+    regeln = pruefe_fassungsregeln(meta.get("fassungsregeln"))
+    return [dict(b, hinweise=sorted({r["gekennzeichnet"][b["fassung"]] for r in regeln.values()
+                                     if b["fassung"] in r["gekennzeichnet"]}))
+            for b in pruefe_buecher(meta)]
+
+
+def inhaltsart_fuer(buch, pfad):
+    """Inhaltsart eines Abschnittspfads: laengstes passendes Pfad-Praefix, sonst der Standard des Buchs."""
+    beste, laenge = buch["inhaltsart"], -1
+    for z in buch.get("inhaltsarten") or []:
+        p = [titelnorm(t) for t in z["praefix"]]          # Praefixe normalisiert wie die Pfade (REQ-MB-33)
+        if len(p) > laenge and list(pfad[:len(p)]) == p:
+            beste, laenge = z["inhaltsart"], len(p)
+    return beste
+
+
+def titelnorm(titel):
+    """REQ-MB-33: NFC, jede Leerraumfolge (CR, LF, Tab, U+00A0 ...) -> ein Leerzeichen, ohne Rand-Leerraum."""
+    return " ".join(unicodedata.normalize("NFC", titel or "").split())
+
+
+def titelvorsatz(abschnittspfad):
+    """Vorsatz, mit dem jeder Haeppchentext beginnt (REQ-MB-15) -- eine Zeile, kein Leerabsatz."""
+    return PFAD_TRENNER.join(abschnittspfad) + "\n" if abschnittspfad else ""
+
+
+def wissens_dateien(spiel_id, data_dir=None):
+    """Dateien, aus denen der Index eines Bestands entsteht (Altbestand: die eine knowledge.jsonl)."""
+    meta = lies_spiel(spiel_id, data_dir)
+    if not ist_mehrbuch(meta):
+        return [knowledge_pfad(spiel_id, data_dir)]
+    return [buch_pfad(spiel_id, b["buch_id"], data_dir) for b in pruefe_buecher(meta)]
+
+
+def _deklaration_fp(meta):
+    """Was aus spiel.json in den Index eines Mehr-Buecher-Bestands wirkt."""
+    return json.dumps({"buecher": meta.get("buecher"), "fassungsregeln": meta.get("fassungsregeln")},
+                      sort_keys=True, ensure_ascii=False)
+
+
+def bestand_fingerprint(spiel_id, data_dir=None, konfig=None):
+    """Fingerprint des ganzen Bestands, wie ihn staende speichert. Altbestand: wie bisher die eine
+    Datei; Mehr-Buecher-Bestand: Deklaration + Fingerprint jeder Buchdatei (REQ-MB-26)."""
+    import hashlib
+    konfig = konfig or index_konfig()
+    meta = lies_spiel(spiel_id, data_dir)
+    if not ist_mehrbuch(meta):
+        return fingerprint(knowledge_pfad(spiel_id, data_dir), konfig)
+    h = hashlib.sha256((konfig + "\0" + _deklaration_fp(meta)).encode())
+    for b in pruefe_buecher(meta):
+        pfad = buch_pfad(spiel_id, b["buch_id"], data_dir)
+        if not os.path.exists(pfad):
+            raise KonfigFehler(f"{pfad} fehlt -- Buch {b['buch_id']!r} ist deklariert, aber nicht eingelesen.")
+        h.update(f"\0{b['buch_id']}\0{fingerprint(pfad, konfig)}".encode())
+    return h.hexdigest()
+
+
 # ---------- Spielzuordnung: Name/Alias/Hoerfehler -> Spiel (Pipe und CLI) ----------
 def normalisiere(name):
     """Spielname fuer den Vergleich: klein, ohne Satzzeichen und Leerraum.
@@ -882,6 +1046,37 @@ CREATE TABLE IF NOT EXISTS chunks (
 # 5 x 1000 schon 407 ms pro Frage; bei 47k Zeilen und einem 2000er-Heft Sekunden.
 _FTS_SQL = ("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
             "text, tag, tokenize='unicode61 remove_diacritics 2')")
+# Mehr-Buecher-Bestand (REQ-MB-2/-3): NEUE Spalten statt eines neuen Schemas. Ein Index vom Stand
+# davor bleibt gueltig (INDEX_SCHEMA und Konfig-String unveraendert, nichts wird neu eingebettet);
+# bei Altbestaenden bleiben die Spalten NULL. seite bleibt JSON (gedruckte Seite oder null).
+_NEUE_SPALTEN = {
+    "chunks": (("buch_id", "TEXT"), ("fassung", "TEXT"), ("sprache", "TEXT"), ("abschnittspfad", "TEXT"),
+               ("inhaltsart", "TEXT"), ("seite_pdf", "INTEGER"), ("seiten", "TEXT"), ("buch_pos", "INTEGER")),
+    "spiele": (("buecher", "TEXT"), ("fassungsregeln", "TEXT")),
+}
+# Ein Stand je Buch: Ersetzen/Hinzufuegen bettet nur das betroffene Buch ein (REQ-MB-8/-9).
+_BUCH_STAENDE_SQL = """
+CREATE TABLE IF NOT EXISTS buch_staende (
+    spiel_id    TEXT NOT NULL,
+    buch_id     TEXT NOT NULL,
+    konfig      TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    deklaration TEXT NOT NULL,
+    chunks      INTEGER NOT NULL,
+    dim         INTEGER NOT NULL,
+    PRIMARY KEY (spiel_id, buch_id, konfig)
+);
+"""
+
+
+def _migriere_schema(con):
+    """Fehlende Spalten/Tabellen ergaenzen -- Altwerte bleiben NULL, keine Zeile wird umgeschrieben."""
+    for tabelle, spalten in _NEUE_SPALTEN.items():
+        da = {r[1] for r in con.execute(f"PRAGMA table_info({tabelle})")}
+        for name, typ in spalten:
+            if name not in da:
+                con.execute(f"ALTER TABLE {tabelle} ADD COLUMN {name} {typ}")
+    con.executescript(_BUCH_STAENDE_SQL)
 
 
 def fts_tag(spiel_id, konfig):
@@ -929,6 +1124,7 @@ def oeffne_index(pfad=None, schreibend=False):
         os.makedirs(os.path.dirname(os.path.abspath(pfad)), exist_ok=True)
         con = sqlite3.connect(pruefe_schreibziel(pfad), timeout=30)
         con.executescript(_SCHEMA_SQL)
+        _migriere_schema(con)
         if fts5_verfuegbar(con):
             con.execute(_FTS_SQL)
         con.commit()
@@ -984,21 +1180,28 @@ def embed_gebatcht(texte, batch=None):
     return np.concatenate(teile) if teile else np.zeros((0, 0), dtype=np.float32)
 
 
-def aktualisiere_spiel(con, spiel_id, data_dir=None):
+_SPIELE_EINFUEGEN = ("INSERT OR REPLACE INTO spiele (spiel_id, name, aliase, sprache, quelle_pdf, buecher, "
+                     "fassungsregeln) VALUES (?,?,?,?,?,?,?)")
+
+
+def aktualisiere_spiel(con, spiel_id, data_dir=None, meldungen=None):
     """Stand eines Spiels fuer die aktuelle Konfiguration herstellen.
 
     Neu eingebettet wird nur, wenn sich der Fingerprint geaendert hat. Die
     Metadaten aus spiel.json (Name, Aliase) werden immer uebernommen -- das
     kostet nichts und macht einen neuen Alias ohne Neu-Embedding wirksam.
-    Rueckgabe: ("aktuell" | "neu", Anzahl Chunks).
+    Rueckgabe: ("aktuell" | "neu", Anzahl Chunks). meldungen (Liste): je Buch
+    eines Mehr-Buecher-Bestands eine Zeile mit buch_id und Haeppchenzahl (REQ-MB-14).
     """
     meta = lies_spiel(spiel_id, data_dir)
+    if ist_mehrbuch(meta):
+        return _aktualisiere_buecher(con, meta, data_dir, meldungen)
     roh = lies_spiel_chunks(spiel_id, data_dir)
     konfig = index_konfig()
     fp = fingerprint(knowledge_pfad(spiel_id, data_dir), konfig)
-    con.execute("INSERT OR REPLACE INTO spiele VALUES (?,?,?,?,?)",
+    con.execute(_SPIELE_EINFUEGEN,
                 (spiel_id, meta["name"], json.dumps(meta.get("aliase") or [], ensure_ascii=False),
-                 meta.get("sprache"), meta.get("quelle_pdf")))
+                 meta.get("sprache"), meta.get("quelle_pdf"), None, None))
     alt = con.execute("SELECT fingerprint, chunks FROM staende WHERE spiel_id=? AND konfig=?",
                       (spiel_id, konfig)).fetchone()
     if alt and alt[0] == fp:
@@ -1017,6 +1220,7 @@ def aktualisiere_spiel(con, spiel_id, data_dir=None):
             con.execute("DELETE FROM chunks_fts WHERE rowid IN "
                         "(SELECT id FROM chunks WHERE spiel_id=? AND konfig=?)", (spiel_id, konfig))
         con.execute("DELETE FROM chunks WHERE spiel_id=? AND konfig=?", (spiel_id, konfig))
+        con.execute("DELETE FROM buch_staende WHERE spiel_id=? AND konfig=?", (spiel_id, konfig))
         for pos, ((seite, typ, text), e) in enumerate(zip(stuecke, embs)):
             cur = con.execute("INSERT INTO chunks (spiel_id, konfig, pos, seite, typ, text, emb) "
                               "VALUES (?,?,?,?,?,?,?)",
@@ -1029,13 +1233,169 @@ def aktualisiere_spiel(con, spiel_id, data_dir=None):
     return "neu", len(stuecke)
 
 
+def buch_stuecke(rohchunks, buch, size=None, overlap=None):
+    """Haeppchen eines Buchs: [{seite, seite_pdf, seiten, typ, text, abschnittspfad, inhaltsart}].
+
+    Jeder Eintrag (= ein Abschnitt) wird mit zerteile() geschnitten wie heute; CHUNK_SIZE gilt fuer den
+    Abschnittstext OHNE Vorsatz, der Vorsatz (Abschnittspfad) steht vor jedem Stueck (REQ-MB-14/-15).
+    "seitenwechsel" [[Zeichenoffset, gedruckte Seite, physische Seite], ...] ergibt die Seiten, ueber
+    die ein Stueck laeuft (REQ-MB-16); ohne die Angabe traegt jedes Stueck die Seite des Eintrags.
+    """
+    size, overlap = pruefe_chunk_konfiguration(size, overlap)
+    out = []
+    for c in rohchunks:
+        pfad = list(c.get("abschnittspfad") or [])
+        vorsatz = titelvorsatz(pfad)
+        art = inhaltsart_fuer(buch, pfad)
+        seite = chunk_seite(c)
+        wechsel = c.get("seitenwechsel") or []
+        text = c["text"]
+        for start, stueck in zip(range(0, len(text), size - overlap), zerteile(text, size, overlap)):
+            if wechsel:
+                ende = start + len(stueck)
+                teil = [w for i, w in enumerate(wechsel)
+                        if w[0] < ende and (i + 1 == len(wechsel) or wechsel[i + 1][0] > start)]
+                teil = teil or [max((w for w in wechsel if w[0] <= start), key=lambda w: w[0], default=wechsel[0])]
+                s, s_pdf = teil[0][1], teil[0][2]
+                seiten = list(dict.fromkeys(w[1] for w in teil if w[1] is not None))
+            else:
+                s, s_pdf = seite, c.get("seite_pdf")
+                seiten = [] if seite is None else [seite]
+            out.append({"seite": s, "seite_pdf": s_pdf, "seiten": seiten, "typ": c.get("typ"),
+                        "text": vorsatz + stueck, "abschnittspfad": pfad, "inhaltsart": art})
+    return out
+
+
+def _buch_deklaration(b):
+    """Was aus der Buchdeklaration in den Zeilen steht (aendert sich nur das, wird nicht neu eingebettet)."""
+    return json.dumps({k: b.get(k) for k in ("fassung", "sprache", "inhaltsart", "inhaltsarten")},
+                      sort_keys=True, ensure_ascii=False)
+
+
+def _aktualisiere_buecher(con, meta, data_dir, meldungen):
+    """Mehr-Buecher-Bestand: je Buch eigener Fingerprint; nur geaenderte Buecher werden eingebettet.
+
+    Erst alles pruefen und einbetten, dann in einer Transaktion schreiben -- bricht etwas ab
+    (kaputte Deklaration, fremde buch_id, Ollama), bleibt der alte Stand (REQ-MB-10).
+    """
+    spiel_id = meta["spiel_id"]
+    buecher = pruefe_buecher(meta)
+    regeln = pruefe_fassungsregeln(meta.get("fassungsregeln"))
+    konfig = index_konfig()
+    daten = []
+    for b in buecher:
+        pfad = buch_pfad(spiel_id, b["buch_id"], data_dir)
+        if not os.path.exists(pfad):
+            raise KonfigFehler(f"{pfad} fehlt -- Buch {b['buch_id']!r} ist deklariert, aber nicht eingelesen.")
+        roh = lies_jsonl(pfad)
+        if not roh:
+            raise KonfigFehler(f"{pfad} ist leer.")
+        falsch = [c.get("id", "?") for c in roh if c.get("spiel_id") != spiel_id or c.get("buch_id") != b["buch_id"]]
+        if falsch:
+            raise KonfigFehler(
+                f"{pfad}: {len(falsch)} Eintrag/Eintraege mit fremder oder nicht deklarierter spiel_id/buch_id "
+                f"(z.B. id {falsch[0]!r}).")
+        daten.append((b, roh, fingerprint(pfad, konfig), _buch_deklaration(b)))
+    gesamt_fp = bestand_fingerprint(spiel_id, data_dir, konfig)
+    anzeige = [{k: b.get(k) for k in ("buch_id", "titel", "fassung", "sprache")} for b in buecher]
+    con.execute(_SPIELE_EINFUEGEN,
+                (spiel_id, meta["name"], json.dumps(meta.get("aliase") or [], ensure_ascii=False),
+                 meta.get("sprache"), meta.get("quelle_pdf"), json.dumps(anzeige, ensure_ascii=False),
+                 json.dumps(regeln, ensure_ascii=False)))
+    alt = con.execute("SELECT fingerprint, chunks FROM staende WHERE spiel_id=? AND konfig=?",
+                      (spiel_id, konfig)).fetchone()
+    vorher = {r[0]: r[1:] for r in con.execute(
+        "SELECT buch_id, fingerprint, deklaration, chunks, dim FROM buch_staende WHERE spiel_id=? AND konfig=?",
+        (spiel_id, konfig))}
+    if alt and alt[0] == gesamt_fp:
+        con.commit()
+        for b, *_ in daten:
+            if meldungen is not None:
+                meldungen.append(f"    {b['buch_id']}: aktuell ({vorher.get(b['buch_id'], (0, 0, 0))[2]} Haeppchen)")
+        return "aktuell", alt[1]
+    neu = {}
+    for b, roh, fp, dekl in daten:
+        st = vorher.get(b["buch_id"])
+        if st and st[0] == fp:
+            continue
+        stuecke = buch_stuecke(roh, b)
+        if not stuecke:
+            raise KonfigFehler(f"{spiel_id}/{b['buch_id']}: Buchdatei ergibt keinen einzigen Haeppchentext.")
+        embs = l2norm(embed_gebatcht([s["text"] for s in stuecke])).astype("<f4")
+        if len(embs) != len(stuecke):
+            raise RuntimeError(f"{spiel_id}/{b['buch_id']}: {len(stuecke)} Texte, aber {len(embs)} Embeddings.")
+        neu[b["buch_id"]] = (stuecke, embs)
+    fts = _hat_fts(con)
+    tag = fts_tag(spiel_id, konfig)
+    rang = {b["buch_id"]: i for i, b in enumerate(buecher)}
+
+    def loesche(bedingung, *werte):
+        if fts:
+            con.execute(f"DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE spiel_id=? AND "
+                        f"konfig=? AND {bedingung})", (spiel_id, konfig) + werte)
+        con.execute(f"DELETE FROM chunks WHERE spiel_id=? AND konfig=? AND {bedingung}", (spiel_id, konfig) + werte)
+
+    zeilen_meldung = []
+    with con:
+        loesche("buch_id IS NULL")                                    # Rest eines frueheren Altbestands
+        for bid in sorted(set(vorher) - set(rang)):                    # nicht mehr deklarierte Buecher
+            loesche("buch_id=?", bid)
+            con.execute("DELETE FROM buch_staende WHERE spiel_id=? AND buch_id=? AND konfig=?", (spiel_id, bid, konfig))
+        frei = 1 + (con.execute("SELECT max(pos) FROM chunks WHERE spiel_id=? AND konfig=?",
+                                (spiel_id, konfig)).fetchone()[0] or 0)
+        for b, roh, fp, dekl in daten:
+            bid = b["buch_id"]
+            if bid in neu:
+                stuecke, embs = neu[bid]
+                loesche("buch_id=?", bid)
+                for i, (s, e) in enumerate(zip(stuecke, embs)):
+                    cur = con.execute(
+                        "INSERT INTO chunks (spiel_id, konfig, pos, seite, typ, text, emb, buch_id, fassung, sprache, "
+                        "abschnittspfad, inhaltsart, seite_pdf, seiten, buch_pos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (spiel_id, konfig, frei, json.dumps(s["seite"]), s["typ"], s["text"], e.tobytes(), bid,
+                         b["fassung"], b["sprache"], json.dumps(s["abschnittspfad"], ensure_ascii=False),
+                         s["inhaltsart"], s["seite_pdf"], json.dumps(s["seiten"]), i))
+                    frei += 1
+                    if fts:
+                        con.execute("INSERT INTO chunks_fts (rowid, text, tag) VALUES (?,?,?)",
+                                    (cur.lastrowid, s["text"], tag))
+                anzahl, dim, status = len(stuecke), int(embs.shape[1]), "neu"
+            else:
+                _, alte_dekl, anzahl, dim = vorher[bid]
+                status = "aktuell"
+                if alte_dekl != dekl:                                  # nur Deklaration: Zeilen nachziehen
+                    status = "aktualisiert"
+                    zeilen = con.execute("SELECT id, abschnittspfad FROM chunks WHERE spiel_id=? AND konfig=? AND "
+                                         "buch_id=?", (spiel_id, konfig, bid)).fetchall()
+                    con.executemany("UPDATE chunks SET fassung=?, sprache=?, inhaltsart=? WHERE id=?",
+                                    [(b["fassung"], b["sprache"], inhaltsart_fuer(b, json.loads(p)), i)
+                                     for i, p in zeilen])
+            con.execute("INSERT OR REPLACE INTO buch_staende VALUES (?,?,?,?,?,?,?)",
+                        (spiel_id, bid, konfig, fp, dekl, anzahl, dim))
+            zeilen_meldung.append(f"    {bid}: {status} ({anzahl} Haeppchen)")
+        # Reihenfolge wie bei einem frischen Bau: Buecher in Deklarationsfolge, darin Haeppchenfolge
+        folge = sorted(con.execute("SELECT id, buch_id, buch_pos FROM chunks WHERE spiel_id=? AND konfig=?",
+                                   (spiel_id, konfig)).fetchall(), key=lambda r: (rang[r[1]], r[2]))
+        con.execute("UPDATE chunks SET pos = -1 - pos WHERE spiel_id=? AND konfig=?", (spiel_id, konfig))
+        con.executemany("UPDATE chunks SET pos=? WHERE id=?", [(i, r[0]) for i, r in enumerate(folge)])
+        dims = {r[0] for r in con.execute("SELECT dim FROM buch_staende WHERE spiel_id=? AND konfig=?",
+                                          (spiel_id, konfig))}
+        if len(dims) != 1:
+            raise KonfigFehler(f"{spiel_id}: Buecher mit verschiedener Embedding-Dimension {sorted(dims)}.")
+        con.execute("INSERT OR REPLACE INTO staende VALUES (?,?,?,?,?)",
+                    (spiel_id, konfig, gesamt_fp, len(folge), dims.pop()))
+    if meldungen is not None:
+        meldungen.extend(zeilen_meldung)
+    return "neu", len(folge)
+
+
 def entferne_spiel(con, spiel_id):
     """Spiel samt allen Staenden aus dem Index (Verzeichnis unter data/ ist weg)."""
     with con:
         if _hat_fts(con):
             con.execute("DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE spiel_id=?)",
                         (spiel_id,))
-        for tabelle in ("chunks", "staende", "spiele"):
+        for tabelle in ("chunks", "staende", "spiele", "buch_staende"):
             con.execute(f"DELETE FROM {tabelle} WHERE spiel_id=?", (spiel_id,))
 
 
@@ -1057,8 +1417,9 @@ def aktualisiere_index(spiel_ids=None, pfad=None, data_dir=None, ausgabe=print):
     try:
         ergebnis, fehler = {}, {}
         for sid in spiel_ids:
+            buchzeilen = []
             try:
-                ergebnis[sid] = aktualisiere_spiel(con, sid, data_dir)
+                ergebnis[sid] = aktualisiere_spiel(con, sid, data_dir, meldungen=buchzeilen)
             except Exception as e:
                 con.rollback()
                 if len(spiel_ids) == 1 and not alle:
@@ -1068,6 +1429,8 @@ def aktualisiere_index(spiel_ids=None, pfad=None, data_dir=None, ausgabe=print):
                 ausgabe(f"  {sid}: FEHLER {type(e).__name__}: {e}")
                 continue
             ausgabe(f"  {sid}: {ergebnis[sid][0]} ({ergebnis[sid][1]} Chunks)")
+            for zeile in buchzeilen:
+                ausgabe(zeile)
         if alle:
             weg = [r[0] for r in con.execute("SELECT spiel_id FROM spiele")]
             for sid in sorted(set(weg) - set(spiel_ids)):
@@ -1104,6 +1467,9 @@ def lade_spiel(con, spiel_id, drop=frozenset(), konfig=None):
         raise KonfigFehler(
             f"{spiel_id!r} ist fuer diese Konfiguration nicht im Index ({konfig}). "
             f"`python rag.py index {spiel_id}` mit denselben EMBED_MODEL/CHUNK_SIZE/CHUNK_OVERLAP laufen lassen.")
+    info = _bestand_im_index(con, spiel_id)
+    if info is not None:
+        return _lade_buecher(con, spiel_id, drop, konfig, stand[0], *info)
     # spiel_id kommt aus der ZEILE, nicht aus dem Aufruf: sonst truege ein Chunk
     # eines fremden Spiels, der durch einen kaputten Filter rutscht, das richtige Etikett.
     zeilen = con.execute("SELECT id, spiel_id, seite, typ, text, emb FROM chunks "
@@ -1113,6 +1479,60 @@ def lade_spiel(con, spiel_id, drop=frozenset(), konfig=None):
     chunks = [{"doc": "knowledge", "seite": json.loads(z[2]), "text": z[4],
                "spiel_id": z[1], "chunk_id": z[0]} for z in zeilen]
     embs = np.frombuffer(b"".join(z[5] for z in zeilen), dtype="<f4").reshape(len(zeilen), stand[0])
+    return chunks, embs.astype(np.float32, copy=False)
+
+
+def _bestand_im_index(con, spiel_id):
+    """(Buecher, Fassungsregeln) eines Mehr-Buecher-Bestands aus der Tabelle spiele, sonst None.
+
+    Liest auch einen Index vom Stand vor dieser Spec (ohne die neuen Spalten, read-only)."""
+    cur = con.execute("SELECT * FROM spiele WHERE spiel_id=?", (spiel_id,))
+    zeile = cur.fetchone()
+    if zeile is None:
+        return None
+    werte = dict(zip((d[0] for d in cur.description), zeile))
+    if werte.get("buecher") is None:
+        return None
+    return json.loads(werte["buecher"]), json.loads(werte.get("fassungsregeln") or "{}")
+
+
+def _lade_buecher(con, spiel_id, drop, konfig, dim, buecher, regeln):
+    """lade_spiel fuer einen Mehr-Buecher-Bestand.
+
+    Alle Felder kommen aus der ZEILE (REQ-MB-2), Titel und Fassungsregeln aus dem Index (Tabelle
+    spiele, beim Indexbau aus spiel.json uebernommen). Die Fassungsregel wirkt hier, vor jedem
+    Ranking: Haeppchen einer ausgeschlossenen Fassung kommen gar nicht erst in die Kandidaten
+    (REQ-MB-5); gekennzeichnete tragen ihren Hinweistext (REQ-MB-21).
+    """
+    zeilen = con.execute("SELECT id, spiel_id, seite, typ, text, emb, buch_id, fassung, sprache, abschnittspfad, "
+                         "inhaltsart, seite_pdf, seiten FROM chunks WHERE spiel_id=? AND konfig=? ORDER BY pos",
+                         (spiel_id, konfig)).fetchall()
+    # DROP_TYPES gilt nur fuer Altbestaende (REQ-MB-30): hier filtert inhaltsart, typ ist kein Ballast-Filter
+    titel = {b["buch_id"]: b.get("titel") or b["buch_id"] for b in buecher}
+    json_cache = {}
+
+    def lies(s):
+        # Pfade und Seitenlisten wiederholen sich stark -- einmal parsen (Laufzeit REQ-MB-19); jeder Chunk
+        # bekommt davon eine eigene Kopie, geteilte Listen wuerden Aenderungen weiterreichen (REQ-MB-2)
+        w = json_cache.get(s)
+        if w is None:
+            w = json_cache[s] = json.loads(s)
+        return w
+
+    chunks, behalten = [], []
+    for z in zeilen:
+        hinweis = ""
+        regel = regeln.get(z[10])
+        if regel is not None and z[7] not in regel["massgeblich"]:
+            if z[7] not in regel["gekennzeichnet"]:
+                continue                       # ausgeschlossene Fassung: nie Kandidat
+            hinweis = regel["gekennzeichnet"][z[7]]
+        behalten.append(z[5])
+        chunks.append({"doc": z[6], "seite": lies(z[2]), "text": z[4], "spiel_id": z[1], "chunk_id": z[0],
+                       "buch_id": z[6], "titel": titel.get(z[6], z[6]), "fassung": z[7], "sprache": z[8],
+                       "abschnittspfad": list(lies(z[9])), "inhaltsart": z[10], "seite_pdf": z[11],
+                       "seiten": list(lies(z[12])), "hinweis": hinweis})
+    embs = np.frombuffer(b"".join(behalten), dtype="<f4").reshape(len(behalten), dim)
     return chunks, embs.astype(np.float32, copy=False)
 
 
@@ -1207,7 +1627,26 @@ def rangfolge(sims):
     return np.argsort(-sims, kind="stable")
 
 
-def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
+def filter_auswahl(chunks, filter):
+    """Positionen der Chunks, die zum Filter {buch_id|fassung|sprache|inhaltsart: Wert} passen.
+
+    Ein Wert, den der Bestand nicht hat, ist ein Fehler, keine stille leere Suche (REQ-MB-4)."""
+    unbekannt = sorted(set(filter) - set(FILTER_FELDER))
+    if unbekannt:
+        raise KonfigFehler(f"Filter auf {unbekannt} nicht moeglich; erlaubt: {', '.join(FILTER_FELDER)}.")
+    for feld, wert in filter.items():
+        vorhanden = {c.get(feld) for c in chunks}
+        if wert not in vorhanden:
+            raise KonfigFehler(f"Filter {feld}={wert!r}: diesen Wert hat der Bestand nicht "
+                               f"(vorhanden: {', '.join(sorted(str(v) for v in vorhanden))}).")
+    paare = list(filter.items())
+    auswahl = [i for i, c in enumerate(chunks) if all(c.get(f) == w for f, w in paare)]
+    if not auswahl:
+        raise KonfigFehler(f"Filter {filter} passt auf kein Haeppchen des Bestands.")
+    return np.asarray(auswahl, dtype=np.intp)
+
+
+def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None, filter=None):
     """Top-k (chunk, score) zur Frage.
 
     Ohne spiel_id der alte In-Memory-Weg ueber (chunks, embs). Mit spiel_id kommen
@@ -1215,6 +1654,8 @@ def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
     Ranking, weil lade_spiel nur dessen Zeilen liefert. chunks/embs duerfen dann
     vorab mit lade_spiel geladen sein (eval: einmal pro Spiel statt pro Frage).
     Die Rangfolge-Rechnung ist fuer beide Wege dieselbe Zeile Code.
+    filter (Mehr-Buecher-Bestand): {buch_id|fassung|sprache|inhaltsart: Wert}; auch er wirkt vor
+    dem Ranking -- Vektor, BM25 und Reranker sehen nur passende Haeppchen (REQ-MB-4).
     """
     con = None
     if spiel_id is not None:
@@ -1230,11 +1671,16 @@ def retrieve(query, chunks=None, embs=None, k=TOP_K, spiel_id=None, index=None):
     if embs is None or getattr(embs, "ndim", 0) != 2 or len(embs) == 0 or len(embs) != len(chunks):
         raise KonfigFehler(f"Keine durchsuchbaren Chunks: {len(chunks or [])} Chunks, Embeddings "
                            f"{getattr(embs, 'shape', None)}. Quelle leer oder nach DROP_TYPES leer?")
+    auswahl = filter_auswahl(chunks, filter) if filter else None
     q = l2norm(embed([query]))[0]
     if embs.shape[1] != q.shape[0]:
         raise KonfigFehler(f"Embedding-Dimension passt nicht: Chunks {embs.shape[1]}, Frage {q.shape[0]} "
                            f"({EMBED_MODEL}). Index mit anderem Modell gebaut?")
     sims = embs @ q
+    if auswahl is not None:
+        # Ab hier gibt es fuer Vektor, BM25 und Reranker nur noch die passenden Haeppchen
+        chunks = [chunks[i] for i in auswahl]
+        sims = sims[auswahl]
     if HYBRID:
         vektor = [int(i) for i in rangfolge(sims)[:CANDIDATES]]
         fusion = rrf([vektor, bm25_rangfolge(con, query, chunks, CANDIDATES)])
@@ -1279,9 +1725,50 @@ def setze_verlauf_ein(nachrichten, verlauf):
     return nachrichten[:1] + verlauf + nachrichten[1:]
 
 
+def ist_buecher_treffer(hits):
+    """Stammen die Treffer aus einem Mehr-Buecher-Bestand? (Altbestand-Chunks haben keine buch_id.)"""
+    return any("buch_id" in h for h, _ in hits)
+
+
+def fassungs_hinweis(chunk):
+    """Hinweistext einer gekennzeichneten Fassung (REQ-MB-21), sonst "". Der Text ist Datum
+    (fassungsregeln in spiel.json), lade_spiel haengt ihn an."""
+    return chunk.get("hinweis") or ""
+
+
+def fundstelle(chunk, sprache=False):
+    """Fundstelle eines Haeppchens aus einem Mehr-Buecher-Bestand: Buch, Fassung, gedruckte Seite
+    (REQ-MB-6, -22), dazu der Hinweis einer gekennzeichneten Fassung (REQ-MB-21). Dieselbe
+    Funktion fuer Quellenkopf, CLI, Pipe-Fusszeile und Entscheidungsschritt.
+    Ohne arabische Seitenzahl: "PDF-S. n" (physische Seite). sprache=True: ohne Abkuerzung."""
+    if chunk.get("seite") is None:
+        ort = f"{'PDF-Seite' if sprache else 'PDF-S.'} {chunk.get('seite_pdf')}"
+    else:
+        ort = f"{'Seite' if sprache else 'S.'} {chunk['seite']}"
+    text = f"{chunk.get('titel') or chunk.get('buch_id')} ({chunk.get('fassung')}), {ort}"
+    hinweis = fassungs_hinweis(chunk)
+    return f"{text} ({hinweis})" if hinweis else text
+
+
+def quellenkopf(h):
+    """Kopf eines Quellenblocks. Altbestand: "doc, Seite N" wie vor dem Mehr-Buecher-Bestand."""
+    if "buch_id" in h:
+        return fundstelle(h)
+    return f"{h['doc']}, Seite {h['seite']}"
+
+
 def baue_kontext(hits):
-    """Quellenbloecke mit Kopf "[doc, Seite N]" -- fuer Antwort UND Entscheidungsschritt dieselben."""
-    return "\n\n".join(f"[{h['doc']}, Seite {h['seite']}]\n{h['text']}" for h, _ in hits)
+    """Quellenbloecke mit Kopf "[doc, Seite N]" -- fuer Antwort UND Entscheidungsschritt dieselben.
+    Mehr-Buecher-Bestand: Kopf "[Buch (Fassung), S. N]" aus fundstelle()."""
+    return "\n\n".join(f"[{quellenkopf(h)}]\n{h['text']}" for h, _ in hits)
+
+
+def abgerufene_seiten(hits):
+    """Was die Wertung als abgerufen zaehlt. Altbestand: die Seiten der Treffer. Mehr-Buecher-Bestand:
+    {"buch_id", "seite"} fuer JEDE gedruckte Seite eines Treffers (REQ-MB-7, -16)."""
+    if not ist_buecher_treffer(hits):
+        return [h["seite"] for h, _ in hits]
+    return [{"buch_id": h["buch_id"], "seite": s} for h, _ in hits for s in h.get("seiten") or []]
 
 
 # (option, probs) des letzten answer()-Aufrufs mit ENTSCHEIDUNG=1, sonst None. Ueber answer()
@@ -1412,8 +1899,18 @@ def _seiten_liste(seiten, sprache):
     return teile[0] if len(teile) == 1 else ", ".join(teile[:-1]) + " und " + teile[-1]
 
 
+def _fundstellen_liste(hits, sprache):
+    """Mehr-Buecher-Bestand: Fundstellen (Buch, Fassung, Seite) in Rangfolge, ohne Duplikate."""
+    teile = list(dict.fromkeys(fundstelle(h, sprache=sprache) for h, _ in hits))
+    if not sprache or len(teile) == 1:
+        return "; ".join(teile)
+    return "; ".join(teile[:-1]) + " und " + teile[-1]
+
+
 def entscheid_text_nichts(hits, sprache=False):
     """Fester Text bei C -- statt einer LLM-Antwort. sprache=True: ohne "S."-Abkuerzung."""
+    if ist_buecher_treffer(hits):
+        return f"{ENTSCHEID_NICHTS} {ENTSCHEID_NAECHSTE} {_fundstellen_liste(hits, sprache)}."
     seiten = entscheid_seiten(hits)
     if not seiten:
         return ENTSCHEID_NICHTS
@@ -1422,6 +1919,9 @@ def entscheid_text_nichts(hits, sprache=False):
 
 def entscheid_hinweis(hits, sprache=False):
     """Anhang bei B, hinter die normale Antwort. sprache=True: ohne "--" und ohne "S."."""
+    if ist_buecher_treffer(hits):
+        trenner = ", pruef" if sprache else " -- pruef"
+        return f"\n\n{ENTSCHEID_TEILWEISE}{trenner} {_fundstellen_liste(hits, sprache)}."
     seiten = entscheid_seiten(hits)
     if not seiten:
         return f"\n\n{ENTSCHEID_TEILWEISE}."
@@ -1781,6 +2281,9 @@ def cmd_ask(query, spiel=None):
         finally:
             con.close()
     print(answer(query, hits))
+    if ist_buecher_treffer(hits):
+        print("\nAbgerufen: " + "; ".join(f"{fundstelle(h)} ({s:.3f})" for h, s in hits))
+        return
     print("\nAbgerufen:", [(h["doc"], f"S.{h['seite']}", round(s, 3)) for h, s in hits])
 
 
@@ -1898,7 +2401,29 @@ def lade_golden_set(spiel_id, data_dir=None):
         gs = json.load(f)
     if gs.get("spiel_id") != spiel_id:
         raise KonfigFehler(f"{pfad}: Feld 'spiel_id' ist {gs.get('spiel_id')!r}, erwartet {spiel_id!r}.")
+    if os.path.exists(os.path.join(spiel_verzeichnis(spiel_id, data_dir), "spiel.json")):
+        meta = lies_spiel(spiel_id, data_dir)
+        if ist_mehrbuch(meta):
+            pruefe_golden_buecher(gs, meta, pfad)
     return gs
+
+
+def pruefe_golden_buecher(gs, meta, pfad):
+    """Golden Set eines Mehr-Buecher-Bestands: jede erwartete Fundstelle ist {"buch_id", "seite"} mit
+    deklariertem Buch -- eine Seite ohne Buch wuerde gegen ein beliebiges Buch gewertet (REQ-MB-7)."""
+    ids = {b["buch_id"] for b in pruefe_buecher(meta)}
+    for f in gs.get("fragen") or []:
+        for s in f.get("seiten") or []:
+            fremd = sorted(set(s) - {"buch_id", "seite"}) if isinstance(s, dict) else []
+            if fremd:
+                raise KonfigFehler(
+                    f"{pfad}: Frage {f.get('id', '?')}: Fundstelle {s!r} hat unbekannte Schluessel {fremd} -- erlaubt "
+                    "sind nur buch_id und seite (ein Zusatzschluessel wuerde nie treffen).")
+            if not (isinstance(s, dict) and s.get("buch_id") in ids and isinstance(s.get("seite"), int)
+                    and not isinstance(s.get("seite"), bool)):
+                raise KonfigFehler(
+                    f"{pfad}: Frage {f.get('id', '?')} nennt die Fundstelle {s!r}. In einem Mehr-Buecher-Bestand "
+                    "ist jede erwartete Fundstelle {\"buch_id\": <deklariertes Buch>, \"seite\": <gedruckte Seite>}.")
 
 
 def cmd_eval_spiel(spiel_id, data_dir=None):
@@ -1956,7 +2481,7 @@ def werte_fragen(fragen, suche):
     for f in fragen:
         erg = antworte_frage(f, suche)
         hits, ans, entscheid = erg["hits"], erg["antwort"], erg["entscheid"]
-        satz = bewerte_frage(f, [h["seite"] for h, _ in hits], ans)
+        satz = bewerte_frage(f, abgerufene_seiten(hits), ans)
         saetze.append(satz)
         print(f"[{f['id']}] ({f['typ']}) {f['frage']}")
         for z in erg["verlauf"]:

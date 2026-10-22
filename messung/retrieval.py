@@ -62,7 +62,11 @@ def trefferquote(data_dir=None, ausgabe=print):
                 if f.get("erwartet_verweigerung") or not f.get("seiten"):
                     continue
                 hits = rag.retrieve(f["frage"], chunks, embs, spiel_id=sid, index=con)
-                ok = bool({h["seite"] for h, _ in hits} & set(f["seiten"]))
+                if rag.ist_buecher_treffer(hits):     # Mehr-Buecher-Bestand: Treffer nur bei passendem Buch
+                    abgerufen = rag.abgerufene_seiten(hits)
+                    ok = any(s in abgerufen for s in f["seiten"])
+                else:
+                    ok = bool({h["seite"] for h, _ in hits} & set(f["seiten"]))
                 g += ok
                 n += 1
                 je_typ.setdefault(f.get("typ") or "?", [0, 0])
@@ -89,6 +93,9 @@ def verzeichnis_anteil(pfad_aus, data_dir=None, schwelle=0.5, ausgabe=print):
     try:
         with open(pfad_aus, "w", encoding="utf-8") as aus:
             for sid in ids:
+                if rag.ist_mehrbuch(rag.lies_spiel(sid, data_dir)):
+                    raise rag.KonfigFehler(f"{sid}: verzeichnis wertet Vision-Seiten eines Altbestands aus; "
+                                           "fuer einen Mehr-Buecher-Bestand gibt es das nicht.")
                 roh = rag.lies_jsonl(rag.knowledge_pfad(sid, data_dir))
                 route = collections.defaultdict(collections.Counter)
                 for c in roh:

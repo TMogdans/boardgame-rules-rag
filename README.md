@@ -272,6 +272,85 @@ zurueckkommen, und der bisherige Weg waere fuer FCM nicht mehr zahlengleich. Daz
 eine Abhaengigkeit mehr im Open-WebUI-Container. Das BLOB-Format ist das `vec_f32` von
 sqlite-vec; ein spaeterer Wechsel kostet eine Abfrage, kein Neu-Embedden.
 
+### Mehrere Buecher in einem Bestand
+
+Ein Bestand (`data/<spiel_id>/`) kann mehrere Buecher verschiedener Titel, Fassungen und
+Sprachen halten (Spec `.specify/specs/mehrbuch-bestand/spec.md`). Ohne `buecher` in
+`spiel.json` bleibt alles wie oben (Altbestand, eine `knowledge.jsonl`, nichts wird
+umgeschrieben). Mit `buecher` liegt jedes Buch in
+`data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl` mit eigenem Fingerprint: ein ersetztes
+oder neues Buch wird allein eingebettet, die anderen nicht.
+
+```json
+{"spiel_id": "testwelt", "name": "Testwelt", "aliase": [], "sprache": "de", "quelle_pdf": null,
+ "buecher": [
+   {"buch_id": "grundregeln", "titel": "Grundregeln", "fassung": "v3", "sprache": "de",
+    "quelle": "grundregeln.pdf", "inhaltsart": "regel",
+    "inhaltsarten": [{"praefix": ["Die Welt"], "inhaltsart": "welt"}],
+    "ueberschriften": {"quelle": "lesezeichen"},
+    "seitenzahlen": {"quelle": "versatz", "versatz": 1, "kontrollpunkte": {"20": 19}},
+    "layout": {"klasse": "section_header", "veto": [],
+               "stufen": [{"groesse": [6.5, 7.5], "fett": true, "kapitaelchen": true, "kursiv": false},
+                          {"groesse": [6.5, 7.5], "fett": true, "kapitaelchen": true, "kursiv": true}]},
+    "rand": {"kopf": 36, "fuss": 25}, "vorspann": "Vorspann", "reparatur": true}],
+ "fassungsregeln": {"regel": {"massgeblich": ["v3"],
+                              "gekennzeichnet": {"v1": "Fassung v1 -- fuer v3 umrechnen"}}}}
+```
+
+- `buch_id` ist ein Slug wie die `spiel_id`; `sprache` aus `rag.SPRACHEN`; `inhaltsart` ist der
+  Standard, `inhaltsarten` weist je Abschnittspfad-Praefix eine andere zu (laengstes gewinnt).
+  Das Vokabular ist frei und unabhaengig von `typ`/`DROP_TYPES`.
+- `fassungsregeln` je Inhaltsart: `massgeblich` normal, `gekennzeichnet` gleich gerankt, aber mit
+  Hinweistext in Quellenkopf und Fundstelle, jede andere Fassung nie Kandidat.
+- `ueberschriften`: `{"quelle": "lesezeichen"}` (aus der PDF) oder `{"quelle": "inhaltsverzeichnis",
+  "eintraege": [{"titel", "ebene", "seite" (gedruckt)}]}` -- die Liste gilt als Wahrheit,
+  Zeilen werden unscharf (nur Auslassungen) auf ihrer Zielseite gesucht; nicht gefundene stehen
+  im Einlese-Protokoll.
+- `seitenzahlen`: `labels` (PDF-Seitenlabels) oder `versatz` (gedruckt = physisch - versatz);
+  `kontrollpunkte` {physisch: gedruckt} werden geprueft. Fundstelle ist die gedruckte Seite,
+  ohne arabische Zahl "PDF-S. n".
+- `layout`: Ueberschriften unterhalb der Liste. Eine Zeile trifft die KLEINSTE Stufe, deren Angaben
+  sie alle erfuellt -- deshalb muss eine Stufe, die tiefer liegende ausschliessen soll, das
+  unterscheidende Merkmal ausdruecklich nennen (im Beispiel `"kursiv": false` in Stufe 1; ohne es
+  faengt Stufe 1 auch die kursiven Zwischenueberschriften und Stufe 2 wird nie erreicht). Eine Zeile mit Schrift einer `stufen`-Angabe
+  (Groesse von-bis, optional `fett`/`kursiv`/`kapitaelchen`, `laufweite`) ist hinreichend;
+  ohne zugeordnete Schrift entscheidet die Klasse `klasse` (Rueckfall). Nie Ueberschrift: Zeilen
+  im Rand und Klassen der Veto-Menge (immer `table`, `caption`, `page_header`, `page_footer`,
+  `veto` ergaenzt). Optional `hoechstlaenge`.
+- `rand`: Kopf-/Fussrand in PDF-Punkten; Zeilen darin (Kolumnentitel, Seitenzahlen) werden
+  verworfen und gezaehlt. `vorspann`: Name des Abschnitts vor dem ersten Listeneintrag.
+- `reparatur`: Trennungen an Zeilenenden (`true` oder `{"konjunktionen": [...]}`).
+- `layout` und `rand` werden gegen ihr Schema geprueft (unbekannte Schluessel, falsche Typen,
+  leere Stufen, Bereiche mit von > bis -> Abbruch vor dem Schreiben). Listentitel, Praefixe und
+  alle Pfadelemente werden normalisiert (NFC, Leerraum -> ein Leerzeichen). Auf dem Docling-Weg bleibt der Elementtext an Zeilenenden und
+  Strichen unveraendert (nur U+00AD im Wort faellt); das Protokoll zaehlt Verdachtsfaelle
+  (Binnen-Grossbuchstabe, Strichrest) mit Seiten. `DROP_TYPES` gilt nur fuer Altbestaende.
+
+Einlesen (Ingest-venv, Docling-Layout ohne LLM, mit Schriftstufen oder Rand zusaetzlich
+pdfplumber; Docling- und pdfplumber-Version muessen denen der Vorab-Messung in
+`vorabmessung.json` gleichen, sonst Abbruch):
+
+```bash
+.venv-ingest/bin/python einlesen.py testwelt grundregeln --pdf pdfs/grundregeln.pdf [--ueberschreiben]
+CHUNK_SIZE=400 python rag.py index testwelt      # zeigt die Haeppchenzahl je Buch
+```
+
+Jeder Abschnitt wird wie bisher mit `CHUNK_SIZE`/`CHUNK_OVERLAP` zerteilt, nie ueber eine
+Abschnittsgrenze; jeder Haeppchentext beginnt mit seinem Abschnittspfad (`K1 › U1`).
+`retrieve(..., filter={"buch_id"|"fassung"|"sprache"|"inhaltsart": wert})` filtert vor dem
+Ranking. Golden Sets eines solchen Bestands nennen `"seiten": [{"buch_id": ..., "seite": n}]`.
+
+**Bewerten und Eichen brauchen die Deklaration.** Der Judge erkennt den festen Verweigerungssatz
+eines Mehr-Buecher-Bestands ("... Naechste Fundstellen: Titel (Fassung), S. n") nur mit dessen
+`spiel.json`. `messung/bewerte.py` nimmt sie aus `--golden` (Datenverzeichnis-Layout); bei einer
+flachen Golden-Kopie (`<golden>/<spiel_id>.json`) zusaetzlich `--daten <Datenverzeichnis>` angeben.
+`judge.py eichen` braucht fuer solche Bestaende `--daten <Datenverzeichnis>` (oder `DATA_DIR`).
+Fehlt die Deklaration und sieht eine Antwort wie so ein Satz aus, warnt der Lauf einmal auf
+stderr; die Urteile von Altbestaenden aendern sich dadurch nicht.
+Gemessen (REQ-MB-19, 3.000 Haeppchen in 5 Buechern, 1.024 Dimensionen, Filter und
+Fassungsregel aktiv, 200 Fragen): Laden + Vektorsuche typisch 10,8 ms, max 16,8 ms; ein
+Altbestand mit 2.000 Haeppchen ist gleich schnell wie vor der Spec (typisch 3,96 / 3,94 ms).
+
 ### Was die Eval misst -- und was nicht
 
 `python rag.py eval` erhebt **zwei** Dinge, und beide sind Regressionswarner, kein
@@ -335,6 +414,10 @@ python test_messung_vergleiche.py  # messung/: Kennzahlen, stabil/gleichgerichte
 python test_messung_bewerte.py     # messung/: judge.bewerte-Fake, urteile.jsonl, Abbruch bei unbekannter Frage
 python test_messung_lauf.py        # messung/: Antwortprotokoll und meta.json
 python test_messung_retrieval.py   # messung/: Trefferquote, Verzeichnis-Anteil
+python test_mehrbuch.py      # Mehr-Buecher-Bestand: Datenmodell, Filter, Fassungsregel, Fundstelle, Laufzeit
+python test_einlesen_reparatur.py  # einlesen.py: Trennungen, Ueberschriften-Liste, Layout, Rand, Seiten, Versionen
+python test_zerschneiden.py  # Abschnittsgrenzen, Titelvorsatz, Seiten ueber Seitengrenzen
+python test_pdf_schrift.py   # pdfplumber-Zeichen -> Zeilen (synthetisches PDF per reportlab)
 python test_schutz.py        # kein Test-/Mutationslauf schreibt in echte Daten (auch nicht per Symlink)
 python test_regression.py    # alter UND neuer Weg == Ausgabe von ed36f99 (regression_referenz.json),
                              # gleichstandsbewusst verglichen -> auf jeder Plattform gueltig
