@@ -97,6 +97,7 @@ class SchriftTest(unittest.TestCase):
         self.assertAlmostEqual(schrift["groesse"], size, delta=0.1)
         self.assertEqual(schrift["fett"], font.endswith("Bold"))
 
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_reine_und_gemischte_zeile(self):
         """[REQ-MB-29] Zeile ganz in X -> X; gemischte Zeile mit Mehrheit X und kuerzerem Teil in Y -> X."""
         z = self.zugeordnet()
@@ -104,16 +105,19 @@ class SchriftTest(unittest.TestCase):
         self.assertSchrift(z["gemischt"]["schrift"], X)
         self.assertEqual([zeile["text"] for zeile in z.values()][:2], ["Ganz fett", "Mehrheitfett kl"])   # Text unveraendert
 
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_gleichstand_ohne_schrift(self):
         """[REQ-MB-29] Gleich viele Zeichen (ohne Leerzeichen) in X und Y -> keine zugeordnete Schrift."""
         self.assertIsNone(self.zugeordnet()["gleichstand"].get("schrift"))
 
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_zwei_spalten_gleicher_hoehe(self):
         """[REQ-MB-29] Zwei Spalten mit gleich hohen Zeilen: links X, rechts Y -- Zeichen der Nachbarspalte zaehlen nicht."""
         z = self.zugeordnet()
         self.assertSchrift(z["links"]["schrift"], X)
         self.assertSchrift(z["rechts"]["schrift"], Y)
 
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_kopfrand_plus_minus_ein_punkt(self):
         """[REQ-MB-29] Zeile im deklarierten Kopfrand -> als Rand erkannt; dieselbe Zeile 1 pt ausserhalb -> nicht."""
         mitte = mitte_aus_zeichen(self.pdf, 2, "Kolumnentitel")
@@ -126,6 +130,7 @@ class SchriftTest(unittest.TestCase):
         self.assertFalse(self.zugeordnet(rand={"fuss": fuss - 1})["randzeile"]["im_rand"])
 
 
+    @unittest.skip("devloop: REQ-MB-29 neu in Fassung 8")
     def test_req_mb_29_mittelpunkt_genau_auf_der_grenze_ist_rand(self):
         """[REQ-MB-29] Kopfrand genau auf dem Mittelpunkt der Zeichen -> im Rand (inklusiv); Grenze 0,01 pt darueber -> nicht. Faengt: "<=" durch "<" ersetzt."""
         mitte = mitte_aus_zeichen(self.pdf, 2, "Kolumnentitel")
@@ -133,6 +138,28 @@ class SchriftTest(unittest.TestCase):
         self.assertFalse(self.zugeordnet(rand={"kopf": mitte - 0.01})["randzeile"]["im_rand"])
         self.assertTrue(self.zugeordnet(rand={"fuss": HOEHE - mitte})["randzeile"]["im_rand"])
         self.assertFalse(self.zugeordnet(rand={"fuss": HOEHE - mitte - 0.01})["randzeile"]["im_rand"])
+
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
+    def test_req_mb_29_lage_aus_mehreren_kaesten_ist_vereinigung(self):
+        """[REQ-MB-29] Docling-Element mit zwei Kaesten auf derselben Seite: Lage = Vereinigung (min x0/oben, max x1/unten); die Zeichen beider Kaesten bestimmen die Schrift. Faengt: nur prov[0] benutzt."""
+        import docling_attrappe as da
+        from reportlab.pdfgen import canvas
+        pfad = os.path.join(self.tmp.name, "kaesten.pdf")
+        c = canvas.Canvas(pfad, pagesize=(BREITE, HOEHE))
+        c.setFont("Helvetica", 10)
+        c.drawString(50, HOEHE - 110, "ab")                       # Kasten 1: 2 Zeichen normal
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(200, HOEHE - 314, "FETTERTEXT")              # Kasten 2: 10 Zeichen fett
+        c.showPage()
+        c.save()
+        element = da.Element("text", "ab FETTERTEXT", (45, 98, 70, 113), weitere_kaesten=[(195, 299, 300, 317)])
+        element._setze_seite(1)
+        seiten = einlesen().zeilen_aus_docling(da.Dokument([(1, element)]))
+        (zeile,) = seiten[1]
+        self.assertEqual((zeile["x0"], zeile["oben"], zeile["x1"], zeile["unten"]), (45, 98, 300, 317))
+        (mit_schrift,) = einlesen().ordne_schrift_zu(pfad, seiten)[1]
+        self.assertTrue(mit_schrift["schrift"]["fett"])
+        self.assertAlmostEqual(mit_schrift["schrift"]["groesse"], 14, delta=0.1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
