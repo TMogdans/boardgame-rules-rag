@@ -35,8 +35,11 @@ Vom Test erwartete Schnittstellen (aus der Spec abgeleitet, Namen hier festgeleg
   .specify/specs/mehrbuch-bestand/vorabmessung.json   (REQ-MB-23)
   Pipe: veralteter Mehr-Buecher-Bestand (irgendeine Buchdatei nach dem Bau geaendert) -> Meldung
         mit "veraltet", kein LLM-Aufruf (REQ-MB-26)
-  REQ-MB-6 (Fassung 8): judge.ist_fester_verweigerungssatz / deterministisches_urteil; messung.lauf.fuehre_aus
-      schreibt in antworten.jsonl "abgerufen" als [{"buch_id", "seite"}] je Fundstelle (Mehrbuch)
+  REQ-MB-6 (Fassung 9): judge.ist_fester_verweigerungssatz(antwort, buecher=None) und
+      judge.deterministisches_urteil(frage, antwort, buecher=None); buecher = Deklaration aus spiel.json
+      (Liste wie rag.lies_buecher), ohne buecher Verhalten wie vor der Spec; messung.lauf.fuehre_aus
+      schreibt in antworten.jsonl "abgerufen" als [{"buch_id", "seite"}] je Fundstelle (Mehrbuch);
+      messung/bewerte.bewerte_lauf uebergibt dem Judge die Buecherdeklaration der spiel_id (Fassung 9a)
   REQ-MB-19 Basis: rag.py aus BASIS_COMMIT (letzter Stand vor der Spec, per git show) im selben Lauf
 """
 import contextlib
@@ -829,21 +832,112 @@ class TestFundstelle(BestandTest):
         # zwei Fundstellen auf "Seite 12" -- bei Seiten ohne Buch fielen sie zu einer zusammen
         self.assertEqual(rag.entscheid_text_nichts(self.hits).count("Buch "), 2)
 
+    def judge_vorher(self):
+        """judge.py vom Stand vor dem Mehr-Buecher-Bestand (BASIS_COMMIT; auf main seither unveraendert)."""
+        p = subprocess.run(["git", "-C", BASE, "show", f"{BASIS_COMMIT}:judge.py"], capture_output=True, text=True)
+        if p.returncode:
+            raise AssertionError(f"judge.py aus {BASIS_COMMIT} nicht lesbar: {p.stderr.strip()}")
+        pfad = os.path.join(self.tmp.name, "judge_vor_spec.py")
+        with open(pfad, "w", encoding="utf-8") as f:
+            f.write(p.stdout)
+        spec = importlib.util.spec_from_file_location("judge_vor_spec", pfad)
+        modul = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modul)
+        return modul
+
+    def bewerte_lauf(self, zeilen, judge_modul=None):
+        """messung/bewerte.bewerte_lauf ueber antworten.jsonl; das Modell antwortet fest "URTEIL: falsch"
+        (nur erreicht, wenn die deterministische Vorstufe nicht greift). Rueckgabe: urteile.jsonl-Zeilen."""
+        bewerte = importlib.import_module("messung.bewerte")
+        verz = os.path.join(self.tmp.name, f"lauf-{len(os.listdir(self.tmp.name))}")
+        os.makedirs(verz)
+        pfad = os.path.join(verz, "antworten.jsonl")
+        with open(pfad, "w", encoding="utf-8") as f:
+            for z in zeilen:
+                f.write(json.dumps(z, ensure_ascii=False) + "\n")
+        modell = lambda *a, **k: {"message": {"content": "URTEIL: falsch"}}     # noqa: E731
+        modul = judge_modul or bewerte.judge
+        with mock.patch.object(modul, "_ollama_chat", modell), mock.patch.object(bewerte, "judge", modul):
+            ziel = bewerte.bewerte_lauf(pfad, self.data, "frei", "m", ausgabe=lambda *_: None)
+        with open(ziel, encoding="utf-8") as f:
+            return [json.loads(z) for z in f]
+
     @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
-    def test_req_mb_6_judge_wertet_festen_satz_mit_buch_als_verweigerung(self):
-        """[REQ-MB-6] (a) Fester Satz mit Buch-Fundstellen (Chat und Sprache) -> Judge: Verweigerung, gleich dem Altbestand-Fall; mit Antworttext -> keine."""
+    def test_req_mb_6_messpfad_uebergibt_die_buecherdeklaration(self):
+        """[REQ-MB-6] Messpfad (messung/bewerte): fester Satz mit deklarierten Buechern (Chat und Sprache) -> deterministisch Verweigerung; Altbestand -> Urteile wie judge.py vor der Spec. Faengt: Deklaration im Messpfad nicht uebergeben."""
+        self.schreibe_golden([{"id": i, "frage": "Gibt es Eis?", "typ": "leerstelle", "erwartet": "-", "keywords": [],
+                               "erwartet_verweigerung": True, "seiten": []} for i in (1, 2)])
+        zeilen = [{"spiel_id": SID, "frage_id": i, "frage": "Gibt es Eis?",
+                   "antwort": rag.entscheid_text_nichts(self.hits, sprache=sprache)}
+                  for i, sprache in ((1, False), (2, True))]
+        urteile = self.bewerte_lauf(zeilen)
+        self.assertEqual([(u["urteil"], u["deterministisch"]) for u in urteile], [("richtig", True)] * 2)
+        # Altbestand: dieselben Urteile wie mit judge.py vor der Spec (dort ohne Deklaration)
+        meta = rag.lege_spiel_an("Altspiel")
+        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]), ALT)
+        with open(os.path.join(self.data, "altspiel", "golden_set.json"), "w", encoding="utf-8") as f:
+            json.dump({"spiel_id": "altspiel", "fragen": [
+                {"id": i, "frage": "Gibt es Eis?", "typ": "leerstelle", "erwartet": "-", "keywords": [],
+                 "erwartet_verweigerung": True, "seiten": []} for i in (1, 2, 3)]}, f)
+        kopf = "In den gefundenen Stellen steht dazu nichts."
+        alt_zeilen = [{"spiel_id": "altspiel", "frage_id": i, "frage": "Gibt es Eis?", "antwort": a} for i, a in (
+            (1, kopf + " Naechste Fundstellen: S. 11."),
+            (2, kopf + " Naechste Fundstellen: Wer angreift, wuerfelt Stufe 8 (Talent), Seite 3."),
+            (3, "Man wuerfelt Stufe 8. " + kopf))]
+        neu = self.bewerte_lauf(alt_zeilen)
+        vorher = self.bewerte_lauf(alt_zeilen, judge_modul=self.judge_vorher())
+        self.assertEqual(neu, vorher)
+        self.assertEqual([u["deterministisch"] for u in vorher], [True, False, False])
+
+    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
+    def test_req_mb_6_judge_echter_fester_satz_mit_deklariertem_buch(self):
+        """[REQ-MB-6] (a) Fester Satz mit Fundstellen aus fundstelle() deklarierter Buecher (Chat "S.", Sprache "Seite") -> Verweigerung, Urteil gleich dem Altbestand-Fall. Faengt: Bestand-Deklaration ignoriert."""
+        buecher = rag.lies_buecher(SID)
         frage = {"erwartet_verweigerung": True}
-        alt = judge.deterministisches_urteil(frage, "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 12.")
+        alt = self.judge_vorher().deterministisches_urteil(
+            frage, "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: S. 12.")
         self.assertIsNotNone(alt)
         for sprache in (False, True):
             with self.subTest(sprache=sprache):
                 text = rag.entscheid_text_nichts(self.hits, sprache=sprache)
-                self.assertIn("Buch Nord", text)
-                self.assertTrue(judge.ist_fester_verweigerungssatz(text), text)
-                self.assertEqual(judge.deterministisches_urteil(frage, text), alt)
-                mit_antwort = "Feuer verdient man in Phase 4. " + text
-                self.assertFalse(judge.ist_fester_verweigerungssatz(mit_antwort))
-                self.assertIsNone(judge.deterministisches_urteil(frage, mit_antwort))
+                self.assertIn("Buch Nord (alpha), " + ("Seite 12" if sprache else "S. 12"), text)
+                self.assertTrue(judge.ist_fester_verweigerungssatz(text, buecher=buecher), text)
+                self.assertEqual(judge.deterministisches_urteil(frage, text, buecher=buecher), alt)
+
+    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
+    def test_req_mb_6_judge_inhalt_oder_pseudo_fundstelle_ist_keine_verweigerung(self):
+        """[REQ-MB-6] (a) Inhalt vor bzw. nach dem Satz, Pseudo-Fundstelle "Ja, das geht (alpha), S. 12" und nicht deklariertes Buch -> keine Verweigerung. Faengt: generisches Fundstellen-Muster statt der Deklaration."""
+        buecher = rag.lies_buecher(SID)
+        frage = {"erwartet_verweigerung": True}
+        satz = rag.entscheid_text_nichts(self.hits)
+        kopf = "In den gefundenen Stellen steht dazu nichts. Naechste Fundstellen: "
+        for name, text in (("Inhalt davor", "Man wuerfelt Stufe 8. " + satz),
+                           ("Inhalt danach", satz + " Wer angreift, wuerfelt Stufe 8."),
+                           ("davor und danach", "Ja. " + satz + " Ausserdem gilt Regel 5."),
+                           ("Pseudo Chat", kopf + "Ja, das geht (alpha), S. 12."),
+                           ("Pseudo Sprache", kopf + "Ja, das geht (alpha), Seite 12."),
+                           ("Buch nicht deklariert", kopf + "Buch West (gamma), S. 12."),
+                           ("falsche Fassung", kopf + "Buch Nord (beta), S. 12.")):
+            with self.subTest(fall=name):
+                self.assertFalse(judge.ist_fester_verweigerungssatz(text, buecher=buecher), text)
+                self.assertIsNone(judge.deterministisches_urteil(frage, text, buecher=buecher))
+
+    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
+    def test_req_mb_6_judge_altbestand_byte_gleich_zu_main(self):
+        """[REQ-MB-6] (a) Altbestand (keine Buecher): Bewertung byte-gleich zu judge.py vor der Spec, auch fuer "...Naechste Fundstellen: Wer angreift, wuerfelt Stufe 8 (Talent), Seite 3." Faengt: generisches Buch-Muster auch fuer Altbestaende."""
+        vorher = self.judge_vorher()
+        kopf = "In den gefundenen Stellen steht dazu nichts."
+        faelle = [kopf, kopf + " Naechste Fundstellen: S. 12, S. 4.",
+                  kopf + " Naechste Fundstellen: Seite 14, Seite 12 und Seite 4.",
+                  kopf + " Naechste Fundstellen: Wer angreift, wuerfelt Stufe 8 (Talent), Seite 3.",
+                  kopf + " Naechste Fundstellen: Buch Nord (alpha), S. 12.",
+                  "Dazu enthaelt das Dokument keine Angaben.", "Man wuerfelt Stufe 8. " + kopf]
+        for frage in ({"erwartet_verweigerung": True}, {}):
+            for text in faelle:
+                with self.subTest(text=text, frage=frage):
+                    self.assertEqual(judge.ist_fester_verweigerungssatz(text), vorher.ist_fester_verweigerungssatz(text))
+                    self.assertEqual(json.dumps(judge.deterministisches_urteil(frage, text), sort_keys=True),
+                                     json.dumps(vorher.deterministisches_urteil(frage, text), sort_keys=True))
 
     @unittest.skip("devloop: REQ-MB-6 neu in Fassung 8")
     def test_req_mb_6_sprachmodus_seite_ausgeschrieben(self):
@@ -1202,7 +1296,8 @@ class TestDropTypesNurAltbestand(ZweiBuecher):
         self.lege_ohne_typ_an()
         alt = self.lege_alt_an()                                    # ALT: ein Eintrag typ flavor
         meta = rag.lege_spiel_an("Altohne")
-        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]), ohne_typ(ALT))
+        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]),
+                           [dict(e, spiel_id=meta["spiel_id"], spiel=meta["name"]) for e in ohne_typ(ALT)])
         self.baue()
         with mock.patch.dict(os.environ, {"DROP_TYPES": "flavor"}):
             with self.assertRaises(rag.KonfigFehler):

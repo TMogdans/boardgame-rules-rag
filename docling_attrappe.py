@@ -61,8 +61,9 @@ class Element:
     """Ein Docling-Item. lage = (x0, oben, x1, unten) in Punkten ab OBEN links (wie pdfplumber);
     gespeichert wird es wie bei Docling mit Ursprung unten links."""
 
-    def __init__(self, label, text="", lage=None, kinder=(), markdown=None):
+    def __init__(self, label, text="", lage=None, kinder=(), markdown=None, weitere_kaesten=()):
         self.label = Label(label)
+        self._weitere = list(weitere_kaesten)          # weitere Kaesten (prov) auf derselben Seite
         self.text = text
         self.kinder = list(kinder)
         self._markdown = markdown
@@ -70,11 +71,11 @@ class Element:
         self.prov = []
 
     def _setze_seite(self, seite):
-        bbox = None
-        if self._lage is not None:
-            x0, oben, x1, unten = self._lage
-            bbox = BoundingBox(x0, HOEHE - oben, x1, HOEHE - unten, CoordOrigin.BOTTOMLEFT)
-        self.prov = [Prov(seite, bbox)]
+        def bbox(lage):
+            x0, oben, x1, unten = lage
+            return BoundingBox(x0, HOEHE - oben, x1, HOEHE - unten, CoordOrigin.BOTTOMLEFT)
+        self.prov = [Prov(seite, bbox(self._lage) if self._lage is not None else None)]
+        self.prov += [Prov(seite, bbox(lage)) for lage in self._weitere]
         for k in self.kinder:
             k._setze_seite(seite)
 

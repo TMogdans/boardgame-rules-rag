@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 8). (Historie: Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 9a). (Historie: Fassung 9a arbeitet Tobias' Nachträge F9a-1 und F9a-2 ein (Messpfad der Bücherdeklaration, Lesart Zeile ohne Lage); Fassung 9 abgenommen durch Tobias am 2026-10-22; Fassung 9 arbeitet Tobias' vorab getroffene Entscheidungen F9-1 bis F9-3 nach dem zweiten Kritiker-Review am echten Buch ein (MB-31 zurückgezogen, Judge-Muster exakt, Lage aus mehreren Kästen); Fassung 8 abgenommen durch Tobias am 2026-10-22; Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -107,17 +107,25 @@ und die Seitenangaben des Entscheidungsschritts (C-Text, B-Hinweis, Sprachmodus)
 **Buch (Titel oder Kurzname), Fassung und gedruckte Seite** (REQ-MB-22). CLI und Pipe erzeugen
 dieselben Köpfe aus derselben Funktion.
 
-*Fassung 8 (a), Judge:* Der Judge (`judge.py`, deterministische Vorstufe) erkennt den festen
-Verweigerungssatz eines Mehr-Bücher-Bestands mit Buch-Fundstellen („Buch …, S. n") in Chat- und
-Sprachmodus wie bei Altbeständen (also als Verweigerung, nicht als inhaltliche Antwort).
+*Fassung 8 (a), Judge (Fassung 9 präzisiert):* Der Judge (`judge.py`, deterministische Vorstufe)
+erkennt den festen Verweigerungssatz eines Mehr-Bücher-Bestands in Chat- und Sprachmodus wie bei
+Altbeständen (also als Verweigerung, nicht als inhaltliche Antwort) **nur dann**, wenn jede
+Fundstelle nach „Naechste Fundstellen:" **exakt** der Form entspricht, die `fundstelle()` für ein
+**deklariertes Buch des Bestands** erzeugt (Titel bzw. Kurzname, Fassung, Seite bzw. PDF-Seite;
+Chat „S.", Sprachmodus „Seite"). Das Muster wird aus der Bücherdeklaration des Bestands gebildet,
+nicht aus einem generischen Muster. Für Altbestände (keine Bücher) bleibt die Judge-Bewertung
+byte-gleich zu main (REQ-MB-3).
 *Fassung 8 (b), Messlauf:* `messung/lauf.py` protokolliert in `antworten.jsonl` die abgerufenen
 Fundstellen eines Mehr-Bücher-Bestands **mit Buch** (`buch_id` und Seite je Fundstelle), nicht nur
 die Seite; Altbestände: Ausgabe unverändert (REQ-MB-3).
 *Fassung 8 (c), Sprachmodus:* Im Sprachmodus nennt die Fundstelle eines Mehr-Bücher-Bestands die
 Seite ausgeschrieben als „Seite n" (wie bei Altbeständen), nicht „S. n"; Buch und Fassung stehen
 weiterhin dabei.
-*Detektor (Fassung 8):* (a) Verweigerungssatz mit „Buch A, S. 12" in Chat- und Sprachmodus → Judge
-wertet Verweigerung, gleich dem Altbestand-Fall; gleicher Satz mit Antworttext → keine Verweigerung.
+*Detektor (Fassung 8, Fassung 9 geschärft):* (a) echter fester Satz mit Fundstelle „Buch A, S. 12"
+(Form aus `fundstelle()` eines deklarierten Buchs) in Chat- und Sprachmodus → Judge wertet
+Verweigerung; Antworttext mit Inhalt **vor und nach** dem Satz → keine Verweigerung; Antworttext mit
+Pseudo-Fundstelle („Ja, das geht (alpha), S. 12") → keine Verweigerung; Altbestand-Fall „…Naechste
+Fundstellen: Wer angreift, wuerfelt Stufe 8 (Talent), Seite 3." → Bewertung wie auf main.
 (b) Messlauf auf synthetischem Zwei-Bücher-Bestand mit gleicher Seitenzahl in beiden Büchern →
 `antworten.jsonl` enthält je abgerufener Fundstelle `buch_id` und Seite, die beiden sind
 unterscheidbar; Altbestand-Zeile byte-gleich zum Stand vor der Änderung. (c) Sprachmodus-Ausgabe
@@ -125,6 +133,8 @@ für Fundstelle Seite 12 enthält „Seite 12" und kein „S. 12".
 *Detektor:* Prompt-Nachrichten und Pipe-Ausgabe für einen synthetischen Zwei-Bücher-Bestand
 mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; Mutation der Kopf-Funktion
 (liefert Marker) ändert CLI- **und** Pipe-Ausgabe. Altbestände: REQ-MB-3.
+*Fassung 9a (a), Messpfad:* In `messung` (Bewerten und Eichen, überall dort, wo der Judge die Antwort eines Bestands bewertet) wird die Bücherdeklaration des Bestands über die `spiel_id` des Golden Sets geladen (wie `rag.lies_buecher`) und an den Judge übergeben. Für Altbestände wird keine Deklaration übergeben; ihre Bewertung bleibt wie bisher (REQ-MB-3).
+*Detektor (Fassung 9a):* Messlauf über einen Mehr-Bücher-Bestand mit festem Verweigerungssatz (deklariertes Buch) → Judge wertet als Verweigerung. Mutation: Deklaration im Messpfad nicht übergeben → derselbe Lauf wertet den Satz falsch → Test rot.
 
 **REQ-MB-7** — *If/Then, Messung*
 Golden-Set-Fragen eines Mehr-Bücher-Bestands geben erwartete Fundstellen als
@@ -169,7 +179,6 @@ Spielen).
 Die Reparatur ist eine reine Funktion auf den Textzeilen der Extraktion **vor** jedem
 Whitespace-Zusammenfassen und wird je Buch eingeschaltet (für Altbestände und den rohen
 PDF-Weg aus: REQ-MB-3). Reihenfolge: (1) Überschriften-Abgleich auf Zeilen (REQ-MB-12, -20)
-samt Einsortieren der Listenüberschriften nach Lage (REQ-MB-31),
 (2) Trennungsreparatur (REQ-MB-11, nur auf Wegen mit Zeilenenden) im Text zwischen den Überschriften — sonst würde der
 gewöhnliche Umbruch (`Wurf⏎Stufe`) Überschriftenzeilen mit dem Folgetext verschmelzen.
 Zeilen im Kopf- oder Fußrand (Position nach REQ-MB-20) werden in (1) erkannt und gezählt, nehmen
@@ -560,10 +569,14 @@ nur eines mit Randangabe → Zähler nur bei diesem, das andere enthält seine K
 vor dieser Änderung (Häppchentexte gleich dem Lauf ohne Randangabe). Mutation: Randzeilen nur
 zählen, nicht verwerfen → Test rot.
 
+*Lesart (Fassung 9a, F9a-2):* Eine Zeile **ohne Lageangabe** gilt bei deklariertem Rand als **nicht im Rand**; sie bleibt im Text und kann Überschrift werden. Das Einlese-Protokoll zählt solche Zeilen je Buch im Zähler `ohne_lage`. Detektor: vorhanden in `test_einlesen_reparatur.py`, `test_req_mb_28_zeile_ohne_lage_gilt_als_nicht_im_rand` (Rand deklariert, Zeile ohne Lage → bleibt im Text, `randzeilen` = 0, `ohne_lage` = 2).
+
 **REQ-MB-29** — *Contract, Zuordnung der pdfplumber-Zeichen zu den Extraktionszeilen*
 Für ein Buch mit Schriftinfo werden jeder Extraktionszeile die pdfplumber-Zeichen zugeordnet,
 die auf derselben Seite zu dieser Zeile gehören; daraus ergeben sich ihre Schrift (Mehrheit nach
-REQ-MB-20, ohne eindeutige Mehrheit keine Schrift) und ihre Lage für die Randprüfung. Zeichen
+REQ-MB-20, ohne eindeutige Mehrheit keine Schrift) und ihre Lage für die Randprüfung. Hat ein Extraktionselement mehrere Kästen (`prov`) auf derselben
+Seite, ist seine Lage die **Vereinigung** der Kästen (min `x0`/`oben`, max `x1`/`unten`; Fassung 9, wie in
+der Vorab-Messung; gemessen: 127 von 8.095 Textelementen haben mehrere Kästen). Zeichen
 einer anderen Zeile — auch einer gleich hohen Zeile der Nachbarspalte — gehen nicht in die
 Mehrheit ein.
 *Detektor:* der Test erzeugt ein synthetisches PDF mit gesteuerten Schriften (Größen und
@@ -573,6 +586,7 @@ Schnitte), z. B. per `reportlab` (reine Testabhängigkeit, darf in der Testumgeb
 - gemischte Zeile mit Mehrheit X und einem kürzeren Teil in Schrift Y → Schrift X;
 - Zeile mit gleich vielen Zeichen in X und Y → keine zugeordnete Schrift;
 - zwei Spalten mit gleich hohen Zeilen in Schrift X (links) und Y (rechts) → links X, rechts Y;
+- Element mit zwei Kästen auf derselben Seite → Lage = Vereinigung beider Kästen (Fassung 9);
 - Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht;
   Mittelpunkt genau auf der Grenze → Rand (inklusiv), Grenze + 0,01 pt → nicht (Fassung 8).
 Mutation: Zuordnung ohne Spaltentrennung (alle Zeichen gleicher Höhe) → Spaltenfall rot.
@@ -594,42 +608,14 @@ Altbestand: bestehende Suite und Referenzen unverändert grün (REQ-MB-3); Altbe
 `DROP_TYPES=flavor` bricht wie heute ab, Altbestand mit `typ: "flavor"` verliert diese Häppchen wie
 heute.
 
-**REQ-MB-31** — *If/Then, Listenüberschrift nach Lage einsortieren*
-Wenn auf einer Seite eine Zeile `Ü` einem Listeneintrag zugeordnet ist (REQ-MB-12), dann werden die
-Elemente der Seite nach der Lage von `Ü` umsortiert. Lage eines Elements = `x0`, `x1`, `oben`, `unten`
-in PDF-Punkten (Ursprung oben links, wie REQ-MB-20). Ein Element `E` derselben Seite **liegt unter
-`Ü`**, wenn beide eine Lage haben und gilt:
-1. der vertikale Mittelpunkt von `E` liegt unterhalb der Unterkante von `Ü`:
-   `(E.oben + E.unten) / 2 > Ü.unten`, und
-2. `E` und `Ü` überlappen sich waagrecht: `E.x0 < Ü.x1` und `Ü.x0 < E.x1`.
-
-Jedes Element, das in der Extraktionsfolge **vor** `Ü` steht und unter `Ü` liegt, wird hinter `Ü`
-verschoben: die verschobenen Elemente stehen unmittelbar hinter `Ü`, untereinander in ihrer
-bisherigen Reihenfolge, danach die bisherigen Nachfolger von `Ü`; alle übrigen Elemente behalten
-ihre Reihenfolge. Eine spaltenübergreifende Überschrift überlappt waagrecht beide Spalten und zieht
-damit die unter ihr liegenden Elemente **beider** Spalten hinter sich; eine Überschrift, die nur in
-einer Spalte steht, verschiebt kein Element der Nachbarspalte. Sind auf einer Seite mehrere Zeilen
-zugeordnet, wird die Regel für sie in Listenreihenfolge nacheinander auf die jeweils aktuelle Folge
-angewandt.
-
-Unverändert bleibt: hat `Ü` keine Lage, wird nichts verschoben; ein Element ohne Lage wird nicht
-verschoben; Elemente, die in der Extraktionsfolge **nach** `Ü` stehen, bleiben, wo sie sind (auch
-wenn sie über `Ü` liegen); Randzeilen (REQ-MB-12, -28) werden nicht verschoben; Layout-Überschriften
-(REQ-MB-20) und nicht gefundene Einträge (REQ-MB-13) lösen kein Umsortieren aus. Der Abgleich
-(REQ-MB-12, einschließlich „erste in Lesereihenfolge" bei Gleichstand) läuft auf der ursprünglichen
-Folge; Abschnittsbildung, REQ-MB-13 und REQ-MB-20 arbeiten auf der umsortierten. Das
-Einlese-Protokoll zählt die verschobenen Elemente je Buch („umsortiert").
-Anlass (gemessen): Docling liefert auf zweispaltigen Seiten mit spaltenübergreifender
-Kapitelüberschrift die Überschrift **nach** dem ersten Eintrag der linken Spalte (S. 76: das erste
-Talent landet unter dem vorherigen Kapitel; S. 114 analog).
-*Detektor:* synthetische Seitenzeilen mit Lage, Liste `Alt` (Vorseite), `Neu` (diese Seite):
-`Oben` (links, über `Neu`, Marker `OBENMARKE`), `Links` (links, unter `Neu`, Marker `LINKSMARKE`),
-`Neu` (über beide Spalten), `Rechts` (rechts, unter `Neu`) in dieser Extraktionsfolge → `LINKSMARKE`
-und `Rechts` liegen im Abschnitt `Neu`, `OBENMARKE` in `Alt`; Protokoll „umsortiert = 1".
-Gegenproben: (a) `Neu` nur über der rechten Spalte (`x0` rechts von `Links.x1`) → `LINKSMARKE`
-bleibt in `Alt`, „umsortiert = 0"; (b) dieselbe Seite ohne Lageangaben → Folge unverändert,
-`LINKSMARKE` in `Alt`; (c) `Links` mit Mittelpunkt 1 pt über `Neu.unten` → nicht verschoben.
-Mutation: Umsortieren aus → Test rot.
+**REQ-MB-31** — *zurückgezogen in Fassung 9*
+(ID nicht wiederverwenden.) Das Einsortieren von Listenüberschriften nach Lage ist am echten Buch
+schädlich: Docling-Kästen zentrierter Kapitelüberschriften sind schmal (S. 76: x 168–404 pt), die
+Talentnamen der linken Spalte (x ≈ 35–138) überlappen sie nicht. Folge: S. 76 nichts verschoben
+(148 statt 149 Talente); S. 114 nur breite Absätze verschoben, Abschnitt „Alchemie" schrumpft von
+2.805 auf 78 Zeichen. Im ganzen Buch änderte REQ-MB-31 genau 2 Abschnitte, beide zum Schlechteren.
+Lesereihenfolge-Korrekturen gehören in Spec 2 (siehe Abgrenzung). Entfallen damit: Protokollzähler
+„umsortiert", die Verweise in Abschnitt C, REQ-MB-13 und REQ-MB-20.
 
 **REQ-MB-32** — *Contract, Verdachtszähler für Striche*
 Das Einlese-Protokoll zählt je Buch auf jedem Extraktionsweg, nach der Reparatur (REQ-MB-11), in den
@@ -718,8 +704,9 @@ Von Tobias bestätigt (Fassung 4):
 - Rekonstruktion echter Binde- und Ergänzungsstriche auf dem Docling-Weg (z. B. über
   pdfplumber-Zeilen); Spec 1 zählt nur Verdachtsfälle (REQ-MB-32). Gemessen: 26 von 69 echten
   Strichen zusammengezogen — Spec 2.
-- Elemente, die die Extraktion **nach** einer Listenüberschrift liefert, die aber über ihr liegen
-  (Gegenrichtung zu REQ-MB-31) — Spec 2, zusammen mit der Lesereihenfolge neben Bildern.
+- Lesereihenfolge-Korrekturen (Überschrift nach dem Inhalt, gemessen S. 76/114; Tabelle hinter
+  Absätzen, S. 22; Bild, S. 94) gemeinsam in Spec 2, Detektoren nach echtem Buchmaß, z. B. je Buch
+  deklariertes Spaltenraster statt Überschriften-Kasten (REQ-MB-31 in Fassung 9 zurückgezogen).
 - FTS5-Trigram bzw. Komposita-Suche.
 - Earthdawn-Testsatz (Golden Set) — Daten, nicht Code; folgt nach Spec 1.
 - Übersetzungs-/Suchfassung für englische Bände (Throal).
@@ -749,7 +736,7 @@ Von Tobias bestätigt (Fassung 4):
 Fassung 7 (Tobias, 2026-10-22, nach Kritiker-Review am echten Buch):
 
 - **F7-1** `DROP_TYPES` wird für Mehr-Bücher-Bestände nicht angewendet, `inhaltsart` übernimmt; Altbestände unverändert — gemessen: Mehr-Bücher-Häppchen tragen kein `typ`, der Pipe-Default `flavor,meta` brach mit `KonfigFehler` ab (MB-30).
-- **F7-2** Listenüberschrift nach Lage vor die unter ihr liegenden Elemente einsortieren, spaltenübergreifend über beide Spalten — gemessen: S. 76 und S. 114 erstes Talent unter dem vorherigen Kapitel (MB-31).
+- **F7-2** *(revidiert durch F9-1)* Listenüberschrift nach Lage vor die unter ihr liegenden Elemente einsortieren, spaltenübergreifend über beide Spalten — gemessen: S. 76 und S. 114 erstes Talent unter dem vorherigen Kapitel (MB-31).
 - **F7-3** Zeilenend-Reparatur nur auf Wegen mit Zeilenenden, auf dem Docling-Weg Verdachtszähler; Strich-Rekonstruktion in Spec 2 — gemessen: Silbentrennung 99,3 % richtig, echte Striche 26/69 zusammengezogen, MB-11 griff bei 0,8 % der Trennungen (MB-11, -32).
 - **F7-4** `norm()` entfernt zusätzlich Formatzeichen (`Cf`, u. a. U+00AD) — gemessen: 1 Lesezeichen wegen U+00AD im Seitentext nicht gefunden (MB-12).
 - **F7-5** Listentitel vor Verwendung normalisiert (Leerraum → ein Leerzeichen, trim, NFC), Vorsatz einzeilig, Präfixe ebenso — gemessen: 48/148 Titel mit `\r\n`, 73 mit abweichendem Leerraum, 28,9 % der Häppchen mit CR/LF im Vorsatz (MB-33).
@@ -764,6 +751,17 @@ Fassung 8 (Tobias, 2026-10-22, vorab entschieden):
 - **F8-3** Sprachmodus nennt „Seite n" (ausgeschrieben), nicht „S. n" (MB-6).
 - **F8-4** Randgrenze inklusiv: Mittelpunkt genau auf der Grenze gehört zum Rand (MB-20, -28, -29; wirkt auch in MB-12).
 - **F8-5** Gleichstand gleich großer Kästen bei der Zeichenzuordnung bleibt unspezifiziert (selten) (MB-29, Abgrenzung).
+
+Fassung 9 (Tobias, 2026-10-22, vorab entschieden, nach zweitem Kritiker-Review am echten Buch):
+
+- **F9-1** REQ-MB-31 zurückgenommen; Lesereihenfolge-Korrekturen gemeinsam in Spec 2 mit Detektoren nach echtem Buchmaß (z. B. deklariertes Spaltenraster je Buch) — gemessen: im ganzen Buch 2 Abschnitte geändert, beide schlechter (Alchemie 2.805 → 78 Zeichen, S. 76 148 statt 149 Talente) (MB-31, Abgrenzung).
+- **F9-2** Judge-Muster exakt: fester Verweigerungssatz nur, wenn jede Fundstelle exakt der `fundstelle()`-Form eines deklarierten Buchs entspricht; Altbestand byte-gleich zu main — gemessen: 6/6 Antworttexte mit Inhalt galten als fester Satz (MB-6, MB-3).
+- **F9-3** Lage eines Elements mit mehreren Kästen = Vereinigung — gemessen: 127 von 8.095 Textelementen haben mehrere Kästen, Implementierung nutzte `prov[0]` (MB-29).
+
+Fassung 9a (Tobias, 2026-10-22, abgenommen als Nachtrag zu Fassung 9):
+
+- **F9a-1** Messpfad: `messung` übergibt dem Judge die Bücherdeklaration des Bestands (über die `spiel_id` des Golden Sets, wie `rag.lies_buecher`); Altbestände ohne Deklaration bleiben unverändert (MB-6, MB-3).
+- **F9a-2** Zeile ohne Lageangabe gilt bei deklariertem Rand als nicht im Rand und wird im Einlese-Protokoll als `ohne_lage` gezählt (MB-28).
 
 ## Tier
 
