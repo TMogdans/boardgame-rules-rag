@@ -75,9 +75,18 @@ TESTS = ("test_classify.py", "test_ingest_seite.py", "test_wertung.py", "test_op
          "test_pipe_alt.py", "test_judge.py", "test_prompt.py", "test_entscheidung.py",
          "test_messung_vergleiche.py", "test_messung_bewerte.py", "test_messung_lauf.py",
          "test_messung_retrieval.py", "test_ketten.py",
-         "test_mehrbuch.py", "test_einlesen_reparatur.py", "test_zerschneiden.py", "test_pdf_schrift.py")
+         "test_mehrbuch.py", "test_einlesen_reparatur.py", "test_zerschneiden.py", "test_pdf_schrift.py",
+         "test_kritiker_luecken.py")
 # Tests des Mehr-Buecher-Bestands (Mutationen MBB* an einlesen.py -- nur diese Tests benutzen es)
-MBT = ("test_mehrbuch.py", "test_einlesen_reparatur.py", "test_zerschneiden.py", "test_pdf_schrift.py")
+MBT = ("test_mehrbuch.py", "test_einlesen_reparatur.py", "test_zerschneiden.py", "test_pdf_schrift.py",
+       "test_kritiker_luecken.py")
+# Zeittests zaehlen nicht als Fang (Spec mehrbuch-bestand REQ-MB-19, F7-6): eine Mutation gilt nur als
+# gefangen, wenn ein Test ausserhalb der Zeitmessung rot wird.
+ZEITTESTS = ("test_mehrbuch.py::test_req_mb_19_",)
+
+
+def ist_zeittest(rot):
+    return rot.startswith(ZEITTESTS)
 # Tests, die Ketten/Praxisfragen beruehren (Mutationen MK*)
 KT = ("test_ketten.py", "test_judge.py", "test_openwebui_pipe.py", "test_pipe_alt.py", "test_pipe_index.py",
       "test_messung_lauf.py", "test_messung_bewerte.py", "test_messung_vergleiche.py", "test_eval_spiele.py")
@@ -894,10 +903,8 @@ MUTATIONEN = [
      '    if not any(s.get("typ") in PRAXIS_TYPEN for s in saetze):\n        return []',
      '    if False:\n        return []', KT),
     # ---- Mehr-Buecher-Bestand (Spec mehrbuch-bestand, REQ-MB-1..29) ----
-    # MBB23d/MBB23e haben (noch) keinen roten Test: der echte Docling-Adapter (einlesen.lies_pdf_ein)
-    # braucht docling und wird von keinem Test ausgefuehrt. Sie bleiben gruen und melden die Luecke.
-    # MBB10d hat keinen roten Test: test_req_mb_10_buch_id_ohne_slug legt keine Buchdatei unter dem
-    # kaputten Namen an -- ohne Slug-Pruefung bricht index trotzdem ab (Buchdatei fehlt).
+    # MBB10d, MBB23d, MBB23e: seit test_kritiker_luecken.py (Docling-Attrappe, Slug mit vorhandener
+    # Buchdatei) mit rotem Test.
     ('MBB1a Praefix-Zuweisung: kuerzestes statt laengstes Praefix gewinnt',
      'rag.py',
      '        if len(p) > laenge and list(pfad[:len(p)]) == p:',
@@ -1052,8 +1059,8 @@ MUTATIONEN = [
      '    k = 0', MBT),
     ('MBB12c Gleichstand: die letzte Zeile gewinnt',
      'einlesen.py',
-     '            vergeben[gleich[0]] = i\n            gefunden_bei[i] = gleich[0]\n            p.gefunden.append((e["titel"], s))\n            starts.append((gleich[0], 1, i))',
-     '            vergeben[gleich[-1]] = i\n            gefunden_bei[i] = gleich[-1]\n            p.gefunden.append((e["titel"], s))\n            starts.append((gleich[-1], 1, i))', MBT),
+     '            vergeben[gleich[0]] = i\n            gefunden_bei[i] = gleich[0]\n',
+     '            vergeben[gleich[-1]] = i\n            gefunden_bei[i] = gleich[-1]\n', MBT),
     ('MBB12d mehrdeutig wird nicht gezaehlt',
      'einlesen.py',
      '            if len(gleich) > 1:\n                p.mehrdeutig.append',
@@ -1072,8 +1079,8 @@ MUTATIONEN = [
      '            phys = e["seite"]', MBT),
     ('MBB13a nicht gefundener Eintrag beginnt immer am Seitenanfang',
      'einlesen.py',
-     '            start = gefunden_bei[davor[-1]] + 1 if davor else seitenanfang(s)',
-     '            start = seitenanfang(s)', MBT),
+     '            nicht[i] = gefunden_bei[davor[-1]] if davor else None',
+     '            nicht[i] = None', MBT),
     ('MBB13b nicht gefundener Eintrag fehlt im Protokoll',
      'einlesen.py',
      '            p.nicht_gefunden.append((e["titel"], s))',
@@ -1200,7 +1207,7 @@ MUTATIONEN = [
      '            pass', MBT),
     ('MBB25b Vorspann-Name fest',
      'einlesen.py',
-     '    vorspann = vorspann or rag.VORSPANN_STANDARD',
+     '    vorspann = rag.titelnorm(vorspann or rag.VORSPANN_STANDARD)',
      '    vorspann = rag.VORSPANN_STANDARD', MBT),
     ('MBB27a Adapter durchlaeuft Bild-Elemente nicht (iterate_items ohne traverse_pictures)',
      'einlesen.py',
@@ -1234,6 +1241,142 @@ MUTATIONEN = [
      'einlesen.py',
      '                    z["im_rand"] = bool(im_rand(z, rand, hoehe))',
      '                    z["im_rand"] = False', MBT),
+    ('MBK1 geparste Listen zwischen Chunks geteilt',
+     'rag.py',
+     '"abschnittspfad": list(lies(z[9])),',
+     '"abschnittspfad": lies(z[9]),'),
+    ('MBK1b geparste Seitenlisten zwischen Chunks geteilt',
+     'rag.py',
+     '"seiten": list(lies(z[12])),',
+     '"seiten": lies(z[12]),'),
+    ('MBK2a Wechsel Alt->Mehrbuch: Altbestand-Zeilen bleiben stehen',
+     'rag.py',
+     '        loesche("buch_id IS NULL")',
+     '        pass'),
+    ("MBK2b Wechsel Mehrbuch->Alt: Buchstaende bleiben (Buecher danach 'aktuell')",
+     'rag.py',
+     '        con.execute("DELETE FROM buch_staende WHERE spiel_id=? AND konfig=?", (spiel_id, konfig))\n',
+     ''),
+    ('MBK3 nicht mehr deklarierte Buecher bleiben im Index',
+     'rag.py',
+     '        for bid in sorted(set(vorher) - set(rang)):',
+     '        for bid in []:'),
+    ('MBK4 reine Deklarationsaenderung wird nicht nachgezogen',
+     'rag.py',
+     '                if alte_dekl != dekl:',
+     '                if False:'),
+    ('MBK7 Tabellen ueber item.text statt roh (Markdown)',
+     'einlesen.py',
+     '    if _klasse(item) == "table" and hasattr(item, "export_to_markdown"):',
+     '    if False:', MBT),
+    ('MBK8 Docling-bbox ohne Umrechnung nach oben links',
+     'einlesen.py',
+     'b = bbox.to_top_left_origin(page_height=hoehe) if hasattr(bbox, "to_top_left_origin") else bbox',
+     'b = bbox', MBT),
+    ('MBK10 Adapter ordnet die pdfplumber-Schrift nicht zu',
+     'einlesen.py',
+     '    if mit_schrift:\n        seiten = ordne_schrift_zu(',
+     '    if False:\n        seiten = ordne_schrift_zu(', MBT),
+    ('MBK11 Seitengrenze inklusiv statt exklusiv',
+     'rag.py',
+     'if w[0] < ende and (i + 1 == len(wechsel)',
+     'if w[0] <= ende and (i + 1 == len(wechsel)'),
+    ('MBK12 Seite der Ueberschriftenzeile zaehlt nicht',
+     'einlesen.py',
+     '        seite(kopfzeile, 0)\n        for o, s in verschoben:\n            if wechsel[-1][1] != s:\n                wechsel.append([o, s])',
+     '        wechsel = verschoben or [[0, zeilen[kopfzeile][0]]]', MBT),
+    ('MBK13 Seitenwechsel nach der Trennfuge um eins verschoben',
+     'einlesen.py',
+     '            self.text = links[:-1] + zeile\n            return len(links) - 1\n        if links.endswith("/")',
+     '            self.text = links[:-1] + zeile\n            return len(links)\n        if links.endswith("/")', MBT),
+    ('MBK14 Rand-Zaehler zaehlt jede Randzeile',
+     'einlesen.py',
+     '                    if _waere_ueberschrift(z, layout):\n                        p.rand_verhindert += 1',
+     '                    if True:\n                        p.rand_verhindert += 1', MBT),
+    ('MBK15 Veto-Zaehler zaehlt jede Veto-Zeile',
+     'einlesen.py',
+     '        if a is not None and merkmale and protokoll is not None:',
+     '        if protokoll is not None:', MBT),
+    ('MBK16 Mehrheit nur nach Groesse (Schnitt nicht im Schluessel)',
+     'einlesen.py',
+     '        schluessel = (round(float(ch["size"]), 1),) + tuple(schnitt[m] for m in SCHNITTE)',
+     '        schluessel = (round(float(ch["size"]), 1),) + tuple(False for m in SCHNITTE)', MBT),
+    ('MBB30a DROP_TYPES auf Mehrbuch angewendet (Filter und typ-Pruefung)',
+     'rag.py',
+     '    for z in zeilen:\n        hinweis = ""',
+     '    pruefe_typ_feld([{"typ": z[3]} for z in zeilen if z[3] is not None], drop)\n    for z in zeilen:\n        if z[3] in drop:\n            continue\n        hinweis = ""'),
+    ('MBB31a Umsortieren nach Lage aus',
+     'einlesen.py',
+     '            reihe = _einsortieren(reihe, gefunden_bei[i], zeilen, p)',
+     '            pass', MBT),
+    ('MBB31b Gleichstand nach Lage (oberste Zeile) statt nach urspruenglicher Folge',
+     'einlesen.py',
+     '            gleich = [j for d, j in bewertet if d == beste]',
+     '            gleich = sorted((j for d, j in bewertet if d == beste), key=lambda j: zeilen[j][1].get("oben") or 0)', MBT),
+    ('MBB31c Umsortieren auch fuer Elemente der Nachbarspalte',
+     'einlesen.py',
+     '                and e["x0"] < u["x1"] and u["x0"] < e["x1"])',
+     ')', MBT),
+    ('MBB32a Strichrest ohne Konjunktionsausnahme',
+     'einlesen.py',
+     '            if unicodedata.category(wort[0]) == "Ll" and wort.casefold() not in konj:',
+     '            if unicodedata.category(wort[0]) == "Ll":', MBT),
+    ('MBB32b Binnen-Grossbuchstabe wird nicht gezaehlt',
+     'einlesen.py',
+     '                _verdacht(p.binnen_grossbuchstabe, seite(i))',
+     '                pass', MBT),
+    ('MBB32c Strichrest wird nicht gezaehlt',
+     'einlesen.py',
+     '                _verdacht(p.strichrest, seite(m.start()))',
+     '                pass', MBT),
+    ('MBB33a titelnorm aus',
+     'rag.py',
+     '    return " ".join(unicodedata.normalize("NFC", titel or "").split())',
+     '    return titel'),
+    ('MBB33b Inhaltsart-Praefix nicht normalisiert',
+     'rag.py',
+     '        p = [titelnorm(t) for t in z["praefix"]]',
+     '        p = list(z["praefix"])'),
+    ('MBB34a Schemapruefung aus',
+     'einlesen.py',
+     'def pruefe_layout_schema(buch):\n',
+     'def pruefe_layout_schema(buch):\n    return\n', MBT),
+    ('MBB11e Zeilenend-Reparatur auf dem Docling-Weg an',
+     'einlesen.py',
+     '                         zeilenenden=False)',
+     '                         zeilenenden=True)', MBT),
+    ('MBB11f Zeilenweg: Zeilenenden innerhalb eines Elements nicht repariert',
+     'einlesen.py',
+     '        stuecke = zeilen[j][1]["text"].split("\\n") if zeilenenden else [zeilen[j][1]["text"]]',
+     '        stuecke = [zeilen[j][1]["text"]]', MBT),
+    ('MBB12h norm ohne Formatzeichen-Entfernung (Cf)',
+     'einlesen.py',
+     '                   if not ch.isspace() and unicodedata.category(ch) != "Cf").casefold()',
+     '                   if not ch.isspace()).casefold()', MBT),
+    ('MBB7c Zusatzschluessel der Fundstelle erlaubt',
+     'rag.py',
+     '            if fremd:\n                raise KonfigFehler(\n                    f"{pfad}: Frage',
+     '            if False:\n                raise KonfigFehler(\n                    f"{pfad}: Frage'),
+    ('MBB6f Judge erkennt den festen Satz mit Buch-Fundstellen nicht',
+     'judge.py',
+     ' + "|"\n                   + liste(_BUCH_FUNDSTELLE, r"\\s*;\\s*|\\s+und\\s+")',
+     ''),
+    ('MBB6g antworten.jsonl ohne Buch je Fundstelle',
+     'messung/lauf.py',
+     '        if any("buch_id" in h for h, _ in hits):\n            return [{"buch_id"',
+     '        if False:\n            return [{"buch_id"'),
+    ("MBB6h Sprachmodus mit 'S.' statt 'Seite'",
+     'rag.py',
+     '        ort = f"{\'Seite\' if sprache else \'S.\'} {chunk[\'seite\']}"',
+     '        ort = f"S. {chunk[\'seite\']}"'),
+    ('MBB20j Kopfrandgrenze exklusiv',
+     'einlesen.py',
+     '    if rand.get("kopf") is not None and mitte <= rand["kopf"]:',
+     '    if rand.get("kopf") is not None and mitte < rand["kopf"]:', MBT),
+    ('MBB20k Fussrandgrenze exklusiv',
+     'einlesen.py',
+     '        if mitte >= hoehe - rand["fuss"]:',
+     '        if mitte > hoehe - rand["fuss"]:', MBT),
 ]
 
 
@@ -1296,7 +1439,8 @@ def _mutiere(auswahl, lauf, unerwartet_gruen):
         print("[NULL ] schon ohne Mutation rot (zaehlt bei keiner Mutation):")
         for r in grund:
             print(f"         {r}")
-        unerwartet_gruen.append("Nullmessung: ohne Mutation rot")
+        if any(not ist_zeittest(r) for r in grund):       # ein Zeittest-Ausreisser allein ist kein Befund
+            unerwartet_gruen.append("Nullmessung: ohne Mutation rot")
     for name, datei, alt, neu, *nur_tests in auswahl:
         pfad = os.path.join(lauf, datei)
         orig = io.open(pfad, encoding="utf-8").read()
@@ -1306,13 +1450,17 @@ def _mutiere(auswahl, lauf, unerwartet_gruen):
             continue
         try:
             io.open(pfad, "w", encoding="utf-8").write(orig.replace(alt, neu, 1))
-            rot = [r for r in rote_tests(lauf, nur_tests[0] if nur_tests else TESTS)
-                   if r not in grund and r.split("::")[0] not in grund_abbruch]
+            alle_rot = [r for r in rote_tests(lauf, nur_tests[0] if nur_tests else TESTS)
+                        if r not in grund and r.split("::")[0] not in grund_abbruch]
+            rot = [r for r in alle_rot if not ist_zeittest(r)]
+            nur_zeit = [r for r in alle_rot if ist_zeittest(r)]
         finally:
             io.open(pfad, "w", encoding="utf-8").write(orig)
         print(f"[{'ROT  ' if rot else 'GRUEN'}] {name}")
         for r in rot:
             print(f"         {r}")
+        for r in nur_zeit:
+            print(f"         (Zeittest, zaehlt nicht) {r}")
         if not rot and not name.startswith("[gleich]"):
             unerwartet_gruen.append(name)
 
