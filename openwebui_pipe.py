@@ -104,7 +104,13 @@ def fundstellen(hits):
 
 def fundstellen_spiel(hits, spiel):
     """Fusszeile des Index-Wegs: welches Spiel, welche Seiten -- sichtbar, welches Heft
-    geantwortet hat (auch bei STANDARD_SPIEL und im Chat ohne Nennung)."""
+    geantwortet hat (auch bei STANDARD_SPIEL und im Chat ohne Nennung).
+
+    Mehr-Buecher-Bestand: je Treffer seine Fundstelle (Buch, Fassung, Seite, ggf. Hinweis), wie sie
+    _suche_spiel mit rag.fundstelle angehaengt hat -- dieselbe Funktion wie Prompt und CLI."""
+    if any("fundstelle" in h for h, _ in hits):
+        teile = [f"{h['fundstelle']} ({s:.3f})" for h, s in hits]
+        return f"\n\n---\n*Quelle: {spiel} -- Abgerufen: {'; '.join(teile)}*"
     seiten = list(dict.fromkeys(str(h["seite"]) for h, _ in hits))
     teile = [f"S. {h['seite']} ({s:.3f})" for h, s in hits]
     wort = "Seite" if len(seiten) == 1 else "Seiten"
@@ -361,12 +367,25 @@ class Pipe:
         data_dir = os.path.dirname(os.path.abspath(v.INDEX_PATH))
         wissen = rag.knowledge_pfad(spiel_id, data_dir)
         stand_wissen = datei_stand(wissen) if os.path.exists(wissen) else None
+        # Mehr-Buecher-Bestand (REQ-MB-26): alle Buchdateien und spiel.json zaehlen, nicht nur eine Datei
+        buecher = self._buchdateien(rag, spiel_id, data_dir)
+        stand_buecher = None if buecher is None else tuple(
+            datei_stand(p) if os.path.exists(p) else None for p in buecher)
         key = (self._rag_key, v.INDEX_PATH, datei_stand(v.INDEX_PATH), spiel_id, stand_wissen,
                v.DROP_TYPES, v.EMBED_MODEL, v.CHUNK_SIZE, v.CHUNK_OVERLAP)
+        key += (stand_buecher,)
         if key in self._spiel_cache:
             self._spiel_cache[key] = self._spiel_cache.pop(key)   # zuletzt benutzt nach hinten
             return self._spiel_cache[key]
         konfig = rag.index_konfig()
+        if stand_buecher is not None:
+            stand = rag.stand_im_index(con, spiel_id, konfig)
+            if stand and stand[0] != rag.bestand_fingerprint(spiel_id, data_dir, konfig):
+                raise rag.KonfigFehler(
+                    f"Index fuer {spiel_id!r} ist veraltet: eine Buchdatei oder die Deklaration in spiel.json hat "
+                    f"sich seit dem letzten `rag.py index` geaendert. Auf dem Host `CHUNK_SIZE={v.CHUNK_SIZE} "
+                    f"CHUNK_OVERLAP={v.CHUNK_OVERLAP} EMBED_MODEL={v.EMBED_MODEL} "
+                    f"python rag.py index {spiel_id}` laufen lassen.")
         if stand_wissen is not None:
             stand = rag.stand_im_index(con, spiel_id, konfig)
             if stand and stand[0] != rag.fingerprint(wissen, konfig):
@@ -384,6 +403,16 @@ class Pipe:
             self._spiel_cache.pop(next(iter(self._spiel_cache)))
         return chunks, embs
 
+    @staticmethod
+    def _buchdateien(rag, spiel_id, data_dir):
+        """spiel.json + Buchdateien eines Mehr-Buecher-Bestands neben dem Index, sonst None."""
+        meta_pfad = os.path.join(data_dir, spiel_id, "spiel.json")
+        if not hasattr(rag, "wissens_dateien") or not os.path.exists(meta_pfad):
+            return None
+        if not rag.ist_mehrbuch(rag.lies_spiel(spiel_id, data_dir)):
+            return None
+        return [meta_pfad] + rag.wissens_dateien(spiel_id, data_dir)
+
     def _suche_spiel(self, frage, v, spiel_id):
         # Unter dem Lock aus demselben Grund wie _suche: Modul-Globale gehoeren zu DIESER Anfrage.
         with self._lock:
@@ -392,6 +421,8 @@ class Pipe:
             try:
                 chunks, embs = self._lade_spiel(rag, v, spiel_id, con)
                 hits = rag.retrieve(frage, chunks, embs, k=v.TOP_K, spiel_id=spiel_id, index=con)
+                # Mehr-Buecher-Bestand: die Fusszeile nennt je Treffer rag.fundstelle (REQ-MB-6, -21)
+                hits = [(dict(h, fundstelle=rag.fundstelle(h)) if "buch_id" in h else h, s) for h, s in hits]
             finally:
                 con.close()
         return rag.baue_nachrichten(frage, hits), hits
