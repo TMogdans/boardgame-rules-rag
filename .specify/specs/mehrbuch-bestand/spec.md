@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Fassung 7 (nach Kritiker-Review), wartet auf Abnahme.** (Historie: Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 7). (Historie: Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -727,6 +727,7 @@ Fassung 7 (Tobias, 2026-10-22, nach Kritiker-Review am echten Buch):
 - **F7-5** Listentitel vor Verwendung normalisiert (Leerraum → ein Leerzeichen, trim, NFC), Vorsatz einzeilig, Präfixe ebenso — gemessen: 48/148 Titel mit `\r\n`, 73 mit abweichendem Leerraum, 28,9 % der Häppchen mit CR/LF im Vorsatz (MB-33).
 - **F7-6** MB-19 Altbestand: Maximum als Median der Maxima aus 5 Wiederholungen je Seite, Grenze +20 %; Zeittests zählen in Mutationsproben nicht als Fang — gemessen: 2/26 Läufe rot, Verhältnis der Einzel-Maxima 0,47–2,35 bei typisch 1,002 (MB-19).
 - **F7-7** Zeilenmerkmal „eigene Zeile" gestrichen, Layout-/Rand-Deklaration gegen Schema geprüft — gemessen: Tippfehler `groese` machte jede Zeile zur Überschrift; „eigene Zeile" war nie definiert noch umgesetzt (MB-20, -34).
+- **F7-A** Abnahme-Auslegungen (Tobias, 2026-10-22): weicher Trennstrich (U+00AD) im Wort wird auf allen Extraktionswegen entfernt (MB-11 Tabellenzeile 2); MB-31 regelt nur „vorher geliefert, liegt darunter“ (Gegenrichtung Spec 2); MB-19 neu und Basis abwechselnd; MB-33 normalisiert auch Präfixe aus spiel.json und alle Pfadelemente; MB-30 behält die Prüfung unbekannter DROP_TYPES-Werte.
 
 ## Tier
 
