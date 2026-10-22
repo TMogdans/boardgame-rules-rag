@@ -1056,6 +1056,78 @@ class TestKaputteDeklaration(ZweiBuecher):
                                                              inhaltsart="welt")])
 
 
+# ===================================================================================
+# REQ-MB-30: DROP_TYPES nur fuer Altbestaende (Fassung 7)
+# ===================================================================================
+def ohne_typ(eintraege):
+    return [{k: v for k, v in e.items() if k != "typ"} for e in eintraege]
+
+
+class TestDropTypesNurAltbestand(ZweiBuecher):
+    def lege_ohne_typ_an(self):
+        self.bestand([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta", sprache="en",
+                                                              inhaltsart="welt")])
+        self.schreibe_buch("nord", ohne_typ(nord()))
+        self.schreibe_buch("sued", ohne_typ(sued()))
+
+    def anzahl(self, drop):
+        with mock.patch.dict(os.environ, {"DROP_TYPES": drop}):
+            return len(rag.lade_spiel(self.oeffne(), SID, rag.drop_fuer_index())[0])
+
+    @unittest.skip("devloop: REQ-MB-30 noch nicht implementiert")
+    def test_req_mb_30_mehrbuch_ohne_typ_mit_pipe_default(self):
+        """[REQ-MB-30] Mehrbuch ohne typ, DROP_TYPES="flavor,meta": index, Suche, Pipe und eval laufen; Haeppchenzahl wie mit ""."""
+        self.lege_ohne_typ_an()
+        self.schreibe_golden([{"id": 1, "frage": "Feuer", "typ": "fakt", "erwartet": "-", "keywords": [],
+                               "seiten": [{"buch_id": "sued", "seite": 10}]}])
+        with mock.patch.dict(os.environ, {"DROP_TYPES": "flavor,meta"}):
+            self.baue()
+            hits = self.suche("Feuer", 3)
+            self.assertEqual(len(hits), 3)
+            with mock.patch.object(rag, "answer", lambda *a: "x"), contextlib.redirect_stdout(io.StringIO()):
+                saetze = rag.cmd_eval_spiele([SID])
+            self.assertEqual([s["kategorie"] for s in saetze], [rag.KAT_GETROFFEN])
+        self.assertEqual(self.anzahl("flavor,meta"), self.anzahl(""))
+        self.assertEqual(self.anzahl(""), len(nord()) + len(sued()))
+        p = self.pipe(top_k=2)
+        p.valves.DROP_TYPES = "flavor,meta"                   # Default der Pipe
+        text = self.frage_pipe(p, "Feuer")
+        self.assertNotIn("Fehler", text)
+        self.assertEqual(len(self.llm_bekam), 1)
+
+    @unittest.skip("devloop: REQ-MB-30 noch nicht implementiert")
+    def test_req_mb_30_flavor_haeppchen_bleiben_im_mehrbuch_index(self):
+        """[REQ-MB-30] Mehrbuch-Haeppchen mit typ "flavor" bleiben bei DROP_TYPES=flavor im Index und sind per BM25 und lade_spiel auffindbar."""
+        self.bestand([buch("nord", "Buch Nord", "alpha")])
+        self.schreibe_buch("nord", [eintrag("nord", 1, 10, "Feuer regelmarke"),
+                                    eintrag("nord", 2, 11, "Wasser flavormarke", typ="flavor")])
+        with mock.patch.dict(os.environ, {"DROP_TYPES": "flavor"}):
+            self.baue()
+            con = self.oeffne()
+            chunks, _ = rag.lade_spiel(con, SID, rag.drop_fuer_index())
+            self.assertTrue(any("flavormarke" in c["text"] for c in chunks))
+            self.assertEqual([chunks[i]["text"] for i in rag.bm25_rangfolge(con, "flavormarke", chunks, 5)],
+                             [c["text"] for c in chunks if "flavormarke" in c["text"]])
+            self.assertIn("flavormarke", " ".join(h["text"] for h, _ in self.suche("Wasser", 2)))
+
+    @unittest.skip("devloop: REQ-MB-30 noch nicht implementiert")
+    def test_req_mb_30_altbestand_unveraendert_unbekannter_wert_bleibt_fehler(self):
+        """[REQ-MB-30] Altbestand ohne typ + DROP_TYPES=flavor bricht ab, mit typ flavor wird gefiltert; unbekannter Wert ist auch im Mehrbuch ein KonfigFehler."""
+        self.lege_ohne_typ_an()
+        alt = self.lege_alt_an()                                    # ALT: ein Eintrag typ flavor
+        meta = rag.lege_spiel_an("Altohne")
+        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]), ohne_typ(ALT))
+        self.baue()
+        with mock.patch.dict(os.environ, {"DROP_TYPES": "flavor"}):
+            with self.assertRaises(rag.KonfigFehler):
+                self.suche("Feuer", 2, sid="altohne")
+            chunks, _ = rag.lade_spiel(self.oeffne(), alt, rag.drop_fuer_index())
+            self.assertNotIn("Erde auf dem Deckblatt.", [c["text"] for c in chunks])
+            self.assertEqual(len(chunks), len(rag.indexiere_stuecke(ALT[:2])))
+        with mock.patch.dict(os.environ, {"DROP_TYPES": "falle"}), self.assertRaises(rag.KonfigFehler):
+            self.suche("Feuer", 2)
+
+
 class TestPipeVeraltet(ZweiBuecher):
     @unittest.skip("devloop: REQ-MB-26 noch nicht implementiert")
     def test_req_mb_26_geaenderte_zweite_buchdatei_meldet_veraltet(self):
@@ -1258,7 +1330,7 @@ class TestPerformance(BestandTest):
 
     @unittest.skip("devloop: REQ-MB-19 noch nicht implementiert")
     def test_req_mb_19_altbestand_hoechstens_20_prozent_ueber_dem_stand_vor_der_spec(self):
-        """[REQ-MB-19] Altbestand 2.000 Haeppchen, 1.024 Dim.: typisch und Maximum <= 1,2 x Basis (rag.py vor der Spec, selber Lauf)."""
+        """[REQ-MB-19] Altbestand 2.000 Haeppchen, 1.024 Dim.: typisch <= 1,2 x Basis; Maximum = Median der 5 Maxima je Seite <= 1,2 x Median der Basis (Fassung 7)."""
         meta = rag.lege_spiel_an("Altspiel")
         rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]),
                            [{"id": j, "seite": j // 10 + 1, "typ": "regel", "text": f"Regel {j} " * 20,
@@ -1276,16 +1348,28 @@ class TestPerformance(BestandTest):
             for i in range(3):          # gleiche Treffer -- sonst waere der Vergleich keiner
                 self.assertEqual([(h["seite"], h["text"], round(s, 6)) for h, s in neu(i)],
                                  [(h["seite"], h["text"], round(s, 6)) for h, s in alt(i)])
-            (typ_a, max_a), (typ_n, max_n) = self.miss_paar(alt, neu)
-        print(f"\n  REQ-MB-19 Altbestand (2000 Haeppchen, 1024 Dim.): Basis typisch {typ_a:.2f} ms, max {max_a:.2f} ms;"
-              f" neu typisch {typ_n:.2f} ms, max {max_n:.2f} ms")
+            zeiten_a, zeiten_n, maxima_a, maxima_n = [], [], [], []
+            for w in range(5):                      # Wiederholungen; die Seite, die anfaengt, wechselt
+                if w % 2 == 0:
+                    (ta, tn) = self.miss_paar(alt, neu)
+                else:
+                    (tn, ta) = self.miss_paar(neu, alt)
+                zeiten_a += ta
+                zeiten_n += tn
+                maxima_a.append(max(ta))
+                maxima_n.append(max(tn))
+        typ_a, typ_n = statistics.median(zeiten_a), statistics.median(zeiten_n)
+        max_a, max_n = statistics.median(maxima_a), statistics.median(maxima_n)
+        print(f"\n  REQ-MB-19 Altbestand (2000 Haeppchen, 1024 Dim., 5 x 200 Fragen): Basis typisch {typ_a:.2f} ms, "
+              f"Maxima {[round(m, 2) for m in maxima_a]} (Median {max_a:.2f}); neu typisch {typ_n:.2f} ms, "
+              f"Maxima {[round(m, 2) for m in maxima_n]} (Median {max_n:.2f})")
         self.assertLessEqual(typ_n, 1.2 * typ_a)
         self.assertLessEqual(max_n, 1.2 * max_a)
 
     @staticmethod
     def miss_paar(fa, fb, n=200):
-        """Basis und neuer Code abwechselnd (Reihenfolge je Frage getauscht), GC aus: Drift und
-        Aufwaermen treffen beide gleich. Rueckgabe: ((typisch, max) Basis, (typisch, max) neu)."""
+        """Eine Wiederholung: fa und fb abwechselnd (Reihenfolge je Frage getauscht), GC aus -- Drift und
+        Aufwaermen treffen beide gleich. Rueckgabe: (Zeiten fa in ms, Zeiten fb in ms)."""
         fa(-1)
         fb(-1)
         ta, tb = [], []
@@ -1299,7 +1383,7 @@ class TestPerformance(BestandTest):
                     t.append((time.perf_counter() - s) * 1000)
         finally:
             gc.enable()
-        return (statistics.median(ta), max(ta)), (statistics.median(tb), max(tb))
+        return ta, tb
 
 class TestVorabmessung(unittest.TestCase):
     """REQ-MB-23: Messergebnis der Extraktion liegt im Spec-Ordner -- Format Fassung 6, nur Zahlen, kein Buchtext."""
