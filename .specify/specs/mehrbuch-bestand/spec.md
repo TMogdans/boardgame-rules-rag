@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 7). (Historie: Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 8). (Historie: Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -106,16 +106,37 @@ In einem Mehr-Bücher-Bestand nennen Quellenkopf im Prompt (`baue_kontext`), Pip
 und die Seitenangaben des Entscheidungsschritts (C-Text, B-Hinweis, Sprachmodus) je Fundstelle
 **Buch (Titel oder Kurzname), Fassung und gedruckte Seite** (REQ-MB-22). CLI und Pipe erzeugen
 dieselben Köpfe aus derselben Funktion.
+
+*Fassung 8 (a), Judge:* Der Judge (`judge.py`, deterministische Vorstufe) erkennt den festen
+Verweigerungssatz eines Mehr-Bücher-Bestands mit Buch-Fundstellen („Buch …, S. n") in Chat- und
+Sprachmodus wie bei Altbeständen (also als Verweigerung, nicht als inhaltliche Antwort).
+*Fassung 8 (b), Messlauf:* `messung/lauf.py` protokolliert in `antworten.jsonl` die abgerufenen
+Fundstellen eines Mehr-Bücher-Bestands **mit Buch** (`buch_id` und Seite je Fundstelle), nicht nur
+die Seite; Altbestände: Ausgabe unverändert (REQ-MB-3).
+*Fassung 8 (c), Sprachmodus:* Im Sprachmodus nennt die Fundstelle eines Mehr-Bücher-Bestands die
+Seite ausgeschrieben als „Seite n" (wie bei Altbeständen), nicht „S. n"; Buch und Fassung stehen
+weiterhin dabei.
+*Detektor (Fassung 8):* (a) Verweigerungssatz mit „Buch A, S. 12" in Chat- und Sprachmodus → Judge
+wertet Verweigerung, gleich dem Altbestand-Fall; gleicher Satz mit Antworttext → keine Verweigerung.
+(b) Messlauf auf synthetischem Zwei-Bücher-Bestand mit gleicher Seitenzahl in beiden Büchern →
+`antworten.jsonl` enthält je abgerufener Fundstelle `buch_id` und Seite, die beiden sind
+unterscheidbar; Altbestand-Zeile byte-gleich zum Stand vor der Änderung. (c) Sprachmodus-Ausgabe
+für Fundstelle Seite 12 enthält „Seite 12" und kein „S. 12".
 *Detektor:* Prompt-Nachrichten und Pipe-Ausgabe für einen synthetischen Zwei-Bücher-Bestand
 mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; Mutation der Kopf-Funktion
 (liefert Marker) ändert CLI- **und** Pipe-Ausgabe. Altbestände: REQ-MB-3.
 
 **REQ-MB-7** — *If/Then, Messung*
 Golden-Set-Fragen eines Mehr-Bücher-Bestands geben erwartete Fundstellen als
-(`buch_id`, gedruckte Seite) an; ein Treffer zählt nur bei passendem Buch. Wenn ein Golden Set
+(`buch_id`, gedruckte Seite) an; ein Treffer zählt nur bei passendem Buch. Ein Fundstelleneintrag
+eines Mehr-Bücher-Bestands darf **nur** die Schlüssel `buch_id` und `seite` enthalten; jeder
+unbekannte Zusatzschlüssel (z. B. `notiz`) bricht `eval`/`messung` mit `KonfigFehler` ab (kein
+stilles Nie-Treffen; Fassung 8). Wenn ein Golden Set
 eines Mehr-Bücher-Bestands eine Seite ohne Buch angibt, dann bricht `eval`/`messung` mit
 `KonfigFehler` ab (keine stille Wertung gegen ein beliebiges Buch). Altbestände: REQ-MB-3.
 *Detektor:* Frage mit erwarteter Seite 12 in Buch A, Treffer auf Seite 12 in Buch B → verfehlt.
+Fundstelleneintrag `{"buch_id": "a", "seite": 12, "notiz": "x"}` → `KonfigFehler`; derselbe Eintrag
+ohne `notiz` → gültig.
 
 ### B. Quelle ersetzen und inkrementell einbetten
 
@@ -330,7 +351,8 @@ Buch konfigurierbar), werden Layout-Überschriften aus drei Merkmalsquellen best
   optional Laufweite von–bis. Eine Schrift **trifft** Stufe n, wenn sie alle Angaben der Stufe n
   erfüllt; trifft sie mehrere, gilt die kleinste n.
 - **Position:** Kopf- und Fußrand je Buch als Abstand in PDF-Punkten von der oberen bzw. unteren
-  Seitenkante. Eine Zeile liegt im Rand, wenn ihr vertikaler Mittelpunkt darin liegt.
+  Seitenkante. Eine Zeile liegt im Rand, wenn ihr vertikaler Mittelpunkt darin liegt; die **Grenze ist inklusiv**
+  (Mittelpunkt genau auf der Randgrenze → Randzeile; Fassung 8).
 - **Layout-Klasse** der Docling-Extraktion: (i) die deklarierte Überschriften-Klasse (z. B.
   `section_header`) für den Rückfall; (ii) eine je Buch deklarierte **Veto-Menge** von Klassen,
   deren Zeilen nie Überschrift sind. Default der Veto-Menge sind mindestens Tabelle samt
@@ -397,6 +419,8 @@ Position, zwei Schriftstufen deklariert:
   Gegenprobe: dieselbe Zeile mit Klasse `text` → Überschrift `… › Zeta`.
 - (h) Veto Bildunterschrift: Zeile `Eta` mit Klasse `caption` und Schrift der Stufe 1 → keine
   Überschrift, kein Pfad enthält `Eta`.
+- Randgrenze (Fassung 8): Mittelpunkt genau auf der Grenze → Randzeile (keine Überschrift, Rand-Zähler);
+  Mittelpunkt Grenze + 0,01 pt → nicht im Rand. Gilt gleich für REQ-MB-12, -28 und -29.
 - Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von REQ-MB-12 unverändert).
 
 **REQ-MB-21** — *Contract, Hinweis gekennzeichneter Fassungen*
@@ -529,7 +553,9 @@ je Buch. Bücher ohne Randangabe und Altbestände bleiben unverändert (REQ-MB-3
 *Detektor:* synthetisches Buch, zwei Seiten, je Seite Kopfzeile mit Marker `KOPFMARKE-n`,
 Fußzeile mit Marker `FUSSMARKE-n` und Fließtext mit eigenem Marker; Kopf- und Fußrand deklariert
 → nach `index` enthält kein Häppchen (BM25 bzw. `lade_spiel`) und kein Pfad einen Kopf- oder
-Fußmarker, jeder Fließtextmarker ist auffindbar, Protokoll-Zähler = 4. Zwei Bücher im Bestand,
+Fußmarker, jeder Fließtextmarker ist auffindbar, Protokoll-Zähler = 4. Grenzfall (Fassung 8): Zeile mit
+Mittelpunkt genau auf der Randgrenze wird verworfen und gezählt, mit Grenze + 0,01 pt bleibt sie.
+Zwei Bücher im Bestand,
 nur eines mit Randangabe → Zähler nur bei diesem, das andere enthält seine Kopf-/Fußmarker wie
 vor dieser Änderung (Häppchentexte gleich dem Lauf ohne Randangabe). Mutation: Randzeilen nur
 zählen, nicht verwerfen → Test rot.
@@ -547,7 +573,8 @@ Schnitte), z. B. per `reportlab` (reine Testabhängigkeit, darf in der Testumgeb
 - gemischte Zeile mit Mehrheit X und einem kürzeren Teil in Schrift Y → Schrift X;
 - Zeile mit gleich vielen Zeichen in X und Y → keine zugeordnete Schrift;
 - zwei Spalten mit gleich hohen Zeilen in Schrift X (links) und Y (rechts) → links X, rechts Y;
-- Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht.
+- Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht;
+  Mittelpunkt genau auf der Grenze → Rand (inklusiv), Grenze + 0,01 pt → nicht (Fassung 8).
 Mutation: Zuordnung ohne Spaltentrennung (alle Zeichen gleicher Höhe) → Spaltenfall rot.
 
 ### J. Ergänzungen (Fassung 7, nach Kritiker-Review)
@@ -696,6 +723,7 @@ Von Tobias bestätigt (Fassung 4):
 - FTS5-Trigram bzw. Komposita-Suche.
 - Earthdawn-Testsatz (Golden Set) — Daten, nicht Code; folgt nach Spec 1.
 - Übersetzungs-/Suchfassung für englische Bände (Throal).
+- Gleichstand gleich großer Kästen bei der Zeichenzuordnung (REQ-MB-29) bleibt unspezifiziert (selten; F8-5).
 - Automatische Erkennung, ob eine *Frage* eine Regel- oder Weltfrage ist.
 
 ## Entscheidungen (Tobias, 2026-10-21)
@@ -728,6 +756,14 @@ Fassung 7 (Tobias, 2026-10-22, nach Kritiker-Review am echten Buch):
 - **F7-6** MB-19 Altbestand: Maximum als Median der Maxima aus 5 Wiederholungen je Seite, Grenze +20 %; Zeittests zählen in Mutationsproben nicht als Fang — gemessen: 2/26 Läufe rot, Verhältnis der Einzel-Maxima 0,47–2,35 bei typisch 1,002 (MB-19).
 - **F7-7** Zeilenmerkmal „eigene Zeile" gestrichen, Layout-/Rand-Deklaration gegen Schema geprüft — gemessen: Tippfehler `groese` machte jede Zeile zur Überschrift; „eigene Zeile" war nie definiert noch umgesetzt (MB-20, -34).
 - **F7-A** Abnahme-Auslegungen (Tobias, 2026-10-22): weicher Trennstrich (U+00AD) im Wort wird auf allen Extraktionswegen entfernt (MB-11 Tabellenzeile 2); MB-31 regelt nur „vorher geliefert, liegt darunter“ (Gegenrichtung Spec 2); MB-19 neu und Basis abwechselnd; MB-33 normalisiert auch Präfixe aus spiel.json und alle Pfadelemente; MB-30 behält die Prüfung unbekannter DROP_TYPES-Werte.
+
+Fassung 8 (Tobias, 2026-10-22, vorab entschieden):
+
+- **F8-1** Golden-Set-Fundstelleneintrag eines Mehr-Bücher-Bestands nur `buch_id` und `seite`; unbekannte Zusatzschlüssel → `KonfigFehler` statt stillem Nie-Treffen (MB-7).
+- **F8-2** Judge erkennt den festen Verweigerungssatz mit Buch-Fundstellen in Chat- und Sprachmodus wie bei Altbeständen; `messung/lauf.py` protokolliert Fundstellen mit Buch in `antworten.jsonl` (MB-6).
+- **F8-3** Sprachmodus nennt „Seite n" (ausgeschrieben), nicht „S. n" (MB-6).
+- **F8-4** Randgrenze inklusiv: Mittelpunkt genau auf der Grenze gehört zum Rand (MB-20, -28, -29; wirkt auch in MB-12).
+- **F8-5** Gleichstand gleich großer Kästen bei der Zeichenzuordnung bleibt unspezifiziert (selten) (MB-29, Abgrenzung).
 
 ## Tier
 
