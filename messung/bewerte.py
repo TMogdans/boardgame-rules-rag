@@ -3,8 +3,8 @@
 """
 Bewertet Messlaeufe: jede antworten.jsonl gegen das Golden Set, per judge.bewerte.
 
-    python messung/bewerte.py [--golden VERZEICHNIS] [--golden-datei NAME] [--modus anthropic] \\
-        [--modell NAME] LAUF/antworten.jsonl [LAUF2/antworten.jsonl ...]
+    python messung/bewerte.py [--golden VERZEICHNIS] [--golden-datei NAME] [--daten VERZEICHNIS] \\
+        [--modus anthropic] [--modell NAME] LAUF/antworten.jsonl [LAUF2/antworten.jsonl ...]
 
 Ein Argument darf auch ein Laufverzeichnis sein (dann gilt LAUF/antworten.jsonl).
 Schreibt urteile.jsonl neben jede antworten.jsonl: die Zeile des Laufs plus urteil,
@@ -13,6 +13,11 @@ begruendung (Rohtext des Bewerters), Token-Zahlen und das Flag "deterministisch"
 
 Golden Sets: <golden>/<spiel_id>/golden_set.json (Layout des Datenverzeichnisses)
 oder <golden>/<spiel_id>.json. Default fuer --golden: DATA_DIR bzw. data/ des Repos.
+Mehr-Buecher-Bestaende: die Buecherdeklaration (<daten>/<spiel_id>/spiel.json) braucht der Judge,
+um ihre festen Saetze deterministisch zu werten. --daten VERZEICHNIS nennt das Datenverzeichnis
+(Default: --golden). Eine flache Golden-Kopie (<golden>/<spiel_id>.json) bringt keine spiel.json
+mit -- dann --daten auf das echte Datenverzeichnis setzen; fehlt die Deklaration und sieht eine
+Antwort wie so ein Satz aus, warnt der Lauf einmal auf stderr.
 --golden-datei NAME waehlt eine andere Datei im Spielordner (<golden>/<spiel_id>/NAME, z. B.
 golden_praxis.json). Ohne die Option gilt die Datei, die meta.json des Laufs festhielt
 (GOLDEN_DATEI beim Lauf), sonst golden_set.json -- Urteile laufen so gegen dieselbe Datei
@@ -82,19 +87,23 @@ def loese_fragen_auf(zeilen, golden_verz, quelle="", datei=STANDARD_DATEI):
 
 
 def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeilen=None, fragen=None,
-                 datei=None):
-    """urteile.jsonl neben antworten.jsonl. Rueckgabe: Pfad."""
+                 datei=None, daten=None):
+    """urteile.jsonl neben antworten.jsonl. Rueckgabe: Pfad.
+    daten: Datenverzeichnis mit <spiel_id>/spiel.json (Buecherdeklaration), Default golden_verz."""
     zeilen = zeilen if zeilen is not None else lies_jsonl(pfad_antworten)
     datei = datei or golden_datei_des_laufs(pfad_antworten)
     fragen = fragen if fragen is not None else loese_fragen_auf(zeilen, golden_verz, pfad_antworten, datei)
     ziel = os.path.join(os.path.dirname(os.path.abspath(pfad_antworten)), "urteile.jsonl")
     # Buecherdeklaration je Bestand ueber die spiel_id (REQ-MB-6, F9a-1); Altbestand: keine
-    buecher = {sid: rag.buecher_fuer_judge(sid, golden_verz) for sid in {z["spiel_id"] for z in zeilen}}
+    buecher = {sid: rag.buecher_fuer_judge(sid, daten or golden_verz) for sid in {z["spiel_id"] for z in zeilen}}
+    verdacht = []
     with open(ziel, "w", encoding="utf-8") as aus:
         for z, q in zip(zeilen, fragen):
             if buecher[z["spiel_id"]]:          # Mehr-Buecher-Bestand
                 r = judge.bewerte(modus, modell, q, z["antwort"], buecher=buecher[z["spiel_id"]])
             else:                               # Altbestand: Aufruf wie vor der Spec
+                if getattr(judge, "sieht_nach_buchsatz_aus", lambda _: False)(z["antwort"]):
+                    verdacht.append(z["spiel_id"])
                 r = judge.bewerte(modus, modell, q, z["antwort"])
             aus.write(json.dumps({**z, "typ": q.get("typ"), "urteil": r["urteil"], "begruendung": r.get("rohtext"),
                                   "input_tokens": r.get("input_tokens"),
@@ -103,13 +112,15 @@ def bewerte_lauf(pfad_antworten, golden_verz, modus, modell, ausgabe=print, zeil
                                  ensure_ascii=False) + "\n")
             aus.flush()
             ausgabe(f"{z['spiel_id']} {z['frage_id']} {r['urteil']}")
+    if verdacht:                            # einmal je Lauf, nur stderr (Urteile unveraendert)
+        judge.warne_ohne_deklaration(verdacht)
     return ziel
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     opt = {"--golden": os.environ.get("DATA_DIR") or os.path.join(BASE, "data"),
-           "--modus": "anthropic", "--modell": None, "--golden-datei": None}
+           "--modus": "anthropic", "--modell": None, "--golden-datei": None, "--daten": None}
     pfade = []
     while argv:
         a = argv.pop(0)
@@ -138,7 +149,7 @@ def main(argv=None):
         for p, zeilen, datei, fragen in geladen:
             print(f"== {p}  (Golden Set: {datei})", file=sys.stderr)
             print(bewerte_lauf(p, opt["--golden"], opt["--modus"], modell, zeilen=zeilen, fragen=fragen,
-                               datei=datei))
+                               datei=datei, daten=opt["--daten"]))
     except (BewerteFehler, judge.JudgeAbbruch, OSError, json.JSONDecodeError) as e:
         print(f"Abbruch: {e}", file=sys.stderr)
         return 1

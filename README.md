@@ -339,6 +339,14 @@ Jeder Abschnitt wird wie bisher mit `CHUNK_SIZE`/`CHUNK_OVERLAP` zerteilt, nie u
 Abschnittsgrenze; jeder Haeppchentext beginnt mit seinem Abschnittspfad (`K1 › U1`).
 `retrieve(..., filter={"buch_id"|"fassung"|"sprache"|"inhaltsart": wert})` filtert vor dem
 Ranking. Golden Sets eines solchen Bestands nennen `"seiten": [{"buch_id": ..., "seite": n}]`.
+
+**Bewerten und Eichen brauchen die Deklaration.** Der Judge erkennt den festen Verweigerungssatz
+eines Mehr-Buecher-Bestands ("... Naechste Fundstellen: Titel (Fassung), S. n") nur mit dessen
+`spiel.json`. `messung/bewerte.py` nimmt sie aus `--golden` (Datenverzeichnis-Layout); bei einer
+flachen Golden-Kopie (`<golden>/<spiel_id>.json`) zusaetzlich `--daten <Datenverzeichnis>` angeben.
+`judge.py eichen` braucht fuer solche Bestaende `--daten <Datenverzeichnis>` (oder `DATA_DIR`).
+Fehlt die Deklaration und sieht eine Antwort wie so ein Satz aus, warnt der Lauf einmal auf
+stderr; die Urteile von Altbestaenden aendern sich dadurch nicht.
 Gemessen (REQ-MB-19, 3.000 Haeppchen in 5 Buechern, 1.024 Dimensionen, Filter und
 Fassungsregel aktiv, 200 Fragen): Laden + Vektorsuche typisch 10,8 ms, max 16,8 ms; ein
 Altbestand mit 2.000 Haeppchen ist gleich schnell wie vor der Spec (typisch 3,96 / 3,94 ms).

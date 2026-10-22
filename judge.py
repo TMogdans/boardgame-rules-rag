@@ -25,6 +25,10 @@ Deterministische Vorstufe (alle Modi, auch im Eichlauf): besteht die Antwort AUS
 aus einem festen Verweigerungssatz (optional mit Fundstellen-Liste), wird KEIN Modell gefragt:
 richtig bei erwartet_verweigerung, sonst unsicher. Grund: Haiku wertete denselben festen Text
 mal unsicher, mal falsch -- Regeln im Prompt reichen nicht (gemessen 2026-09-30).
+Mehr-Buecher-Bestaende: der feste Satz nennt Fundstellen "Titel (Fassung), S. n". Die Vorstufe
+erkennt ihn NUR mit der Buecherdeklaration des Bestands -- fuer den Eichlauf deshalb
+`--daten <Datenverzeichnis>` (oder DATA_DIR) angeben, in dem <spiel_id>/spiel.json liegt. Ohne
+Deklaration geht so ein Satz ans Modell; der Lauf warnt dann einmal auf stderr.
 Umgebungsvariable: OLLAMA_URL (wie rag.py).
 """
 import argparse, json, math, os, re, statistics, sys, time
@@ -321,6 +325,32 @@ def _regex_fuer(buecher):
     return _BUCH_RE_CACHE[schluessel]
 
 
+# Nur fuer die Warnung (nie fuer ein Urteil): hat eine Antwort die FORM eines festen Satzes mit
+# Buch-Fundstellen, obwohl keine Deklaration vorliegt? Dann fehlt dem Lauf vermutlich --daten.
+_BUCHSATZ_FORM = _verweigerung_regex(r"[^;()]+? \([^()]*\), (?:pdf-)?(?:s\. |seite )\d+(?: \([^()]*\))?")
+
+
+def sieht_nach_buchsatz_aus(antwort):
+    """True, wenn die Antwort wie ein fester Satz eines Mehr-Buecher-Bestands aussieht, den die
+    Vorstufe ohne Deklaration NICHT erkennt (Altbestand-Saetze ausgenommen)."""
+    n = _normalisiere(antwort)
+    return bool(_BUCHSATZ_FORM.match(n)) and not _VERWEIGERUNG_RE.match(n)
+
+
+WARNUNG_OHNE_DEKLARATION = (
+    "WARNUNG: {n} Antwort(en) sehen aus wie der feste Satz eines Mehr-Buecher-Bestands (Fundstelle "
+    '"Titel (Fassung), S. n"), aber es wurde keine Buecherdeklaration uebergeben -- sie gehen ans Modell '
+    "statt deterministisch gewertet zu werden. Datenverzeichnis mit <spiel_id>/spiel.json angeben "
+    "(--daten bzw. DATA_DIR). Bestaende: {sids}")
+
+
+def warne_ohne_deklaration(verdacht, datei=None):
+    """Einmal je Lauf auf stderr; verdacht: Liste der spiel_ids mit verdaechtigen Antworten."""
+    if verdacht:
+        print(WARNUNG_OHNE_DEKLARATION.format(n=len(verdacht), sids=", ".join(sorted(set(verdacht)))),
+              file=datei or sys.stderr)
+
+
 def ist_fester_verweigerungssatz(antwort, buecher=None):
     """True, wenn die Antwort ausschliesslich ein fester Verweigerungssatz ist (siehe oben).
     buecher: Deklaration eines Mehr-Buecher-Bestands (wie rag.lies_buecher); ohne sie wie vor der Spec."""
@@ -590,10 +620,12 @@ def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None, buecher
                if e["frage_id"] not in golden.get(e["spiel_id"], {})]
     if fehlend:
         raise JudgeAbbruch(f"Frage-IDs nicht im Golden Set: {fehlend[:10]}")
-    einzel = []
+    einzel, verdacht = [], []
     for i, e in enumerate(eintraege, 1):
         frage = golden[e["spiel_id"]][e["frage_id"]]
         b = (buecher or {}).get(e["spiel_id"])
+        if not b and sieht_nach_buchsatz_aus(e["antwort"]):
+            verdacht.append(e["spiel_id"])
         r = bewerter(modus, modell, frage, e["antwort"], buecher=b) if b else bewerter(modus, modell, frage, e["antwort"])
         einzel.append({
             "spiel_id": e["spiel_id"], "frage_id": e["frage_id"], "label": e["label"],
@@ -610,6 +642,7 @@ def eichen(eintraege, golden, modus, modell, bewerter=bewerte, log=None, buecher
         if log:
             log(f"[{i}/{len(eintraege)}] {e['spiel_id']}/{e['frage_id']} "
                 f"label={e['label']} urteil={r['urteil']} {r['sekunden']:.1f}s")
+    warne_ohne_deklaration(verdacht)
     return einzel
 
 
@@ -689,7 +722,8 @@ def main(argv=None):
     e.add_argument("--ausgabe", default=None, help="JSON-Datei (Default: eichlauf_<modus>.json)")
     e.add_argument("--limit", type=int, default=None, help="nur die ersten N Eintraege (Rauchtest)")
     e.add_argument("--daten", default=os.environ.get("DATA_DIR") or None,
-                   help="Datenverzeichnis mit <spiel_id>/spiel.json: Buecherdeklaration fuer Mehr-Buecher-Bestaende")
+                   help="Datenverzeichnis mit <spiel_id>/spiel.json: Buecherdeklaration fuer Mehr-Buecher-Bestaende "
+                        "(fuer diese PFLICHT, sonst wertet die Vorstufe ihre festen Saetze nicht; Default DATA_DIR)")
     a = ap.parse_args(argv)
 
     modell = a.modell or (ANTHROPIC_DEFAULT if a.modus == "anthropic" else OLLAMA_DEFAULT)

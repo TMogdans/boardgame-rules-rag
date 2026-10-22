@@ -1376,7 +1376,7 @@ MUTATIONEN = [
      '    if not buecher:\n        return _verweigerung_regex(r"[^;()\\n]+?\\s\\([^()\\n]*\\),\\s+(?:pdf-)?(?:s\\.|seite)\\s*\\d+")'),
     ('MBB6l Messpfad uebergibt die Deklaration nicht',
      'messung/bewerte.py',
-     '    buecher = {sid: rag.buecher_fuer_judge(sid, golden_verz) for sid in {z["spiel_id"] for z in zeilen}}',
+     '    buecher = {sid: rag.buecher_fuer_judge(sid, daten or golden_verz) for sid in {z["spiel_id"] for z in zeilen}}',
      '    buecher = {sid: None for sid in {z["spiel_id"] for z in zeilen}}'),
     ('MBB6m Eichlauf uebergibt die Deklaration nicht',
      'judge.py',
