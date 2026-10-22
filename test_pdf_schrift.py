@@ -139,5 +139,27 @@ class SchriftTest(unittest.TestCase):
         self.assertTrue(self.zugeordnet(rand={"fuss": HOEHE - mitte})["randzeile"]["im_rand"])
         self.assertFalse(self.zugeordnet(rand={"fuss": HOEHE - mitte - 0.01})["randzeile"]["im_rand"])
 
+    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
+    def test_req_mb_29_lage_aus_mehreren_kaesten_ist_vereinigung(self):
+        """[REQ-MB-29] Docling-Element mit zwei Kaesten auf derselben Seite: Lage = Vereinigung (min x0/oben, max x1/unten); die Zeichen beider Kaesten bestimmen die Schrift. Faengt: nur prov[0] benutzt."""
+        import docling_attrappe as da
+        from reportlab.pdfgen import canvas
+        pfad = os.path.join(self.tmp.name, "kaesten.pdf")
+        c = canvas.Canvas(pfad, pagesize=(BREITE, HOEHE))
+        c.setFont("Helvetica", 10)
+        c.drawString(50, HOEHE - 110, "ab")                       # Kasten 1: 2 Zeichen normal
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(200, HOEHE - 314, "FETTERTEXT")              # Kasten 2: 10 Zeichen fett
+        c.showPage()
+        c.save()
+        element = da.Element("text", "ab FETTERTEXT", (45, 98, 70, 113), weitere_kaesten=[(195, 299, 300, 317)])
+        element._setze_seite(1)
+        seiten = einlesen().zeilen_aus_docling(da.Dokument([(1, element)]))
+        (zeile,) = seiten[1]
+        self.assertEqual((zeile["x0"], zeile["oben"], zeile["x1"], zeile["unten"]), (45, 98, 300, 317))
+        (mit_schrift,) = einlesen().ordne_schrift_zu(pfad, seiten)[1]
+        self.assertTrue(mit_schrift["schrift"]["fett"])
+        self.assertAlmostEqual(mit_schrift["schrift"]["groesse"], 14, delta=0.1)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
