@@ -130,5 +130,14 @@ class SchriftTest(unittest.TestCase):
         self.assertFalse(self.zugeordnet(rand={"fuss": fuss - 1})["randzeile"]["im_rand"])
 
 
+    @unittest.skip("devloop: REQ-MB-29 neu in Fassung 8")
+    def test_req_mb_29_mittelpunkt_genau_auf_der_grenze_ist_rand(self):
+        """[REQ-MB-29] Kopfrand genau auf dem Mittelpunkt der Zeichen -> im Rand (inklusiv); Grenze 0,01 pt darueber -> nicht. Faengt: "<=" durch "<" ersetzt."""
+        mitte = mitte_aus_zeichen(self.pdf, 2, "Kolumnentitel")
+        self.assertTrue(self.zugeordnet(rand={"kopf": mitte})["randzeile"]["im_rand"])
+        self.assertFalse(self.zugeordnet(rand={"kopf": mitte - 0.01})["randzeile"]["im_rand"])
+        self.assertTrue(self.zugeordnet(rand={"fuss": HOEHE - mitte})["randzeile"]["im_rand"])
+        self.assertFalse(self.zugeordnet(rand={"fuss": HOEHE - mitte - 0.01})["randzeile"]["im_rand"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

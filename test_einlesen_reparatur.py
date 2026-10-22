@@ -63,10 +63,19 @@ Fassung 6:
       doc wie DoclingDocument: iterate_items(traverse_pictures=...) -> (item, ebene); item.label,
       item.text, item.prov[0].page_no; Text-Kinder eines Bild-Elements folgen ihm bei
       traverse_pictures=True
+Fassung 7:
+  Docling-Weg = einlesen.lies_pdf_ein(spiel_id, buch_id, pdf=..., ausgabe=...) mit der Docling-Attrappe
+      (docling_attrappe.py); Versionen wie im Messergebnis des Spec-Ordners (REQ-MB-11, -32)
+  Protokoll.umsortiert (REQ-MB-31); Protokoll.binnen_grossbuchstabe / .strichrest =
+      {"anzahl": n, "seiten": [gedruckt, sonst physisch]} (REQ-MB-32)
+  Zeile mit Lage fuer REQ-MB-31: "x0", "x1", "oben", "unten" (Punkte, Ursprung oben links)
+  Schemafehler der Layout-/Rand-Deklaration -> KonfigFehler aus lies_buch_ein, Meldung nennt den Schluessel (REQ-MB-34)
 """
 import importlib
 import json
 import os
+import unicodedata
+from unittest import mock
 import sys
 import unittest
 
@@ -255,6 +264,19 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertEqual([a["abschnittspfad"] for a in abschnitte], [["Ablauf"], ["Ablauf", "Ablauf"]])
         self.assertEqual(abschnitte[0]["text"], "Ablauf")
         self.assertIn("Text zum Ablauf.", abschnitte[1]["text"])
+
+    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
+    def test_req_mb_12_formatzeichen_cf_werden_beim_abgleich_entfernt(self):
+        """[REQ-MB-12] norm() entfernt Formatzeichen (Cf): "Bewusstlosigkeits·schwelle" (U+00AD) und "Bonus<U+200B>würfel" passen mit 0 Auslassungen."""
+        for titel, zeile in (("Bewusstlosigkeitsschwelle", f"Bewusstlosigkeits{SHY}schwelle"),
+                             ("Bonuswürfel", "Bonus\u200bwürfel")):
+            with self.subTest(titel=titel):
+                seiten = {7: [z(zeile, "section_header"), z("Fliesstext dazu.")]}
+                abschnitte, p = self.baue(seiten, [eintrag(titel, 7)])
+                self.assertEqual(p.gefunden, [(titel, 7)])
+                self.assertEqual(abschnitte[0]["abschnittspfad"], [titel])
+                self.assertTrue(abschnitte[0]["text"].startswith(titel))
+                self.assertNotIn("\u200b", abschnitte[0]["text"])
 
     @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_randzeile_ist_kein_kandidat(self):
@@ -979,6 +1001,380 @@ class TestRandzeilen(mb.BestandTest):
         self.assertTrue(treffer)
         self.assertEqual(set(treffer), {"sued"})
         self.assertEqual([c["text"] for c in chunks if c["buch_id"] == "sued"], sued_ohne)
+
+
+# ===================================================================================
+# Fassung 8: Randgrenze inklusiv (REQ-MB-12, -20, -28)
+# ===================================================================================
+def grenzzeile(text, mitte, klasse="section_header", schrift=S1):
+    d = {"text": text, "klasse": klasse, "oben": mitte - 5, "unten": mitte + 5}
+    if schrift is not None:
+        d["schrift"] = dict(schrift)
+    return d
+
+
+class TestRandgrenzeInklusiv(unittest.TestCase):
+    """Kopfrand 50, Fussrand 40 bei Seitenhoehe 800 (Grenze 760): Mittelpunkt genau auf der Grenze ist Rand,
+    0,01 pt weiter innen nicht. Faengt: Vergleich "<=" bzw. ">=" durch "<" bzw. ">" ersetzt."""
+    RAND = {"kopf": 50, "fuss": 40}
+
+    def baue(self, kopf_mitte, fuss_mitte):
+        e = einlesen()
+        p = e.Protokoll()
+        seiten = {1: [grenzzeile("Kolumne", kopf_mitte), grenzzeile("K1", 100),
+                      grenzzeile("Text K1.", 120, "text", FT), grenzzeile("Fussstufe", fuss_mitte)]}
+        abschnitte = e.baue_abschnitte(seiten, [eintrag("K1", 1)], layout={"klasse": "section_header", "stufen": STUFEN},
+                                       rand=self.RAND, seitenhoehe=SEITENHOEHE, protokoll=p)
+        return [a["abschnittspfad"] for a in abschnitte], " ".join(a["text"] for a in abschnitte), p
+
+    @unittest.skip("devloop: REQ-MB-20 neu in Fassung 8")
+    def test_req_mb_20_mittelpunkt_auf_der_grenze_ist_rand(self):
+        """[REQ-MB-20] Kopf-/Fusszeile (Stufe 1) mit Mittelpunkt genau auf der Grenze: keine Ueberschrift, Rand-Zaehler 2; Grenze +-0,01 pt nach innen: beide Ueberschrift."""
+        pfade, _, p = self.baue(50.0, 760.0)
+        self.assertEqual(pfade, [["K1"]])
+        self.assertEqual(p.rand_verhindert, 2)
+        pfade, _, p = self.baue(50.01, 759.99)
+        self.assertIn(["K1", "Fussstufe"], pfade)
+        self.assertEqual(p.rand_verhindert, 0)
+
+    @unittest.skip("devloop: REQ-MB-28 neu in Fassung 8")
+    def test_req_mb_28_grenzzeile_verworfen_und_gezaehlt(self):
+        """[REQ-MB-28] Mittelpunkt genau auf der Grenze: Zeile verworfen und gezaehlt (2); Grenze + 0,01 pt nach innen: Zeile bleibt, Zaehler 0."""
+        _, text, p = self.baue(50.0, 760.0)
+        self.assertNotIn("Kolumne", text)
+        self.assertNotIn("Fussstufe", text)
+        self.assertEqual(p.randzeilen, 2)
+        _, text, p = self.baue(50.01, 759.99)
+        self.assertIn("Kolumne", text)
+        self.assertIn("Fussstufe", text)
+        self.assertEqual(p.randzeilen, 0)
+
+    @unittest.skip("devloop: REQ-MB-12 neu in Fassung 8")
+    def test_req_mb_12_grenzzeile_ist_kein_kandidat(self):
+        """[REQ-MB-12] Kolumnentitel "Bonuswürfel" mit Mittelpunkt genau auf der Kopfrandgrenze ist kein Kandidat (mehrdeutig 0); 0,01 pt innen schon (mehrdeutig 1)."""
+        e = einlesen()
+        for mitte, mehrdeutig in ((50.0, []), (50.01, [("Bonuswürfel", 1)])):
+            with self.subTest(mitte=mitte):
+                p = e.Protokoll()
+                seiten = {1: [grenzzeile("Bonuswürfel", mitte), grenzzeile("Bonuswürfel", 200),
+                              grenzzeile("Text.", 220, "text", FT)]}
+                e.baue_abschnitte(seiten, [eintrag("Bonuswürfel", 1)], rand={"kopf": 50}, seitenhoehe=SEITENHOEHE,
+                                  protokoll=p)
+                self.assertEqual(p.mehrdeutig, mehrdeutig)
+                self.assertEqual(p.gefunden, [("Bonuswürfel", 1)])
+
+
+# ===================================================================================
+# Fassung 7 -- Docling-Weg mit Attrappe (REQ-MB-11, -32)
+# ===================================================================================
+import docling_attrappe as da  # noqa: E402
+
+MESSUNG = os.path.join(BASE, ".specify", "specs", "mehrbuch-bestand", "vorabmessung.json")
+
+
+def gemessene_versionen():
+    """Versionen aus dem Messergebnis im Spec-Ordner -- dieselben, die das Einlesen verlangt."""
+    with open(MESSUNG, encoding="utf-8") as f:
+        m = json.load(f)
+    return {"docling": m["docling_version"], "pdfplumber": m["pdfplumber_version"]}
+
+
+def leeres_pdf(pfad, seiten):
+    import pypdf
+    w = pypdf.PdfWriter()
+    for _ in range(seiten):
+        w.add_blank_page(width=da.BREITE, height=da.HOEHE)
+    w.write(pfad)
+    return pfad
+
+
+class DoclingWegTest(mb.BestandTest):
+    def deklariere(self, kapitel_seite=1):
+        self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "inhaltsverzeichnis",
+                                                                           "eintraege": [eintrag("Kapitel", kapitel_seite)]},
+                              seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True)])
+
+    def docling(self, elemente):
+        """elemente: {seite: [(Label, Text)]} -> Protokoll des Docling-Wegs (lies_pdf_ein)."""
+        pdf = leeres_pdf(os.path.join(self.tmp.name, "buch.pdf"), max(elemente))
+        doc = {s: [da.Element(lab, text) for lab, text in liste] for s, liste in elemente.items()}
+        with da.installiere(doc, gemessene_versionen()):
+            return einlesen().lies_pdf_ein(mb.SID, "nord", pdf=pdf, ausgabe=lambda *_: None)
+
+    def buchtext(self):
+        with open(self.buchdatei("nord"), encoding="utf-8") as f:
+            return "\n".join(json.loads(z)["text"] for z in f)
+
+    def haeppchentext(self):
+        self.baue()
+        return "\n".join(c["text"] for c in rag.lade_spiel(self.oeffne(), mb.SID)[0])
+
+
+class TestTrennungDoclingWeg(DoclingWegTest):
+    @unittest.skip("devloop: REQ-MB-11 noch nicht implementiert")
+    def test_req_mb_11_docling_weg_laesst_zeilenenden_unangetastet(self):
+        """[REQ-MB-11] Docling-Weg: Element "Akti-⏎onswürfel" bleibt byte-gleich, "Bewusstlosigkeits·schwelle" -> ohne U+00AD, Zaehler 0."""
+        self.deklariere()
+        p = self.docling({1: [("section_header", "Kapitel"), ("text", "Akti-\nonswürfel"),
+                              ("text", f"Bewusstlosigkeits{SHY}schwelle")]})
+        for text in (self.buchtext(), self.haeppchentext()):
+            self.assertIn("Akti-\nonswürfel", text)
+            self.assertNotIn("Aktionswürfel", text)
+            self.assertIn("Bewusstlosigkeitsschwelle", text)
+            self.assertNotIn(SHY, text)
+        self.assertEqual(p.trennungen_zusammengefuegt, 0)
+
+    @unittest.skip("devloop: REQ-MB-11 noch nicht implementiert")
+    def test_req_mb_11_zeilenweg_repariert_dasselbe_element(self):
+        """[REQ-MB-11] Zeilenweg: dasselbe Element "Akti-⏎onswürfel" -> "Aktionswürfel" (der Weg entscheidet, nicht der Text)."""
+        self.deklariere()
+        p = einlesen().lies_buch_ein(mb.SID, "nord", {1: [z("Kapitel", "section_header"), z("Akti-\nonswürfel")]})
+        self.assertIn("Aktionswürfel", self.buchtext())
+        self.assertEqual(p.trennungen_zusammengefuegt, 1)
+
+
+class TestVerdachtszaehler(DoclingWegTest):
+    ELEMENTE = {1: [("section_header", "Kapitel"), ("text", "Das NovizenTalent wirkt")],
+                2: [("text", "die Akti- onswürfel")],
+                3: [("text", "Nah- und Fernkampf"), ("text", "ED4-Regeln"), ("text", "Zwerg-Krieger")]}
+
+    @unittest.skip("devloop: REQ-MB-32 noch nicht implementiert")
+    def test_req_mb_32_docling_weg_zaehlt_verdachtsfaelle(self):
+        """[REQ-MB-32] Docling-Weg: Binnen-Grossbuchstabe = 1 (S. 1), Strichrest = 1 (S. 2); "Nah- und" (Konjunktion) zaehlt nicht; Texte byte-gleich."""
+        self.deklariere()
+        p = self.docling(self.ELEMENTE)
+        self.assertEqual(p.binnen_grossbuchstabe, {"anzahl": 1, "seiten": [1]})
+        self.assertEqual(p.strichrest, {"anzahl": 1, "seiten": [2]})
+        text = self.haeppchentext()
+        for _, element in [x for liste in self.ELEMENTE.values() for x in liste]:
+            self.assertIn(element, text)
+
+    @unittest.skip("devloop: REQ-MB-32 noch nicht implementiert")
+    def test_req_mb_32_auch_auf_dem_zeilenweg_und_gedruckte_seite(self):
+        """[REQ-MB-32] Zeilenweg, Versatz 2: Verdachtsfaelle mit gedruckter Seite (physisch 3 -> 1, physisch 4 -> 2)."""
+        self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "inhaltsverzeichnis",
+                                                                           "eintraege": [eintrag("Kapitel", 1)]},
+                              seitenzahlen={"quelle": "versatz", "versatz": 2}, reparatur=True)])
+        p = einlesen().lies_buch_ein(mb.SID, "nord", {3: [z("Kapitel", "section_header"), z("Das NovizenTalent wirkt")],
+                                                      4: [z("die Akti- onswürfel"), z("Nah- und Fernkampf")]})
+        self.assertEqual(p.binnen_grossbuchstabe, {"anzahl": 1, "seiten": [1]})
+        self.assertEqual(p.strichrest, {"anzahl": 1, "seiten": [2]})
+
+
+# ===================================================================================
+# REQ-MB-31: Listenueberschrift nach Lage einsortieren
+# ===================================================================================
+def lz(text, x0, x1, oben, klasse="text", hoehe=12):
+    return {"text": text, "klasse": klasse, "x0": x0, "x1": x1, "oben": oben, "unten": oben + hoehe}
+
+
+LINKS, RECHTS, BEIDE = (40, 280), (320, 560), (40, 560)
+
+
+def lage_seiten(neu=BEIDE, links_oben=200, ohne_lage=False):
+    """Extraktionsfolge auf Seite 2: Oben, Links, Neu, Rechts (Docling-Fehler: Ueberschrift nach Links)."""
+    s2 = [lz("Oben OBENMARKE steht ueber der Ueberschrift.", *LINKS, 100),
+          lz("Links LINKSMARKE steht unter der Ueberschrift.", *LINKS, links_oben),
+          lz("Neu", *neu, 150, "section_header", hoehe=14),
+          lz("Rechts RECHTSMARKE steht unter der Ueberschrift.", *RECHTS, 200)]
+    s1 = [lz("Alt", *BEIDE, 100, "section_header", hoehe=14), lz("Text der Vorseite.", *LINKS, 130)]
+    if ohne_lage:
+        s1, s2 = [{"text": x["text"], "klasse": x["klasse"]} for x in s1], [{"text": x["text"], "klasse": x["klasse"]} for x in s2]
+    return {1: s1, 2: s2}
+
+
+LAGE_LISTE = [eintrag("Alt", 1), eintrag("Neu", 2)]
+
+
+class TestEinsortierenNachLage(unittest.TestCase):
+    def baue(self, seiten, liste=LAGE_LISTE):
+        e = einlesen()
+        p = e.Protokoll()
+        return nach_pfad(e.baue_abschnitte(seiten, liste, protokoll=p)), p
+
+    @unittest.skip("devloop: REQ-MB-31 noch nicht implementiert")
+    def test_req_mb_31_spaltenuebergreifend_zieht_beide_spalten(self):
+        """[REQ-MB-31] Neu ueber beide Spalten: LINKSMARKE und RECHTSMARKE in Neu, OBENMARKE in Alt, umsortiert = 1."""
+        je, p = self.baue(lage_seiten())
+        self.assertIn("LINKSMARKE", je[("Neu",)]["text"])
+        self.assertIn("RECHTSMARKE", je[("Neu",)]["text"])
+        self.assertIn("OBENMARKE", je[("Alt",)]["text"])
+        self.assertNotIn("LINKSMARKE", je[("Alt",)]["text"])
+        self.assertLess(je[("Neu",)]["text"].index("LINKSMARKE"), je[("Neu",)]["text"].index("RECHTSMARKE"))
+        self.assertEqual(p.umsortiert, 1)
+
+    @unittest.skip("devloop: REQ-MB-31 noch nicht implementiert")
+    def test_req_mb_31_gegenproben(self):
+        """[REQ-MB-31] (a) Neu nur ueber der rechten Spalte, (b) ohne Lage, (c) Links 1 pt ueber Neu.unten -> LINKSMARKE bleibt in Alt, umsortiert = 0."""
+        neu_unten = 150 + 14
+        for name, seiten in (("a nur rechts", lage_seiten(neu=RECHTS)), ("b ohne Lage", lage_seiten(ohne_lage=True)),
+                             ("c 1 pt darueber", lage_seiten(links_oben=neu_unten - 1 - 6))):    # Mitte = Neu.unten - 1
+            with self.subTest(fall=name):
+                je, p = self.baue(seiten)
+                self.assertIn("LINKSMARKE", je[("Alt",)]["text"])
+                self.assertNotIn("LINKSMARKE", je[("Neu",)]["text"])
+                self.assertEqual(p.umsortiert, 0)
+
+    @unittest.skip("devloop: REQ-MB-31 noch nicht implementiert")
+    def test_req_mb_31_abgleich_auf_der_urspruenglichen_folge(self):
+        """[REQ-MB-31] Gleichstand zweier Zeilen fuer "Bonuswürfel": es gewinnt die erste der URSPRUENGLICHEN Folge, auch wenn das Umsortieren nach "Kopf" sie hinter die andere schiebt."""
+        s2 = [lz("Bonusw rfel", *LINKS, 300, "section_header"),        # 1. in Extraktionsfolge, liegt unter Kopf
+              lz("Bonuswürfl", *LINKS, 60, "section_header"),          # 2., liegt ueber Kopf: bleibt vor Kopf
+              lz("Kopf", *BEIDE, 100, "section_header", hoehe=14),
+              lz("Text nach Bonus.", *LINKS, 320)]
+        seiten = {1: [lz("Alt", *BEIDE, 100, "section_header", hoehe=14), lz("Text alt.", *LINKS, 130)], 2: s2}
+        je, p = self.baue(seiten, [eintrag("Alt", 1), eintrag("Kopf", 2), eintrag("Bonuswürfel", 2)])
+        self.assertEqual(p.mehrdeutig, [("Bonuswürfel", 2)])
+        alles = " ".join(a["text"] for a in je.values())
+        self.assertNotIn("Bonusw rfel", alles)                         # die erste wurde ersetzt
+        self.assertIn("Bonuswürfl", je[("Alt",)]["text"])             # die zweite blieb Fliesstext vor Kopf
+        self.assertIn("Text nach Bonus.", je[("Bonuswürfel",)]["text"])
+
+
+# ===================================================================================
+# REQ-MB-33: Listentitel normalisiert
+# ===================================================================================
+UEBERSICHT_NFD = unicodedata.normalize("NFD", "Übersicht")
+MB33_LESEZEICHEN = [("Kapitel\r\nZwei", 1), ("Teil  Drei\t", 2), (UEBERSICHT_NFD, 3)]
+
+
+class TestTitelNormalisiert(mb.BestandTest):
+    def pdf(self):
+        import pypdf
+        w = pypdf.PdfWriter()
+        for _ in range(3):
+            w.add_blank_page(width=da.BREITE, height=da.HOEHE)
+        for titel, seite in MB33_LESEZEICHEN:
+            w.add_outline_item(titel, seite - 1)
+        pfad = os.path.join(self.tmp.name, "titel.pdf")
+        w.write(pfad)
+        return pfad
+
+    @unittest.skip("devloop: REQ-MB-33 noch nicht implementiert")
+    def test_req_mb_33_lesezeichen_und_inhaltsverzeichnis_normalisiert(self):
+        """[REQ-MB-33] Lesezeichen mit CR/LF, Doppelleerzeichen/Tab, NFD und Inhaltsverzeichnis-Titel mit CR/LF -> normalisierte Pfade, einzeiliger Vorsatz, Praefix-Zuweisung greift (auch mit unnormalisiertem Praefix)."""
+        self.bestand([
+            mb.buch("a", "Buch A", "alpha", quelle="a.pdf", ueberschriften={"quelle": "lesezeichen"},
+                    seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True,
+                    inhaltsarten=[(("Kapitel Zwei",), "welt")]),
+            mb.buch("b", "Buch B", "alpha", quelle="b.pdf", ueberschriften={"quelle": "inhaltsverzeichnis", "eintraege": [
+                {"titel": "Anhang\r\nEins", "ebene": 1, "seite": 1}]},
+                seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True,
+                inhaltsarten=[(("Anhang\nEins",), "welt")])])                  # Praefix bewusst unnormalisiert
+        p = einlesen().lies_buch_ein(mb.SID, "a", {1: [z("Kapitel Zwei", "section_header"), z("Text zwei.")],
+                                                   2: [z("Teil Drei", "section_header"), z("Text drei.")],
+                                                   3: [z("Übersicht", "section_header"), z("Text uebersicht.")]},
+                                     pdf=self.pdf())
+        self.assertEqual(p.gefunden, [("Kapitel Zwei", 1), ("Teil Drei", 2), ("Übersicht", 3)])
+        einlesen().lies_buch_ein(mb.SID, "b", {1: [z("Anhang Eins", "section_header"), z("Text anhang.")]})
+        self.baue()
+        chunks, _ = rag.lade_spiel(self.oeffne(), mb.SID)
+        pfade = {(c["buch_id"], tuple(c["abschnittspfad"])): c for c in chunks}
+        self.assertEqual(set(pfade), {("a", ("Kapitel Zwei",)), ("a", ("Teil Drei",)), ("a", ("Übersicht",)),
+                                      ("b", ("Anhang Eins",))})
+        self.assertEqual(unicodedata.normalize("NFC", "Übersicht"), pfade[("a", ("Übersicht",))]["abschnittspfad"][0])
+        for (bid, pfad), c in pfade.items():
+            with self.subTest(pfad=pfad):
+                vorsatz = rag.titelvorsatz(list(pfad))
+                self.assertTrue(c["text"].startswith(vorsatz))
+                self.assertEqual(vorsatz.count("\n"), 1)
+                self.assertTrue(vorsatz.endswith("\n"))
+                for schlecht in ("\r", "\t", "  "):
+                    self.assertNotIn(schlecht, vorsatz)
+                    self.assertFalse(any(schlecht in t for t in c["abschnittspfad"]))
+                self.assertEqual(c["inhaltsart"], "welt" if pfad in (("Kapitel Zwei",), ("Anhang Eins",)) else "regel")
+
+    @unittest.skip("devloop: REQ-MB-33 noch nicht implementiert")
+    def test_req_mb_33_jedes_pfadelement_normalisiert(self):
+        """[REQ-MB-33] Listentitel, ersetzte Zeile, Protokoll, Layout-Ueberschrift und Vorspann-Name mit titelnorm."""
+        e = einlesen()
+        p = e.Protokoll()
+        seiten = {1: [z("Vorspanntext."), z("Kapitel  Zwei", "section_header"), z("Text."),
+                      z(" Gamma \t Zeile ", "section_header"), z("Text gamma.")],
+                  2: [z("Text auf Seite zwei.")]}
+        abschnitte = e.baue_abschnitte(seiten, [{"titel": "Kapitel\r\nZwei", "ebene": 1, "seite": 1},
+                                                {"titel": "Fehlt\r\nganz", "ebene": 1, "seite": 2}],
+                                       layout={"klasse": "section_header"}, vorspann="Vor\r\nspann", protokoll=p)
+        pfade = [a["abschnittspfad"] for a in abschnitte]
+        self.assertIn(["Vor spann"], pfade)
+        self.assertIn(["Kapitel Zwei", "Gamma Zeile"], pfade)
+        self.assertIn(["Fehlt ganz"], pfade)
+        kapitel = next(a for a in abschnitte if a["abschnittspfad"] == ["Kapitel Zwei"])
+        self.assertTrue(kapitel["text"].startswith("Kapitel Zwei"))
+        self.assertEqual(p.gefunden, [("Kapitel Zwei", 1)])
+        self.assertEqual(p.nicht_gefunden, [("Fehlt ganz", 2)])
+
+
+# ===================================================================================
+# REQ-MB-34: Schema der Layout-/Rand-Deklaration
+# ===================================================================================
+GUELTIG_LAYOUT = {"klasse": "section_header", "veto": ["formula"], "hoechstlaenge": 40,
+                  "stufen": [{"groesse": [13.5, 14.5], "laufweite": [-1, 1], "fett": True, "kursiv": False,
+                              "kapitaelchen": False}, {"groesse": [11.5, 12.5]}]}
+GUELTIG_RAND = {"kopf": 40, "fuss": 30}
+VERSTOESSE = [  # (Name, layout, rand, Schluessel in der Meldung)
+    ("Stufe groese", {"stufen": [{"groese": [10, 12]}]}, None, "groese"),
+    ("layout groese", {"groese": [10, 12]}, None, "groese"),
+    ("Stufe leer", {"stufen": [{}]}, None, "stufen"),
+    ("groesse von > bis", {"stufen": [{"groesse": [14, 12]}]}, None, "groesse"),
+    ("groesse ein Wert", {"stufen": [{"groesse": [12]}]}, None, "groesse"),
+    ("rand Zeichenkette", None, {"kopf": "40"}, "kopf"),
+    ("rand Wahrheitswert", None, {"kopf": True}, "kopf"),
+    ("rand negativ", None, {"fuss": -5}, "fuss"),
+    ("rand leer", None, {}, "rand"),
+    ("veto Zeichenkette", {"veto": "table"}, None, "veto"),
+    ("hoechstlaenge 0", {"hoechstlaenge": 0}, None, "hoechstlaenge"),
+    ("eigene_zeile", {"eigene_zeile": True}, None, "eigene_zeile"),
+]
+SCHEMA_SEITEN = {1: [z("Kapitel", "section_header", S1, oben=100), z("Text Kapitel.", schrift=FT, oben=120),
+                     z("Alpha", "section_header", S1, oben=140), z("Text Alpha.", schrift=FT, oben=160)]}
+
+
+class TestSchema(mb.BestandTest):
+    def deklariere(self, layout=None, rand=None):
+        extra = {}
+        if layout is not None:
+            extra["layout"] = layout
+        if rand is not None:
+            extra["rand"] = rand
+        self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "lesezeichen"},
+                              seitenzahlen={"quelle": "versatz", "versatz": 0}, reparatur=True, **extra)])
+
+    def lies(self, **kw):
+        return einlesen().lies_buch_ein(mb.SID, "nord", SCHEMA_SEITEN, lesezeichen=[eintrag("Kapitel", 1)],
+                                        seitenhoehe=SEITENHOEHE, **kw)
+
+    @unittest.skip("devloop: REQ-MB-34 noch nicht implementiert")
+    def test_req_mb_34_verstoesse_brechen_ab_ohne_zu_schreiben(self):
+        """[REQ-MB-34] Je Schemaverstoss: KonfigFehler mit dem Schluessel, keine Buchdatei bzw. die alte byte-gleich."""
+        for name, layout, rand, schluessel in VERSTOESSE:
+            with self.subTest(fall=name):
+                self.deklariere(layout, rand)
+                if os.path.exists(self.buchdatei("nord")):
+                    os.remove(self.buchdatei("nord"))
+                with self.assertRaises(rag.KonfigFehler) as ctx:
+                    self.lies()
+                self.assertIn(schluessel, str(ctx.exception))
+                self.assertFalse(os.path.exists(self.buchdatei("nord")))
+                self.deklariere()
+                self.lies()
+                vorher = mb.hashes(os.path.dirname(self.buchdatei("nord")))
+                self.deklariere(layout, rand)
+                with self.assertRaises(rag.KonfigFehler):
+                    self.lies(ueberschreiben=True)
+                self.assertEqual(mb.hashes(os.path.dirname(self.buchdatei("nord"))), vorher)
+
+    @unittest.skip("devloop: REQ-MB-34 noch nicht implementiert")
+    def test_req_mb_34_gueltige_vollkonfiguration_liest_ein(self):
+        """[REQ-MB-34] Gueltige Deklaration mit allen Schluesseln liest ein und ergibt dieselben Abschnitte wie baue_abschnitte."""
+        self.deklariere(GUELTIG_LAYOUT, GUELTIG_RAND)
+        self.lies()
+        soll = einlesen().baue_abschnitte(SCHEMA_SEITEN, [eintrag("Kapitel", 1)], layout=GUELTIG_LAYOUT, rand=GUELTIG_RAND,
+                                          seitenhoehe=SEITENHOEHE, protokoll=einlesen().Protokoll())
+        with open(self.buchdatei("nord"), encoding="utf-8") as f:
+            ist = [json.loads(x) for x in f]
+        self.assertEqual([(e["abschnittspfad"], e["text"]) for e in ist], [(a["abschnittspfad"], a["text"]) for a in soll])
+        self.assertIn(["Kapitel", "Alpha"], [e["abschnittspfad"] for e in ist])
 
 
 if __name__ == "__main__":
