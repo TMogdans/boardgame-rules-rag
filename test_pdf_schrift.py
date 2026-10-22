@@ -97,7 +97,6 @@ class SchriftTest(unittest.TestCase):
         self.assertAlmostEqual(schrift["groesse"], size, delta=0.1)
         self.assertEqual(schrift["fett"], font.endswith("Bold"))
 
-    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_reine_und_gemischte_zeile(self):
         """[REQ-MB-29] Zeile ganz in X -> X; gemischte Zeile mit Mehrheit X und kuerzerem Teil in Y -> X."""
         z = self.zugeordnet()
@@ -105,19 +104,16 @@ class SchriftTest(unittest.TestCase):
         self.assertSchrift(z["gemischt"]["schrift"], X)
         self.assertEqual([zeile["text"] for zeile in z.values()][:2], ["Ganz fett", "Mehrheitfett kl"])   # Text unveraendert
 
-    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_gleichstand_ohne_schrift(self):
         """[REQ-MB-29] Gleich viele Zeichen (ohne Leerzeichen) in X und Y -> keine zugeordnete Schrift."""
         self.assertIsNone(self.zugeordnet()["gleichstand"].get("schrift"))
 
-    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_zwei_spalten_gleicher_hoehe(self):
         """[REQ-MB-29] Zwei Spalten mit gleich hohen Zeilen: links X, rechts Y -- Zeichen der Nachbarspalte zaehlen nicht."""
         z = self.zugeordnet()
         self.assertSchrift(z["links"]["schrift"], X)
         self.assertSchrift(z["rechts"]["schrift"], Y)
 
-    @unittest.skip("devloop: REQ-MB-29 noch nicht implementiert")
     def test_req_mb_29_kopfrand_plus_minus_ein_punkt(self):
         """[REQ-MB-29] Zeile im deklarierten Kopfrand -> als Rand erkannt; dieselbe Zeile 1 pt ausserhalb -> nicht."""
         mitte = mitte_aus_zeichen(self.pdf, 2, "Kolumnentitel")

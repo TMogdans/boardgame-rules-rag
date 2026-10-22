@@ -127,14 +127,12 @@ TRENNUNGEN = [  # (Eingabe, Ergebnis, Fall) -- Tabelle der Spec, woertlich
 
 
 class TestTrennungen(unittest.TestCase):
-    @unittest.skip("devloop: REQ-MB-11 noch nicht implementiert")
     def test_req_mb_11_tabelle_der_spec(self):
         """[REQ-MB-11] Jede Zeile der Trennungstabelle liefert genau das Ergebnis der Spec."""
         for eingabe, ergebnis, fall in TRENNUNGEN:
             with self.subTest(fall=fall):
                 self.assertEqual(einlesen().repariere_trennungen(eingabe, sprache="de"), ergebnis)
 
-    @unittest.skip("devloop: REQ-MB-11 noch nicht implementiert")
     def test_req_mb_11_protokoll_zaehler_exakt(self):
         """[REQ-MB-11] Protokoll zaehlt zusammengefuegte Trennungen und behaltene Striche exakt (3 und 4)."""
         e = einlesen()
@@ -150,7 +148,6 @@ class TestTrennungen(unittest.TestCase):
         e.repariere_trennungen("Wurf\nStufe Schaden - 2 Stufen/\nAktionswürfel", sprache="de", protokoll=p2)
         self.assertEqual(p2.trennungen_zusammengefuegt, 0)
 
-    @unittest.skip("devloop: REQ-MB-11 noch nicht implementiert")
     def test_req_mb_11_konjunktionsliste_ist_konfiguration(self):
         """[REQ-MB-11] Die Konjunktionsliste kommt aus der Konfiguration: ohne "und" gilt die Trennungsregel."""
         e = einlesen()
@@ -186,7 +183,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         p = einlesen().Protokoll()
         return einlesen().baue_abschnitte(seiten, liste, protokoll=p, **kw), p
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_ersetzte_faelle(self):
         """[REQ-MB-12] Passende Zeile auf der Zielseite wird durch den Listentitel ersetzt und beginnt den Abschnitt."""
         for titel, zeile, grund in ERSETZT:
@@ -201,7 +197,6 @@ class TestUeberschriftenListe(unittest.TestCase):
                 self.assertIn((titel, 7), p.gefunden)
                 self.assertEqual(p.nicht_gefunden, [("Einleitung", 6)])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_nicht_ersetzte_faelle_bleiben_byte_gleich(self):
         """[REQ-MB-12] Nicht passende Zeilen bleiben byte-gleich; der Eintrag faellt unter REQ-MB-13."""
         for titel, zeile, seite, grund in NICHT_ERSETZT:
@@ -215,7 +210,6 @@ class TestUeberschriftenListe(unittest.TestCase):
                 self.assertEqual(p.gefunden, [])
                 self.assertEqual(p.nicht_gefunden, [(titel, 7)])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_gleichstand_erste_zeile_und_protokoll_mehrdeutig(self):
         """[REQ-MB-12] Zwei gleich gute Zeilen: die erste in Lesereihenfolge gewinnt, Protokoll mehrdeutig = 1."""
         seiten = {7: [z("Bonusw rfel", "section_header"), z("Erster Text."),
@@ -231,7 +225,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertEqual(p.mehrdeutig, [("Bonuswürfel", 7)])
         self.assertEqual(p.gefunden, [("Bonuswürfel", 7)])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_wenigste_auslassungen_gewinnen(self):
         """[REQ-MB-12] Mehrere passende Zeilen: die mit den wenigsten Auslassungen gewinnt, auch wenn sie spaeter steht."""
         seiten = {7: [z("Bonusw rfel", "section_header"), z("Vorher."),
@@ -245,7 +238,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertNotIn("BONUSWÜRFEL", pfade[("Bonuswürfel",)]["text"])
         self.assertEqual(p.mehrdeutig, [])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_eine_zeile_hoechstens_ein_eintrag(self):
         """[REQ-MB-12] Eine Zeile wird hoechstens einem Eintrag zugeordnet (Listenreihenfolge); der zweite beginnt hinter ihr (REQ-MB-13)."""
         seiten = {7: [z("Ablauf", "section_header"), z("Text zum Ablauf.")]}
@@ -256,7 +248,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertEqual(abschnitte[0]["text"], "Ablauf")
         self.assertIn("Text zum Ablauf.", abschnitte[1]["text"])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_randzeile_ist_kein_kandidat(self):
         """[REQ-MB-12] Kopfrand deklariert: Kolumnentitel "Bonuswürfel" im Rand ist kein Kandidat -> Abschnitt beginnt im Satzspiegel, mehrdeutig 0; ohne Rand: erste Zeile, mehrdeutig 1."""
         seiten = {6: [z("Davor", "section_header", oben=100), z("Text davor.", oben=120)],
@@ -277,7 +268,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertIn("Zwischentext der Seite.", bonus)
         self.assertEqual(p.mehrdeutig, [("Bonuswürfel", 7)])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_ebenen_aus_der_liste(self):
         """[REQ-MB-12] Die Liste ist Wahrheit fuer ihre Ebenen: Pfade K1, K1 > U1, K1 > U2, K2."""
         seiten = {1: [z("K1", "section_header"), z("Text K1."), z("U1", "section_header"), z("Text U1.")],
@@ -290,7 +280,6 @@ class TestUeberschriftenListe(unittest.TestCase):
         self.assertIn("Text U1.", texte[("K1", "U1")]["text"])
         self.assertNotIn("Text U1.", texte[("K1",)]["text"])
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_reihenfolge_abgleich_vor_trennungsreparatur(self):
         """[REQ-MB-12] Erst der Abgleich auf Zeilen, dann die Trennungsreparatur: "Wurf" wird nicht mit "Stufe ..." verschmolzen."""
         seiten = {7: [z("Wurf", "section_header"), z("Stufe und Akti-"), z("onswürfel.")]}
@@ -303,7 +292,6 @@ class TestUeberschriftenListe(unittest.TestCase):
 
 
 class TestNichtGefunden(unittest.TestCase):
-    @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
     def test_req_mb_13_abschnitt_ab_seitenanfang_und_protokoll(self):
         """[REQ-MB-13] (a) Eintrag ohne Gegenstueck, als erster seiner Seite: Abschnitt beginnt am Seitenanfang, Protokoll nennt ihn."""
         e = einlesen()
@@ -325,7 +313,6 @@ class TestNichtGefunden(unittest.TestCase):
         self.assertEqual(p.gefunden, [("Kapitel A", 6), ("Kapitel C", 8)])
         self.assertEqual(p.mehrdeutig, [])
 
-    @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
     def test_req_mb_13_beginnt_hinter_dem_vorangehenden_gefundenen_eintrag(self):
         """[REQ-MB-13] (b) Liste A, B auf derselben Seite, nur A gefunden: B beginnt direkt hinter Zeile A, der Fliesstext liegt in B."""
         e = einlesen()
@@ -347,7 +334,6 @@ class TestNichtGefunden(unittest.TestCase):
         self.assertEqual(p.nicht_gefunden, [("Kapitel B", 7)])
         self.assertEqual(p.gefunden, [("Vorher", 6), ("Kapitel A", 7), ("Kapitel C", 8)])
 
-    @unittest.skip("devloop: REQ-MB-13 noch nicht implementiert")
     def test_req_mb_13_listenreihenfolge_ist_massgeblich(self):
         """[REQ-MB-13] Vorangehend in LISTENreihenfolge: B steht in der Liste vor A -> B beginnt am Seitenanfang, nicht hinter A."""
         e = einlesen()
@@ -376,7 +362,6 @@ LAYOUT_LISTE = [eintrag("K1", 1, 1), eintrag("U1", 1, 2)]
 
 
 class TestLayoutUeberschriften(unittest.TestCase):
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_layout_ueberschriften_verfeinern_den_pfad(self):
         """[REQ-MB-20] Ohne Schriftstufen entscheidet 5(b), die Klasse (Rueckfall): K1 > U1 > Alpha / Beta; "Gamma" (Klasse text) bleibt in Beta."""
         e = einlesen()
@@ -395,7 +380,6 @@ class TestLayoutUeberschriften(unittest.TestCase):
         self.assertEqual(p.rueckfaelle, 2)
         self.assertEqual({k: v for k, v in p.layout_je_stufe.items() if v}, {1: 2})
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_ohne_merkmale_nur_die_liste(self):
         """[REQ-MB-20] Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von REQ-MB-12 unveraendert)."""
         e = einlesen()
@@ -405,7 +389,6 @@ class TestLayoutUeberschriften(unittest.TestCase):
         for t in ("Alpha", "Text Alpha zwei.", "Beta", "Text nach Gamma."):
             self.assertIn(t, u1)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_zeilenmerkmale_sind_notwendig(self):
         """[REQ-MB-20] Bedingung 4: Hoechstlaenge gilt zusaetzlich -- auch mit Schrift der Stufe 1 und auch im Rueckfall."""
         e = einlesen()
@@ -424,7 +407,6 @@ class TestLayoutUeberschriften(unittest.TestCase):
         self.assertIn("Ohne Schrift und zu lang", pfade[("K1", "Ohne")]["text"])
         self.assertEqual(p.rueckfaelle, 1)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_nicht_gegen_die_liste_abgeglichen(self):
         """[REQ-MB-20] Layout-Ueberschriften werden nicht gegen die Liste abgeglichen oder ersetzt: Zeile bleibt, wie sie ist."""
         e = einlesen()
@@ -465,7 +447,6 @@ class TestLayoutSchrift(unittest.TestCase):
     def ohne(pfade, wort):
         return not any(wort in teil for pfad in pfade for teil in pfad)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_grundfall_schrift_der_stufe_1(self):
         """[REQ-MB-20] Grundfall: Alpha, Beta mit Schrift der Stufe 1 -> K1 > U1 > Alpha / Beta, Protokoll U1 = 2, kein Rueckfall."""
         pfade, je, p = self.baue(schrift_seiten())
@@ -475,7 +456,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertEqual({k: v for k, v in p.layout_je_stufe.items() if v}, {1: 2})
         self.assertEqual((p.rueckfaelle, p.rand_verhindert, p.veto_verhindert), (0, 0, 0))
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_a_kolumnentitel_im_kopfrand(self):
         """[REQ-MB-20] (a) Zeile im Kopfrand mit Ueberschriften-Klasse und Schrift der Stufe 1 -> keine Ueberschrift, Rand-Zaehler 1; 1 pt ausserhalb -> Ueberschrift."""
         kopf = z("Kolumne", "section_header", S1, oben=44)               # Mitte 49 < 50
@@ -490,7 +470,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertIn(["K1", "U1", "Kolumne"], pfade)
         self.assertEqual(p.rand_verhindert, 0)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_b_schrift_hinreichend_auch_mit_klasse_text(self):
         """[REQ-MB-20] (b) "Delta" mit Schrift der Stufe 1, Klasse text -> Ueberschrift K1 > U1 > Delta, kein Rueckfall."""
         pfade, je, p = self.baue(schrift_seiten(z("Delta", schrift=S1), z("Text Delta.", schrift=FT)))
@@ -499,7 +478,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertNotIn("Text Delta.", je[("K1", "U1", "Beta")]["text"])
         self.assertEqual(p.rueckfaelle, 0)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_c_stufe_2_liegt_unter_dem_talent(self):
         """[REQ-MB-20] (c) In Alpha: Text, "Unter" (Stufe 2), Text, dann Beta -> Alpha, Alpha > Unter, Beta; kein K1 > U1 > Unter."""
         seiten = {1: [z("K1", "section_header", S1), z("Einleitung K1.", schrift=FT),
@@ -517,7 +495,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertEqual({k: v for k, v in p.layout_je_stufe.items() if v}, {1: 2, 2: 1})
         self.assertEqual({k: v for k, v in p.layout_ueberschriften.items() if v}, {("K1", "U1"): 3})
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_c_fehlende_stufe_wird_uebersprungen(self):
         """[REQ-MB-20] Stufe 2 ohne offene Stufe 1 im Listenabschnitt -> K1 > U1 > Unter (keine Luecke gefuellt)."""
         seiten = {1: [z("K1", "section_header", S1), z("Einleitung K1.", schrift=FT),
@@ -526,7 +503,6 @@ class TestLayoutSchrift(unittest.TestCase):
         pfade, je, _ = self.baue(seiten)
         self.assertEqual(pfade, [["K1"], ["K1", "U1"], ["K1", "U1", "Unter"]])
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_d_e_fliesstextschrift_ist_nie_ueberschrift(self):
         """[REQ-MB-20] (d) "Gamma" Klasse text, Fliesstextschrift; (e) "Epsilon" Ueberschriften-Klasse, Fliesstextschrift -> beide bleiben in Beta."""
         pfade, je, p = self.baue(schrift_seiten(z("Gamma", schrift=FT), z("Text Gamma.", schrift=FT),
@@ -536,7 +512,6 @@ class TestLayoutSchrift(unittest.TestCase):
             self.assertIn(t, je[("K1", "U1", "Beta")]["text"])
         self.assertEqual(p.rueckfaelle, 0)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_f_rueckfall_ohne_schrift(self):
         """[REQ-MB-20] (f) Zeile ohne zugeordnete Schrift mit Ueberschriften-Klasse -> Stufe 1, Rueckfall-Zaehler 1."""
         pfade, je, p = self.baue(schrift_seiten(z("Omega", "section_header"), z("Text Omega.", schrift=FT)))
@@ -544,7 +519,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertEqual(p.rueckfaelle, 1)
         self.assertEqual({k: v for k, v in p.layout_je_stufe.items() if v}, {1: 3})
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_g_veto_tabelle_und_gegenprobe(self):
         """[REQ-MB-20] (g) fette Tabellenzeile "Zeta" (table, Stufe 1) -> keine Ueberschrift, Text bleibt in Beta, Veto-Zaehler 1; mit Klasse text -> Ueberschrift."""
         pfade, je, p = self.baue(schrift_seiten(z("Zeta", "table", S1), z("Text Zeta.", schrift=FT)))
@@ -556,7 +530,6 @@ class TestLayoutSchrift(unittest.TestCase):
         self.assertEqual(pfade[-1], ["K1", "U1", "Zeta"])
         self.assertEqual(p.veto_verhindert, 0)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_h_veto_bildunterschrift_und_seitenkopf(self):
         """[REQ-MB-20] (h) "Eta" (caption, Stufe 1) und Seitenkopf/-fuss (page_header/page_footer, Stufe 1) -> keine Ueberschrift."""
         pfade, _, p = self.baue(schrift_seiten(z("Eta", "caption", S1), z("Kopfzeile", "page_header", S1),
@@ -565,7 +538,6 @@ class TestLayoutSchrift(unittest.TestCase):
             self.assertTrue(self.ohne(pfade, wort), (wort, pfade))
         self.assertEqual(p.veto_verhindert, 3)
 
-    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_veto_deklaration_ergaenzt_den_default(self):
         """[REQ-MB-20] Veto des Buchs ["formula"] ergaenzt die Default-Menge: formula UND table bleiben Fliesstext."""
         layout = dict(LAYOUT_SCHRIFT, veto=["formula"])
@@ -585,7 +557,6 @@ class TestVorspann(unittest.TestCase):
     SEITEN = {1: [z("Ein eindeutiger Vorspanntext quorx."), z("Noch ein Satz davor.")],
               2: [z("Kapitel", "section_header"), z("Text im Kapitel.")]}
 
-    @unittest.skip("devloop: REQ-MB-25 noch nicht implementiert")
     def test_req_mb_25_text_vor_dem_ersten_eintrag_wird_vorspann(self):
         """[REQ-MB-25] Text vor dem ersten Listeneintrag -> Abschnitt ["Vorspann"]; konfigurierter Name -> dieser Name."""
         e = einlesen()
@@ -620,7 +591,6 @@ class TestGedruckteSeite(mb.BestandTest):
         chunks, _ = rag.lade_spiel(self.oeffne(), mb.SID)
         return chunks
 
-    @unittest.skip("devloop: REQ-MB-22 noch nicht implementiert")
     def test_req_mb_22_labels_ergeben_gedruckte_und_physische_seite(self):
         """[REQ-MB-22] Labels (i, ii, 1, 2): Haeppchen von physisch 3 traegt gedruckt 1 und physisch 3; "ii" -> "PDF-S. 2"."""
         self.lege_an({"quelle": "labels"})
@@ -635,7 +605,6 @@ class TestGedruckteSeite(mb.BestandTest):
         self.assertIn("PDF-S. 2", rag.fundstelle(vorwort))
         self.assertNotIn("PDF-S.", rag.fundstelle(kapitel))
 
-    @unittest.skip("devloop: REQ-MB-22 noch nicht implementiert")
     def test_req_mb_22_versatz_ohne_labels_gleiches_ergebnis(self):
         """[REQ-MB-22] Versatz 2 ohne Labels -> Haeppchen von physisch 3 traegt gedruckt 1, physisch 3."""
         self.lege_an({"quelle": "versatz", "versatz": 2})
@@ -643,7 +612,6 @@ class TestGedruckteSeite(mb.BestandTest):
         kapitel = next(c for c in self.chunks() if "Kapiteltext eins" in c["text"])
         self.assertEqual((kapitel["seite"], kapitel["seite_pdf"]), (1, 3))
 
-    @unittest.skip("devloop: REQ-MB-22 noch nicht implementiert")
     def test_req_mb_22_kontrollpunkt_widerspricht_labels(self):
         """[REQ-MB-22] Labels widersprechen einem Kontrollpunkt -> KonfigFehler mit Hinweis auf den Versatz, nichts geschrieben."""
         self.lege_an({"quelle": "labels", "kontrollpunkte": {"3": 5}})
@@ -658,7 +626,6 @@ class TestGedruckteSeite(mb.BestandTest):
                                  labels=["i", "ii", "1", "2"])
         self.assertTrue(os.path.exists(self.buchdatei("nord")))
 
-    @unittest.skip("devloop: REQ-MB-12 noch nicht implementiert")
     def test_req_mb_12_inhaltsverzeichnis_liste_mit_gedruckten_seiten(self):
         """[REQ-MB-12] Lieferant Inhaltsverzeichnis: gedruckte Seite 1 wird per Versatz auf physisch 3 umgerechnet und gefunden."""
         self.lege_an({"quelle": "versatz", "versatz": 2},
@@ -709,7 +676,6 @@ class TestDoclingVersion(mb.BestandTest):
             self.lies(version, ueberschreiben=True)
         self.assertEqual(mb.hashes(os.path.dirname(self.buchdatei("nord"))), vorher)
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_gleiche_version_laeuft_und_steht_im_protokoll(self):
         """[REQ-MB-23] Docling-Version gleich der im Messergebnis -> Einlesen laeuft, Protokoll nennt die Version."""
         self.schreibe_messung(docling_version="2.5.1")
@@ -717,19 +683,16 @@ class TestDoclingVersion(mb.BestandTest):
         self.assertEqual(p.docling_version, "2.5.1")
         self.assertTrue(os.path.exists(self.buchdatei("nord")))
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_abweichende_version_ist_konfigfehler(self):
         """[REQ-MB-23] Abweichende Docling-Version -> KonfigFehler, keine Buchdatei bzw. alte unveraendert."""
         self.schreibe_messung(docling_version="2.5.1")
         self.pruefe_abbruch("2.6.0")
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_fehlendes_messergebnis_ist_konfigfehler(self):
         """[REQ-MB-23] vorabmessung.json fehlt -> KonfigFehler beim Einlesen mit Docling, keine/unveraenderte Buchdatei."""
         self.assertFalse(os.path.exists(self.messung))
         self.pruefe_abbruch()
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_messergebnis_ohne_version_ist_konfigfehler(self):
         """[REQ-MB-23] vorabmessung.json ohne docling_version -> KonfigFehler, keine/unveraenderte Buchdatei."""
         self.schreibe_messung()
@@ -766,7 +729,6 @@ class TestPdfAdapter(mb.BestandTest):
         super().setUp()
         self.pdf = baue_pdf(os.path.join(self.tmp.name, "testbuch.pdf"))
 
-    @unittest.skip("devloop: REQ-MB-24 noch nicht implementiert")
     def test_req_mb_24_lesezeichen_und_labels_aus_der_pdf(self):
         """[REQ-MB-24] Synthetisches PDF: Lesezeichen (2 Ebenen) -> Titel/Ebene/Seite/Reihenfolge; Labels je physischer Seite."""
         e = einlesen()
@@ -774,7 +736,6 @@ class TestPdfAdapter(mb.BestandTest):
                          [{"titel": t, "ebene": eb, "seite": s} for t, eb, s in PDF_LESEZEICHEN])
         self.assertEqual(e.seitenlabels_aus_pdf(self.pdf), PDF_LABELS)
 
-    @unittest.skip("devloop: REQ-MB-24 noch nicht implementiert")
     def test_req_mb_24_einlesen_liest_die_pdf_selbst(self):
         """[REQ-MB-24] lies_buch_ein(pdf=...) nimmt Liste und gedruckte Seiten aus der Datei: Pfade und Seiten je Haeppchen."""
         self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "lesezeichen"},
@@ -808,7 +769,6 @@ class TestPdfplumberVersion(TestDoclingVersion):
         return einlesen().lies_buch_ein(mb.SID, "nord", self.SEITEN, lesezeichen=self.LISTE,
                                         pdfplumber_version=version, vorabmessung=self.messung, **kw)
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_gleiche_version_laeuft_und_steht_im_protokoll(self):
         """[REQ-MB-23] pdfplumber-Version gleich der im Messergebnis (Buch mit Schriftstufen) -> laeuft, Protokoll nennt sie."""
         self.schreibe_messung(docling_version="2.131.0", pdfplumber_version="0.11.4")
@@ -816,24 +776,20 @@ class TestPdfplumberVersion(TestDoclingVersion):
         self.assertEqual(p.pdfplumber_version, "0.11.4")
         self.assertTrue(os.path.exists(self.buchdatei("nord")))
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_abweichende_version_ist_konfigfehler(self):
         """[REQ-MB-23] Abweichende pdfplumber-Version -> KonfigFehler, keine Buchdatei bzw. alte unveraendert."""
         self.schreibe_messung(docling_version="2.131.0", pdfplumber_version="0.11.4")
         self.pruefe_abbruch("0.11.5")
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_fehlendes_messergebnis_ist_konfigfehler(self):
         """[REQ-MB-23] vorabmessung.json fehlt -> KonfigFehler beim Einlesen mit Schriftinfo."""
         self.pruefe_abbruch("0.11.4")
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_messergebnis_ohne_version_ist_konfigfehler(self):
         """[REQ-MB-23] vorabmessung.json ohne pdfplumber_version -> KonfigFehler beim Einlesen mit Schriftinfo."""
         self.schreibe_messung(docling_version="2.131.0")
         self.pruefe_abbruch("0.11.4")
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_buch_ohne_schriftstufen_braucht_keine_pdfplumber_version(self):
         """[REQ-MB-23] Buch ohne Schriftstufen liest trotz fehlender pdfplumber_version ein."""
         self.bestand([mb.buch("nord", "Buch Nord", "alpha", ueberschriften={"quelle": "lesezeichen"},
@@ -879,7 +835,6 @@ BILD_MARKEN = ["vormarke", "bildmarkeeins", "bildmarkezwei", "nachmarke"]
 
 
 class TestBildElemente(mb.BestandTest):
-    @unittest.skip("devloop: REQ-MB-27 noch nicht implementiert")
     def test_req_mb_27_text_kinder_genau_einmal_an_der_stelle_des_bildes(self):
         """[REQ-MB-27] Vor, Kind 1, Kind 2, Nach -- jeder Marker genau einmal; leeres Bild ohne Zeile; Protokoll-Zaehler 2."""
         e = einlesen()
@@ -890,7 +845,6 @@ class TestBildElemente(mb.BestandTest):
                                  "Kind zwei bildmarkezwei.", "Nach dem Bild nachmarke."])
         self.assertEqual(p.aus_bildern, 2)
 
-    @unittest.skip("devloop: REQ-MB-27 noch nicht implementiert")
     def test_req_mb_27_nach_index_auffindbar(self):
         """[REQ-MB-27] Nach Einlesen und index findet lade_spiel/BM25 jeden Marker in genau einem Haeppchen, in Reihenfolge."""
         e = einlesen()
@@ -943,7 +897,6 @@ class TestRandzeilen(mb.BestandTest):
         chunks, _ = rag.lade_spiel(con, mb.SID)
         return con, chunks, prot
 
-    @unittest.skip("devloop: REQ-MB-28 noch nicht implementiert")
     def test_req_mb_28_rein_baue_abschnitte(self):
         """[REQ-MB-28] Rand deklariert: Kopf-/Fusszeilen in keinem Abschnittstext und keinem Pfad, Zaehler 4; ohne Rand unveraendert."""
         e = einlesen()
@@ -960,7 +913,6 @@ class TestRandzeilen(mb.BestandTest):
         self.assertIn("KOPFMARKE-2", " ".join(a["text"] for a in ohne))
         self.assertEqual(p0.randzeilen, 0)
 
-    @unittest.skip("devloop: REQ-MB-28 noch nicht implementiert")
     def test_req_mb_28_nach_index_nur_beim_buch_mit_randangabe(self):
         """[REQ-MB-28] Zwei Buecher, nur nord mit Rand: nord ohne Kopf-/Fussmarker (BM25, lade_spiel), Zaehler nur bei nord; sued wie ohne Randangabe."""
         _, _, _ = self.lies_und_baue(rand_bei=())

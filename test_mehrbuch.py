@@ -913,7 +913,6 @@ class TestErsetzen(ZweiBuecher):
         self.assertEqual(zahl("SELECT count(*) FROM chunks_fts"), zahl("SELECT count(*) FROM chunks"))
         self.assertEqual([z for z in self.zeilen() if z[0] == "sued"], sued_vorher)
 
-    @unittest.skip("devloop: REQ-MB-8 noch nicht implementiert")
     def test_req_mb_8_ueberschreiben_wirkt_nur_auf_das_genannte_buch(self):
         """[REQ-MB-8] Einlesen von nord ohne --ueberschreiben bricht ab; mit wirkt es nur auf nord (sued byte-gleich)."""
         einlesen = importlib.import_module("einlesen")
@@ -950,7 +949,6 @@ class TestErsetzen(ZweiBuecher):
         _, eingebettet = self.baue()
         self.assertEqual(eingebettet, [])
 
-    @unittest.skip("devloop: REQ-MB-9 noch nicht implementiert")
     def test_req_mb_9_einlesen_laesst_andere_buecher_byte_gleich(self):
         """[REQ-MB-9] Einlesen eines Buchs laesst die Dateien der anderen Buecher byte-gleich."""
         einlesen = importlib.import_module("einlesen")
@@ -1135,7 +1133,6 @@ print(os.path.exists(os.path.join(verz, "buecher", "nord", "knowledge.jsonl")))
                     out[os.path.relpath(p, self.kopie.repo)] = hashlib.sha256(f.read()).hexdigest()
         return out
 
-    @unittest.skip("devloop: REQ-MB-18 noch nicht implementiert")
     def test_req_mb_18_buecherdateien_nie_neben_dem_code(self):
         """[REQ-MB-18] Einlesen + index unter testumgebung: Repo-Kopie unveraendert; ohne testumgebung sieht der Detektor die Schreibzugriffe."""
         vorher = self.stand()
