@@ -67,6 +67,9 @@ class Protokoll:
         self.docling_version = None             # REQ-MB-23
         self.pdfplumber_version = None
         self.abschnitte = 0
+        self.umsortiert = 0                     # REQ-MB-31
+        self.binnen_grossbuchstabe = {"anzahl": 0, "seiten": []}   # REQ-MB-32
+        self.strichrest = {"anzahl": 0, "seiten": []}
 
     def als_dict(self):
         d = dict(vars(self))
@@ -94,14 +97,26 @@ class _Verbinder:
     add() liefert den Offset, an dem der Text der Zeile im Ergebnis beginnt -- daraus entstehen die
     Seitenwechsel eines Abschnitts (REQ-MB-16), ohne dass eine spaetere Ersetzung sie verschiebt."""
 
-    def __init__(self, reparatur=True, konjunktionen=(), protokoll=None):
+    def __init__(self, reparatur=True, konjunktionen=(), protokoll=None, zeilenenden=True):
         self.text, self.reparatur, self.konj, self.p = "", reparatur, set(konjunktionen), protokoll
+        self.zeilenenden = zeilenenden
 
     def _zaehle(self, feld):
         if self.p is not None:
             setattr(self.p, feld, getattr(self.p, feld) + 1)
 
     def add(self, zeile):
+        if not self.zeilenenden:
+            # Docling-Weg (REQ-MB-11, Fassung 7): der Elementtext bleibt an Zeilenenden und Strichen
+            # unveraendert; nur der weiche Trennstrich im Wort faellt (auf allen Wegen)
+            zeile = zeile.replace(SHY, "") if self.reparatur else zeile
+            if not zeile.strip():
+                return None
+            if not self.text:
+                self.text = zeile
+                return 0
+            self.text = self.text + " " + zeile
+            return len(self.text) - len(zeile)
         zeile = _zeile_vorbereiten(zeile) if self.reparatur else " ".join(zeile.split())
         if not zeile:
             return None
@@ -153,8 +168,9 @@ def repariere_trennungen(text, sprache="de", konjunktionen=None, protokoll=None)
 
 # ---------- REQ-MB-12: unscharfer Abgleich ----------
 def norm(s):
-    """NFC, ohne jeden Leerraum, casefold."""
-    return "".join(unicodedata.normalize("NFC", s or "").split()).casefold()
+    """NFC, ohne Leerraum und ohne Unicode-Formatzeichen (Cf, u. a. U+00AD, U+200B), casefold."""
+    return "".join(ch for ch in unicodedata.normalize("NFC", s or "")
+                   if not ch.isspace() and unicodedata.category(ch) != "Cf").casefold()
 
 
 def auslassungen(zeile, titel):
@@ -254,7 +270,7 @@ def _waere_ueberschrift(zeile, layout):
 
 # ---------- Abschnitte (REQ-MB-12, -13, -14, -20, -25, -28) ----------
 def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=True, protokoll=None,
-                    vorspann=None, rand=None, seitenhoehe=None, konjunktionen=None):
+                    vorspann=None, rand=None, seitenhoehe=None, konjunktionen=None, zeilenenden=True):
     """Seitenzeilen + Ueberschriften-Liste -> [{"abschnittspfad", "text", "seiten", "seitenwechsel"}].
 
     seiten: {physische Seite: [{"text", "klasse", "schrift"?, "oben"?, "unten"?}, ...]} in Lesereihenfolge
@@ -265,7 +281,7 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
     """
     p = protokoll if protokoll is not None else Protokoll()
     layout = layout or {}
-    vorspann = vorspann or rag.VORSPANN_STANDARD
+    vorspann = rag.titelnorm(vorspann or rag.VORSPANN_STANDARD)            # REQ-MB-33
     konj = konjunktionen_fuer(sprache, konjunktionen)
 
     # 1. Zeilen in Lesereihenfolge; Randzeilen werden gezaehlt und verworfen (REQ-MB-28)
@@ -290,8 +306,8 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
         return bisect.bisect_left(seitenfolge, s)
 
     # 2. Listenabgleich: je Eintrag (Listenreihenfolge) die beste Zeile seiner Zielseite
-    liste = list(liste or [])
-    vergeben, gefunden_bei, starts = {}, {}, []
+    liste = [dict(e, titel=rag.titelnorm(e["titel"])) for e in liste or []]    # REQ-MB-33
+    vergeben, gefunden_bei, nicht = {}, {}, {}
     for i, e in enumerate(liste):
         s = e["seite"]
         bewertet = []
@@ -309,12 +325,25 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
             vergeben[gleich[0]] = i
             gefunden_bei[i] = gleich[0]
             p.gefunden.append((e["titel"], s))
-            starts.append((gleich[0], 1, i))
         else:
             p.nicht_gefunden.append((e["titel"], s))
             davor = [m for m in range(i) if liste[m]["seite"] == s and m in gefunden_bei]
-            start = gefunden_bei[davor[-1]] + 1 if davor else seitenanfang(s)
-            starts.append((start, 0, i))
+            nicht[i] = gefunden_bei[davor[-1]] if davor else None
+
+    # 2b. Listenueberschriften nach Lage einsortieren (REQ-MB-31) -- der Abgleich lief auf der
+    # urspruenglichen Folge, Abschnitte, REQ-MB-13 und -20 arbeiten auf der umsortierten
+    reihe = list(range(len(zeilen)))
+    for i in range(len(liste)):
+        if i in gefunden_bei:
+            reihe = _einsortieren(reihe, gefunden_bei[i], zeilen, p)
+    neu = {alt: pos for pos, alt in enumerate(reihe)}
+    zeilen = [zeilen[k] for k in reihe]
+    starts = []
+    for i, e in enumerate(liste):
+        if i in gefunden_bei:
+            starts.append((neu[gefunden_bei[i]], 1, i))
+        else:
+            starts.append((neu[nicht[i]] + 1 if nicht[i] is not None else seitenanfang(e["seite"]), 0, i))
 
     # Pfade aus der Liste (Wahrheit fuer ihre Ebenen); eine uebersprungene Ebene bleibt leer
     pfade, stapel = {}, []
@@ -350,20 +379,43 @@ def baue_abschnitte(seiten, liste=None, layout=None, sprache="de", reparatur=Tru
             p.rueckfaelle += rueckfall
             _zaehle(p.layout_ueberschriften, tuple(pfad))
             _zaehle(p.layout_je_stufe, n)
-            name = " ".join(zeilen[j][1]["text"].split())
+            name = rag.titelnorm(zeilen[j][1]["text"])
             offen = {k: v for k, v in offen.items() if k < n}
             unter = pfad + [offen[k] for k in sorted(offen)] + [name]
             offen[n] = name
             teile.append((unter, name, j, []))
         for upfad, kopf, kj, rj in teile:
-            a = _baue_text(upfad, kopf, kj, rj, zeilen, reparatur, konj, p)
+            a = _baue_text(upfad, kopf, kj, rj, zeilen, reparatur, konj, p, zeilenenden)
             if a is not None:
                 abschnitte.append(a)
     p.abschnitte = len(abschnitte)
     return abschnitte
 
 
-def _baue_text(pfad, kopf, kopfzeile, rumpf, zeilen, reparatur, konj, p):
+def _hat_lage(z):
+    return all(z.get(k) is not None for k in ("x0", "x1", "oben", "unten"))
+
+
+def _einsortieren(reihe, j, zeilen, p):
+    """REQ-MB-31: Elemente derselben Seite, die VOR der Listenueberschrift j geliefert wurden, aber
+    unter ihr liegen (Mittelpunkt unter ihrer Unterkante, waagrecht ueberlappend), hinter j."""
+    s, u = zeilen[j]
+    if not _hat_lage(u):
+        return reihe
+    pos = reihe.index(j)
+
+    def darunter(k):
+        sk, e = zeilen[k]
+        return (sk == s and _hat_lage(e) and (e["oben"] + e["unten"]) / 2 > u["unten"]
+                and e["x0"] < u["x1"] and u["x0"] < e["x1"])
+    weg = [k for k in reihe[:pos] if darunter(k)]
+    if not weg:
+        return reihe
+    p.umsortiert += len(weg)
+    return [k for k in reihe[:pos] if k not in weg] + [j] + weg + reihe[pos + 1:]
+
+
+def _baue_text(pfad, kopf, kopfzeile, rumpf, zeilen, reparatur, konj, p, zeilenenden=True):
     """Ein Abschnitt: Ueberschrift (Listenform bzw. Layout-Zeile), dann der reparierte Text."""
     wechsel = []
 
@@ -371,11 +423,14 @@ def _baue_text(pfad, kopf, kopfzeile, rumpf, zeilen, reparatur, konj, p):
         if not wechsel or wechsel[-1][1] != zeilen[j][0]:
             wechsel.append([offset, zeilen[j][0]])
 
-    v = _Verbinder(reparatur, konj, p)
+    v = _Verbinder(reparatur, konj, p, zeilenenden)
     for j in rumpf:
-        off = v.add(zeilen[j][1]["text"])
-        if off is not None:
-            seite(j, off)
+        # Zeilenweg: die Zeilenenden eines Elementtexts sind Zeilen fuer die Reparatur (REQ-MB-11)
+        stuecke = zeilen[j][1]["text"].split("\n") if zeilenenden else [zeilen[j][1]["text"]]
+        for n, stueck in enumerate(stuecke):
+            off = v.add(stueck)
+            if off is not None:
+                seite(j, off)
     rumpftext = v.ergebnis()
     if kopf is None:
         text = rumpftext
@@ -533,17 +588,19 @@ def _reparatur(buch):
 
 def lies_buch_ein(spiel_id, buch_id, seiten, lesezeichen=None, labels=None, data_dir=None, ueberschreiben=False,
                   pdf=None, docling_version=None, vorabmessung=None, pdfplumber_version=None, seitenhoehe=None,
-                  protokoll=None):
+                  protokoll=None, zeilenenden=True):
     """Seitenzeilen eines Buchs -> data/<spiel_id>/buecher/<buch_id>/knowledge.jsonl (+ Einlese-Protokoll).
 
     Die Buchdeklaration (spiel.json) sagt alles Weitere: "ueberschriften", "seitenzahlen", "layout",
     "rand", "vorspann", "reparatur", "sprache". Bricht etwas ab, wird nichts geschrieben; eine
-    vorhandene Buchdatei bleibt ohne ueberschreiben=True stehen (REQ-MB-8)."""
+    vorhandene Buchdatei bleibt ohne ueberschreiben=True stehen (REQ-MB-8).
+    zeilenenden=False: Docling-Weg (Elementtexte ohne Zeilenend-Reparatur, REQ-MB-11)."""
     meta = rag.lies_spiel(spiel_id, data_dir)
     if not rag.ist_mehrbuch(meta):
         raise KonfigFehler(f"{spiel_id}: spiel.json deklariert keine 'buecher' -- einlesen.py ist fuer "
                            "Mehr-Buecher-Bestaende.")
     buch = _buch(meta, buch_id)
+    pruefe_layout_schema(buch)
     p = protokoll if protokoll is not None else Protokoll()
     pruefe_versionen(buch, docling_version, pdfplumber_version, vorabmessung, p)
     ziel = rag.buch_pfad(spiel_id, buch_id, data_dir)
@@ -554,7 +611,7 @@ def lies_buch_ein(spiel_id, buch_id, seiten, lesezeichen=None, labels=None, data
     an, konj = _reparatur(buch)
     abschnitte = baue_abschnitte(seiten, liste, layout=buch.get("layout"), sprache=buch["sprache"], reparatur=an,
                                  protokoll=p, vorspann=buch.get("vorspann"), rand=buch.get("rand"),
-                                 seitenhoehe=seitenhoehe, konjunktionen=konj)
+                                 seitenhoehe=seitenhoehe, konjunktionen=konj, zeilenenden=zeilenenden)
     if not abschnitte:
         raise KonfigFehler(f"{spiel_id}/{buch_id}: kein Abschnitt mit Text -- nichts eingelesen.")
     eintraege = []
@@ -563,11 +620,105 @@ def lies_buch_ein(spiel_id, buch_id, seiten, lesezeichen=None, labels=None, data
         eintraege.append({"id": n, "seite": wechsel[0][1], "seite_pdf": wechsel[0][2], "seitenwechsel": wechsel,
                           "text": a["text"], "spiel": meta["name"], "spiel_id": spiel_id, "buch_id": buch_id,
                           "abschnittspfad": a["abschnittspfad"]})
+    zaehle_verdacht(eintraege, konjunktionen_fuer(buch["sprache"], konj), p)
     os.makedirs(os.path.dirname(ziel), exist_ok=True)
     _schreibe_atomar(ziel, "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in eintraege))
     _schreibe_atomar(os.path.join(os.path.dirname(ziel), PROTOKOLL_DATEI),
                      json.dumps(p.als_dict(), ensure_ascii=False, indent=2) + "\n")
     return p
+
+
+def zaehle_verdacht(eintraege, konj, p):
+    """REQ-MB-32: Verdachtsfaelle in den Abschnittstexten (nach der Reparatur, Text unveraendert) --
+    Binnen-Grossbuchstabe (Ll gefolgt von Lu) und Strichrest (Buchstabe, "-", Leerzeichen, Wort mit
+    Kleinbuchstaben, keine Konjunktion). Seite: gedruckt, sonst physisch."""
+    konj = {k.casefold() for k in konj}
+    for e in eintraege:
+        text, wechsel = e["text"], e["seitenwechsel"]
+
+        def seite(offset):
+            w = [x for x in wechsel if x[0] <= offset] or wechsel[:1]
+            return w[-1][1] if w[-1][1] is not None else w[-1][2]
+        for i in range(len(text) - 1):
+            if unicodedata.category(text[i]) == "Ll" and unicodedata.category(text[i + 1]) == "Lu":
+                _verdacht(p.binnen_grossbuchstabe, seite(i))
+        for m in _STRICHREST.finditer(text):
+            wort = m.group(1)
+            if unicodedata.category(wort[0]) == "Ll" and wort.casefold() not in konj:
+                _verdacht(p.strichrest, seite(m.start()))
+
+
+_STRICHREST = re.compile(r"(?<=[^\W\d_])- +(\w+)")
+
+
+def _verdacht(zaehler, seite):
+    zaehler["anzahl"] += 1
+    if seite not in zaehler["seiten"]:
+        zaehler["seiten"].append(seite)
+        zaehler["seiten"].sort()
+
+
+# ---------- REQ-MB-34: Schema der Layout-/Rand-Deklaration ----------
+_STUFEN_SCHLUESSEL = ("groesse", "laufweite") + SCHNITTE
+
+
+def _zahl(w):
+    return isinstance(w, (int, float)) and not isinstance(w, bool)
+
+
+def _bereich(w, name, positiv=False):
+    if not (isinstance(w, list) and len(w) == 2 and all(_zahl(x) for x in w) and w[0] <= w[1]):
+        raise KonfigFehler(f"Schluessel {name!r}: erwartet [von, bis] aus zwei Zahlen mit von <= bis, nicht {w!r}.")
+    if positiv and not w[0] > 0:
+        raise KonfigFehler(f"Schluessel {name!r}: 'von' muss groesser als 0 sein, nicht {w[0]!r}.")
+
+
+def pruefe_layout_schema(buch):
+    """Layout- und Rand-Deklaration eines Buchs gegen ihr Schema; Verstoss -> KonfigFehler mit dem Schluessel."""
+    wo = f"Buch {buch.get('buch_id')!r}"
+    layout = buch.get("layout")
+    if layout is not None:
+        if not isinstance(layout, dict):
+            raise KonfigFehler(f"{wo}: 'layout' muss ein Objekt sein.")
+        fremd = sorted(set(layout) - {"klasse", "stufen", "veto", "hoechstlaenge"})
+        if fremd:
+            raise KonfigFehler(f"{wo}: unbekannter Schluessel {fremd[0]!r} in 'layout'.")
+        if "klasse" in layout and not (isinstance(layout["klasse"], str) and layout["klasse"].strip()):
+            raise KonfigFehler(f"{wo}: Schluessel 'klasse' muss eine nicht leere Zeichenkette sein.")
+        if "veto" in layout and not (isinstance(layout["veto"], list)
+                                     and all(isinstance(v, str) and v.strip() for v in layout["veto"])):
+            raise KonfigFehler(f"{wo}: Schluessel 'veto' muss eine Liste nicht leerer Zeichenketten sein.")
+        if "hoechstlaenge" in layout and not (isinstance(layout["hoechstlaenge"], int)
+                                              and not isinstance(layout["hoechstlaenge"], bool)
+                                              and layout["hoechstlaenge"] >= 1):
+            raise KonfigFehler(f"{wo}: Schluessel 'hoechstlaenge' muss eine ganze Zahl >= 1 sein.")
+        if "stufen" in layout:
+            stufen = layout["stufen"]
+            if not (isinstance(stufen, list) and stufen):
+                raise KonfigFehler(f"{wo}: Schluessel 'stufen' muss eine nicht leere Liste sein.")
+            for n, st in enumerate(stufen, 1):
+                if not isinstance(st, dict) or not st:
+                    raise KonfigFehler(f"{wo}: 'stufen' Stufe {n} muss ein Objekt mit mindestens einer Angabe sein.")
+                fremd = sorted(set(st) - set(_STUFEN_SCHLUESSEL))
+                if fremd:
+                    raise KonfigFehler(f"{wo}: unbekannter Schluessel {fremd[0]!r} in Stufe {n} ('stufen').")
+                if "groesse" in st:
+                    _bereich(st["groesse"], "groesse", positiv=True)
+                if "laufweite" in st:
+                    _bereich(st["laufweite"], "laufweite")
+                for m in SCHNITTE:
+                    if m in st and not isinstance(st[m], bool):
+                        raise KonfigFehler(f"{wo}: Schluessel {m!r} in Stufe {n} muss true oder false sein.")
+    rand = buch.get("rand")
+    if rand is not None:
+        if not isinstance(rand, dict) or not rand:
+            raise KonfigFehler(f"{wo}: 'rand' muss ein Objekt mit 'kopf' und/oder 'fuss' sein.")
+        fremd = sorted(set(rand) - {"kopf", "fuss"})
+        if fremd:
+            raise KonfigFehler(f"{wo}: unbekannter Schluessel {fremd[0]!r} in 'rand'.")
+        for k, w in rand.items():
+            if not _zahl(w) or w < 0:
+                raise KonfigFehler(f"{wo}: Schluessel {k!r} in 'rand' muss eine Zahl >= 0 sein, nicht {w!r}.")
 
 
 def _schreibe_atomar(pfad, inhalt):
@@ -712,6 +863,7 @@ def lies_pdf_ein(spiel_id, buch_id, pdf=None, data_dir=None, ueberschreiben=Fals
     from pypdf import PdfReader
     meta = rag.lies_spiel(spiel_id, data_dir)
     buch = _buch(meta, buch_id)
+    pruefe_layout_schema(buch)
     pdf = pdf or os.path.join(rag.PDF_DIR, buch["quelle"])
     if not os.path.exists(pdf):
         raise KonfigFehler(f"Quelldatei {pdf} fehlt (--pdf angeben).")
@@ -736,7 +888,8 @@ def lies_pdf_ein(spiel_id, buch_id, pdf=None, data_dir=None, ueberschreiben=Fals
     if mit_schrift:
         seiten = ordne_schrift_zu(pdf, seiten, rand=buch.get("rand"))
     return lies_buch_ein(spiel_id, buch_id, seiten, data_dir=data_dir, ueberschreiben=ueberschreiben, pdf=pdf,
-                         docling_version=docling_version, pdfplumber_version=pdfplumber_version, protokoll=p)
+                         docling_version=docling_version, pdfplumber_version=pdfplumber_version, protokoll=p,
+                         zeilenenden=False)
 
 
 def main(argv=None):

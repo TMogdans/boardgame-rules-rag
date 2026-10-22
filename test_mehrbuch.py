@@ -294,7 +294,6 @@ class ZweiBuecher(BestandTest):
 
 
 class TestDatenmodell(ZweiBuecher):
-    @unittest.skip("devloop: REQ-MB-1 noch nicht implementiert")
     def test_req_mb_1_zwei_buecher_im_index(self):
         """[REQ-MB-1] Bestand mit zwei Buechern -> index legt Haeppchen beider Buecher an, je Buch eigene Datei."""
         self.lege_zwei_an()
@@ -305,7 +304,6 @@ class TestDatenmodell(ZweiBuecher):
         self.assertEqual(sorted(kennung(c, NORD_K + SUED_K) for c in chunks), sorted(NORD_K + SUED_K))
         self.assertEqual({c["buch_id"] for c in chunks}, {"nord", "sued"})
 
-    @unittest.skip("devloop: REQ-MB-1 noch nicht implementiert")
     def test_req_mb_1_eigener_fingerprint_je_buch(self):
         """[REQ-MB-1] Jedes Buch hat seinen eigenen Fingerprint: Aenderung an sued bettet nur sued neu ein."""
         self.lege_zwei_an()
@@ -316,7 +314,6 @@ class TestDatenmodell(ZweiBuecher):
         self.assertEqual(len(eingebettet), len(neu))
         self.assertTrue(all(any(k in t for k in SUED_K + ["suedneun"]) for t in eingebettet), eingebettet)
 
-    @unittest.skip("devloop: REQ-MB-1 noch nicht implementiert")
     def test_req_mb_1_praefix_zuweisung_laengstes_gewinnt(self):
         """[REQ-MB-1] Standard regel, ["K2"]->welt, ["K2","X","Y"]->regel: laengstes Pfad-Praefix gewinnt."""
         self.lege_zwei_an(nord_arten=[(("K2",), "welt"), (("K2", "X", "Y"), "regel")])
@@ -331,7 +328,6 @@ class TestDatenmodell(ZweiBuecher):
                                "nordsechs": "regel",      # K2 > X > Y: laengeres Praefix
                                "suedeins": "welt", "suedzwei": "welt", "sueddrei": "welt"})   # Standard von sued
 
-    @unittest.skip("devloop: REQ-MB-1 noch nicht implementiert")
     def test_req_mb_1_altbestand_ein_buch_und_byte_gleich(self):
         """[REQ-MB-1] Altbestand gilt als genau ein Buch; sein Verzeichnis ist nach index byte-gleich."""
         self.lege_zwei_an()
@@ -347,7 +343,6 @@ class TestDatenmodell(ZweiBuecher):
 
 
 class TestFelderJeHaeppchen(ZweiBuecher):
-    @unittest.skip("devloop: REQ-MB-2 noch nicht implementiert")
     def test_req_mb_2_felder_im_index_und_in_lade_spiel(self):
         """[REQ-MB-2] Index-Zeile und lade_spiel-Chunk tragen buch_id, fassung, sprache, seite, abschnittspfad, inhaltsart."""
         self.lege_zwei_an(nord_arten=[(("K2",), "welt")])
@@ -370,7 +365,6 @@ class TestFelderJeHaeppchen(ZweiBuecher):
                                             c["abschnittspfad"], c["inhaltsart"]) for c in chunks}
         self.assertEqual(geladen, soll)
 
-    @unittest.skip("devloop: REQ-MB-2 noch nicht implementiert")
     def test_req_mb_2_werte_kommen_aus_der_zeile(self):
         """[REQ-MB-2] Falsche Deklaration (spiel.json nach dem Bau verfaelscht, ohne index) -> lade_spiel liefert die Zeilenwerte."""
         self.lege_zwei_an()
@@ -445,7 +439,6 @@ def alte_suche(pfad, spiel_id, frage, k):
 
 
 class TestRueckwaertskompatibel(ZweiBuecher):
-    @unittest.skip("devloop: REQ-MB-3 noch nicht implementiert")
     def test_req_mb_3_migration_alter_index_ohne_neu_einbetten(self):
         """[REQ-MB-3] Index vom Stand vor der Spec -> nach Migration 0 Einbettungen, gleiche Zeilen und Suchergebnisse."""
         alt = self.lege_alt_an()
@@ -475,7 +468,6 @@ class TestRueckwaertskompatibel(ZweiBuecher):
                 for (_, s), (_, _, s_alt) in zip(neu, vorher_suche[f]):
                     self.assertAlmostEqual(s, s_alt, places=6)
 
-    @unittest.skip("devloop: REQ-MB-3 noch nicht implementiert")
     def test_req_mb_3_altbestand_neben_mehrbuch_bestand_unveraendert(self):
         """[REQ-MB-3] Altbestand im selben Index wie ein Mehr-Buecher-Bestand: Retrieval, Quellenkopf, Entscheid-Text wie vorher."""
         self.lege_zwei_an()
@@ -519,7 +511,6 @@ class TestFilter(ZweiBuecher):
     def schluessel(hits):
         return [(h["buch_id"], h["seite"], h["text"], round(s, 6)) for h, s in hits]
 
-    @unittest.skip("devloop: REQ-MB-4 noch nicht implementiert")
     def test_req_mb_4_vektor_score_eins_verdraengt_nichts(self):
         """[REQ-MB-4] Vektorsuche: nicht passendes Haeppchen mit Score 1,0 erscheint nicht; Top-k = Bestand nur mit passenden."""
         ungefiltert = self.suche("Feuer", 3)
@@ -533,7 +524,6 @@ class TestFilter(ZweiBuecher):
                 self.assertEqual({h["buch_id"] for h, _ in hits}, {"nord"})
                 self.assertEqual(self.schluessel(hits), soll)
 
-    @unittest.skip("devloop: REQ-MB-4 noch nicht implementiert")
     def test_req_mb_4_bm25_treffer_verdraengt_nichts(self):
         """[REQ-MB-4] HYBRID=1: der staerkste BM25-Treffer (fremdes Buch) erscheint nicht; Top-k = Bestand nur mit passenden."""
         with mock.patch.object(rag, "HYBRID", True):
@@ -548,7 +538,6 @@ class TestFilter(ZweiBuecher):
                     self.assertEqual({h["buch_id"] for h, _ in hits}, {"nord"})
                     self.assertEqual(self.schluessel(hits), soll)
 
-    @unittest.skip("devloop: REQ-MB-4 noch nicht implementiert")
     def test_req_mb_4_reranker_kandidatenfeld_nur_passende(self):
         """[REQ-MB-4] RERANK=1 (mit und ohne HYBRID): im Kandidatenfeld des Rerankers nur passende Haeppchen."""
         for hybrid in (False, True):
@@ -564,7 +553,6 @@ class TestFilter(ZweiBuecher):
                     self.assertEqual([k for _, t in rec.paare for k in SUED_K if k in t], [])
                     self.assertEqual(self.schluessel(hits), soll)
 
-    @unittest.skip("devloop: REQ-MB-4 noch nicht implementiert")
     def test_req_mb_4_unbekannter_filterwert_ist_konfigfehler(self):
         """[REQ-MB-4] Filter auf einen Wert, den der Bestand nicht hat -> KonfigFehler statt leerer Suche."""
         for f in ({"buch_id": "west"}, {"fassung": "gamma"}, {"sprache": "fr"}, {"inhaltsart": "kosmos"},
@@ -610,7 +598,6 @@ class FassungsTest(BestandTest):
 
 
 class TestFassungsregel(FassungsTest):
-    @unittest.skip("devloop: REQ-MB-5 noch nicht implementiert")
     def test_req_mb_5_erreichbar_und_ausgeschlossen_vektor(self):
         """[REQ-MB-5] Score 1,0 ueberall: erreichbar regel@alpha, regel@beta, welt@alle; regel@gamma nie (Vektor)."""
         self.lege_fassungen_an(GLEICH)
@@ -622,7 +609,6 @@ class TestFassungsregel(FassungsTest):
         self.assertEqual(art["mkbr"], ("beta", "regel"))
         self.assertEqual(art["mkgw"], ("gamma", "welt"))
 
-    @unittest.skip("devloop: REQ-MB-5 noch nicht implementiert")
     def test_req_mb_5_ausgeschlossen_im_bm25_kandidatenfeld(self):
         """[REQ-MB-5] HYBRID=1: regel@gamma (staerkster BM25-Treffer) steht in keiner BM25-Rangfolge und in keinem Ergebnis."""
         self.lege_fassungen_an(GLEICH, regeln={}, sid="testwelt-ohne", name="Testwelt ohne")
@@ -644,7 +630,6 @@ class TestFassungsregel(FassungsTest):
         self.assertNotIn("mkgr", gesehen)
         self.assertEqual(sorted(self.rollen(hits)), ["mkar", "mkaw", "mkbr", "mkbw", "mkgw"])
 
-    @unittest.skip("devloop: REQ-MB-5 noch nicht implementiert")
     def test_req_mb_5_ausgeschlossen_im_reranker_kandidatenfeld(self):
         """[REQ-MB-5] RERANK=1 (mit/ohne HYBRID): regel@gamma nie im Kandidatenfeld des Rerankers."""
         self.lege_fassungen_an(GLEICH)
@@ -659,7 +644,6 @@ class TestFassungsregel(FassungsTest):
                                  ["mkar", "mkaw", "mkbr", "mkbw", "mkgw"])
                 self.assertNotIn("mkgr", self.rollen(hits))
 
-    @unittest.skip("devloop: REQ-MB-5 noch nicht implementiert")
     def test_req_mb_5_ranking_gleichbehandlung(self):
         """[REQ-MB-5] Top-k-Reihenfolge = Bestand ohne Regel, aus dem regel@gamma entfernt ist (kein Bonus/Malus fuer beta)."""
         for name, texte in (("gleich", GLEICH), ("verschieden", VERSCHIEDEN)):
@@ -675,7 +659,6 @@ class TestFassungsregel(FassungsTest):
                     self.assertEqual([round(s, 6) for _, s in mit], [round(s, 6) for _, s in ohne])
         self.assertEqual(self.rollen(self.suche("Feuer", 5)), ["mkbr", "mkar", "mkgw", "mkaw", "mkbw"])
 
-    @unittest.skip("devloop: REQ-MB-5 noch nicht implementiert")
     def test_req_mb_5_gilt_in_eval_cli_und_pipe(self):
         """[REQ-MB-5] Die Regel gilt bei jeder Suche des Bestands: Eval, CLI (ask) und Pipe sehen regel@gamma nie."""
         self.lege_fassungen_an(VERSCHIEDEN)
@@ -711,7 +694,6 @@ class TestHinweis(FassungsTest):
         return sorted(kennung({"text": b}, ROLLEN) for b in kontext.split("\n\n")
                       if hinweis in b and any(r in b for r in ROLLEN))
 
-    @unittest.skip("devloop: REQ-MB-21 noch nicht implementiert")
     def test_req_mb_21_hinweis_genau_bei_gekennzeichneter_fassung(self):
         """[REQ-MB-21] Prompt, CLI-Quellenausgabe und Pipe-Fusszeile tragen den Hinweistext genau bei regel@beta."""
         hits = self.suche("Feuer", 5)
@@ -730,7 +712,6 @@ class TestHinweis(FassungsTest):
         self.assertEqual(text.count(HINWEIS), 1, text)
         self.assertEqual(self.llm_bekam[-1]["messages"][-1]["content"].count(HINWEIS), 1)
 
-    @unittest.skip("devloop: REQ-MB-21 noch nicht implementiert")
     def test_req_mb_21_mutation_der_hinweis_funktion_aendert_cli_und_pipe(self):
         """[REQ-MB-21] fassungs_hinweis liefert einen Marker -> Prompt, CLI- und Pipe-Ausgabe zeigen ihn (eine Funktion)."""
         p = self.pipe(top_k=5)
@@ -747,7 +728,6 @@ class TestHinweis(FassungsTest):
             self.assertIn(marker, text)
             self.assertIn(marker, self.llm_bekam[-1]["messages"][-1]["content"])
 
-    @unittest.skip("devloop: REQ-MB-21 noch nicht implementiert")
     def test_req_mb_21_hinweistext_ist_daten(self):
         """[REQ-MB-21] Anderer Hinweistext in spiel.json -> beide Ausgaben aendern sich, ohne Code-Aenderung."""
         neu = "Achtung: aeltere Ausgabe, Werte pruefen"
@@ -785,7 +765,6 @@ class TestFundstelle(BestandTest):
         block = next(b for b in kontext.split("\n\n") if text in b)
         return block[:block.index(text)]
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_quellenkopf_nennt_buch_fassung_seite(self):
         """[REQ-MB-6] Quellenkopf im Prompt: Buch, Fassung und Seite je Fundstelle -- gleiche Seite 12 unterscheidbar."""
         kontext = rag.baue_kontext(self.hits)
@@ -799,7 +778,6 @@ class TestFundstelle(BestandTest):
                 self.assertIn(rag.fundstelle(next(h for h, _ in self.hits if h["buch_id"] == bid)), koepfe[bid])
         self.assertNotEqual(koepfe["nord"], koepfe["sued"])
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_cli_und_pipe_aus_derselben_funktion(self):
         """[REQ-MB-6] CLI-Quellenausgabe, Pipe-Fusszeile und Pipe-Prompt nennen dieselben Fundstellen wie fundstelle()."""
         fundstellen = [rag.fundstelle(h) for h, _ in self.hits]
@@ -816,7 +794,6 @@ class TestFundstelle(BestandTest):
             self.assertIn(f, text)                     # die Modellantwort ist nur "Antwort"
         self.assertEqual(self.llm_bekam[-1]["messages"], rag.baue_nachrichten("Feuer", self.hits))
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_entscheidungsschritt_nennt_buch_und_fassung(self):
         """[REQ-MB-6] C-Text, B-Hinweis und Sprachmodus nennen je Fundstelle Buch, Fassung und Seite."""
         for sprache in (False, True):
@@ -829,7 +806,6 @@ class TestFundstelle(BestandTest):
         # zwei Fundstellen auf "Seite 12" -- bei Seiten ohne Buch fielen sie zu einer zusammen
         self.assertEqual(rag.entscheid_text_nichts(self.hits).count("Buch "), 2)
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_judge_wertet_festen_satz_mit_buch_als_verweigerung(self):
         """[REQ-MB-6] (a) Fester Satz mit Buch-Fundstellen (Chat und Sprache) -> Judge: Verweigerung, gleich dem Altbestand-Fall; mit Antworttext -> keine."""
         frage = {"erwartet_verweigerung": True}
@@ -845,7 +821,6 @@ class TestFundstelle(BestandTest):
                 self.assertFalse(judge.ist_fester_verweigerungssatz(mit_antwort))
                 self.assertIsNone(judge.deterministisches_urteil(frage, mit_antwort))
 
-    @unittest.skip("devloop: REQ-MB-6 neu in Fassung 8")
     def test_req_mb_6_sprachmodus_seite_ausgeschrieben(self):
         """[REQ-MB-6] (c) Sprachmodus: "Seite 12", kein "S. 12", Buch und Fassung dabei (C-Text, B-Hinweis, fundstelle)."""
         for text in (rag.entscheid_text_nichts(self.hits, sprache=True), rag.entscheid_hinweis(self.hits, sprache=True),
@@ -856,7 +831,6 @@ class TestFundstelle(BestandTest):
                 self.assertIn("Buch", text)
                 self.assertRegex(text, "alpha|beta")
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_mutation_der_kopf_funktion_aendert_cli_und_pipe(self):
         """[REQ-MB-6] fundstelle liefert einen Marker -> Prompt, CLI-Ausgabe, Entscheid-Text, Pipe-Fusszeile und -Prompt zeigen ihn."""
         p = self.pipe(top_k=2)
@@ -901,7 +875,6 @@ class TestMessung(BestandTest):
         with mock.patch.object(rag, "answer", lambda *a: "x"), contextlib.redirect_stdout(io.StringIO()):
             return rag.cmd_eval_spiele([SID])
 
-    @unittest.skip("devloop: REQ-MB-7 noch nicht implementiert")
     def test_req_mb_7_treffer_nur_bei_passendem_buch(self):
         """[REQ-MB-7] Erwartet Seite 12 in nord, Treffer auf Seite 12 in sued -> verfehlt (Eval und messung/retrieval)."""
         self.schreibe_golden(self.fragen)
@@ -914,7 +887,6 @@ class TestMessung(BestandTest):
         self.assertEqual(erg["je_spiel"], {SID: (1, 2)})
         self.assertEqual(erg["verfehlt"], [f"{SID}/1"])
 
-    @unittest.skip("devloop: REQ-MB-7 noch nicht implementiert")
     def test_req_mb_7_unbekannter_zusatzschluessel_ist_konfigfehler(self):
         """[REQ-MB-7] Fundstelle {"buch_id", "seite", "notiz"} -> KonfigFehler in eval und messung; ohne notiz gueltig."""
         retrieval = importlib.import_module("messung.retrieval")
@@ -928,7 +900,6 @@ class TestMessung(BestandTest):
         self.schreibe_golden([dict(self.fragen[1])])
         self.assertEqual([s["kategorie"] for s in self.eval()], [rag.KAT_GETROFFEN])
 
-    @unittest.skip("devloop: REQ-MB-7 noch nicht implementiert")
     def test_req_mb_7_seite_ohne_buch_ist_konfigfehler(self):
         """[REQ-MB-7] Golden Set eines Mehr-Buecher-Bestands mit Seite ohne Buch -> KonfigFehler in eval und messung."""
         fragen = [dict(self.fragen[1], seiten=[12])]
@@ -952,7 +923,6 @@ class TestMesslaufMitBuch(BestandTest):
         with open(os.path.join(aus, "antworten.jsonl"), encoding="utf-8") as f:
             return f.read().splitlines()
 
-    @unittest.skip("devloop: REQ-MB-6 noch nicht implementiert")
     def test_req_mb_6_antworten_jsonl_mit_buch_je_fundstelle(self):
         """[REQ-MB-6] (b) Zwei Buecher mit Seite 12: "abgerufen" nennt je Fundstelle buch_id und Seite, unterscheidbar."""
         self.bestand([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta")])
@@ -966,7 +936,6 @@ class TestMesslaufMitBuch(BestandTest):
         paare = [(a.get("buch_id"), a.get("seite")) for a in abgerufen]
         self.assertEqual(sorted(paare), [("nord", 12), ("sued", 12)])
 
-    @unittest.skip("devloop: REQ-MB-6 neu in Fassung 8")
     def test_req_mb_6_antworten_jsonl_altbestand_byte_gleich(self):
         """[REQ-MB-6] (b) Altbestand: Zeile in antworten.jsonl byte-gleich zum Format vor der Aenderung (abgerufen = Seitenliste)."""
         meta = rag.lege_spiel_an("Altspiel")
@@ -1000,7 +969,6 @@ LESEZEICHEN = [{"titel": "Kapitel Eins", "ebene": 1, "seite": 1}, {"titel": "Kap
 
 
 class TestErsetzen(ZweiBuecher):
-    @unittest.skip("devloop: REQ-MB-8 noch nicht implementiert")
     def test_req_mb_8_ersetzte_fassung_nur_neue_haeppchen(self):
         """[REQ-MB-8] Neue Fassung fuer nord -> nur noch deren Haeppchen (auch FTS), genau diese eingebettet, sued nicht."""
         self.bestand([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta")])
@@ -1026,7 +994,6 @@ class TestErsetzen(ZweiBuecher):
         self.assertEqual(zahl("SELECT count(*) FROM chunks_fts"), zahl("SELECT count(*) FROM chunks"))
         self.assertEqual([z for z in self.zeilen() if z[0] == "sued"], sued_vorher)
 
-    @unittest.skip("devloop: REQ-MB-8 noch nicht implementiert")
     def test_req_mb_8_ueberschreiben_wirkt_nur_auf_das_genannte_buch(self):
         """[REQ-MB-8] Einlesen von nord ohne --ueberschreiben bricht ab; mit wirkt es nur auf nord (sued byte-gleich)."""
         einlesen = importlib.import_module("einlesen")
@@ -1046,7 +1013,6 @@ class TestErsetzen(ZweiBuecher):
         self.assertIn("nordneu", inhalt)
         self.assertNotIn("nordalt", inhalt)
 
-    @unittest.skip("devloop: REQ-MB-9 noch nicht implementiert")
     def test_req_mb_9_neues_buch_nur_dieses_eingebettet_dann_nichts(self):
         """[REQ-MB-9] Neues Buch -> nur dessen Haeppchen eingebettet; Lauf ohne Aenderung bettet nichts ein."""
         self.lege_zwei_an()
@@ -1064,7 +1030,6 @@ class TestErsetzen(ZweiBuecher):
         _, eingebettet = self.baue()
         self.assertEqual(eingebettet, [])
 
-    @unittest.skip("devloop: REQ-MB-9 noch nicht implementiert")
     def test_req_mb_9_einlesen_laesst_andere_buecher_byte_gleich(self):
         """[REQ-MB-9] Einlesen eines Buchs laesst die Dateien der anderen Buecher byte-gleich."""
         einlesen = importlib.import_module("einlesen")
@@ -1105,26 +1070,22 @@ class TestKaputteDeklaration(ZweiBuecher):
         self.assertEqual(ctx.exception.ergebnis[alt][0], "neu")
         self.assertEqual(self.zeilen(), vorher)
 
-    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
     def test_req_mb_10_doppelte_buch_id(self):
         """[REQ-MB-10] Doppelte buch_id in der Deklaration -> KonfigFehler, alter Stand bleibt."""
         self.kaputt([buch("nord", "Buch Nord", "alpha"), buch("nord", "Buch Nord Zwei", "beta", quelle="anders.pdf"),
                      buch("sued", "Buch Sued", "beta", sprache="en", inhaltsart="welt")])
 
-    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
     def test_req_mb_10_gleiche_quelldatei(self):
         """[REQ-MB-10] Zwei Buecher nennen dieselbe Quelldatei -> KonfigFehler, alter Stand bleibt."""
         self.kaputt([buch("nord", "Buch Nord", "alpha", quelle="gemeinsam.pdf"),
                      buch("sued", "Buch Sued", "beta", sprache="en", inhaltsart="welt", quelle="gemeinsam.pdf")])
 
-    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
     def test_req_mb_10_nicht_deklarierte_buch_id_im_haeppchen(self):
         """[REQ-MB-10] Haeppchen mit nicht deklarierter buch_id -> KonfigFehler, alter Stand bleibt."""
         self.kaputt([buch("nord", "Buch Nord", "alpha"), buch("sued", "Buch Sued", "beta", sprache="en",
                                                              inhaltsart="welt")],
                     {"nord": nord() + [eintrag("west", 7, 70, "Feuer fremd")]})
 
-    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
     def test_req_mb_10_buch_id_ohne_slug(self):
         """[REQ-MB-10] buch_id bildet keinen Slug (gleiche Regel wie spiel_id): "Buch A", "../x" -> KonfigFehler, alter Stand bleibt."""
         for schlecht in ("Buch A", "../x"):
@@ -1134,7 +1095,6 @@ class TestKaputteDeklaration(ZweiBuecher):
                 self.assertFalse(os.path.exists(os.path.join(self.data, "x")))
                 self.assertFalse(os.path.exists(os.path.join(self.data, SID, "buecher", "Buch A")))
 
-    @unittest.skip("devloop: REQ-MB-10 noch nicht implementiert")
     def test_req_mb_10_sprache_nicht_in_sprachen(self):
         """[REQ-MB-10] sprache "xx" (nicht in rag.SPRACHEN) -> KonfigFehler, alter Stand bleibt."""
         self.assertNotIn("xx", rag.SPRACHEN)
@@ -1160,7 +1120,6 @@ class TestDropTypesNurAltbestand(ZweiBuecher):
         with mock.patch.dict(os.environ, {"DROP_TYPES": drop}):
             return len(rag.lade_spiel(self.oeffne(), SID, rag.drop_fuer_index())[0])
 
-    @unittest.skip("devloop: REQ-MB-30 noch nicht implementiert")
     def test_req_mb_30_mehrbuch_ohne_typ_mit_pipe_default(self):
         """[REQ-MB-30] Mehrbuch ohne typ, DROP_TYPES="flavor,meta": index, Suche, Pipe und eval laufen; Haeppchenzahl wie mit ""."""
         self.lege_ohne_typ_an()
@@ -1181,7 +1140,6 @@ class TestDropTypesNurAltbestand(ZweiBuecher):
         self.assertNotIn("Fehler", text)
         self.assertEqual(len(self.llm_bekam), 1)
 
-    @unittest.skip("devloop: REQ-MB-30 noch nicht implementiert")
     def test_req_mb_30_flavor_haeppchen_bleiben_im_mehrbuch_index(self):
         """[REQ-MB-30] Mehrbuch-Haeppchen mit typ "flavor" bleiben bei DROP_TYPES=flavor im Index und sind per BM25 und lade_spiel auffindbar."""
         self.bestand([buch("nord", "Buch Nord", "alpha")])
@@ -1215,7 +1173,6 @@ class TestDropTypesNurAltbestand(ZweiBuecher):
 
 
 class TestPipeVeraltet(ZweiBuecher):
-    @unittest.skip("devloop: REQ-MB-26 noch nicht implementiert")
     def test_req_mb_26_geaenderte_zweite_buchdatei_meldet_veraltet(self):
         """[REQ-MB-26] Index gebaut; Buchdatei sued (nicht die erste) geaendert -> Pipe meldet veraltet; unveraendert -> nicht."""
         self.lege_zwei_an()
@@ -1274,7 +1231,6 @@ class TestSynthetisch(FassungsTest):
                                [kennung(h, ROLLEN) for h, _ in gefiltert], [kennung(h, ROLLEN) for h, _ in art])
             return erg
 
-    @unittest.skip("devloop: REQ-MB-17 noch nicht implementiert")
     def test_req_mb_17_umbenennen_aendert_kein_ergebnis(self):
         """[REQ-MB-17] Bestand, Buecher, Titel, Fassungen, Hinweis, Pfade, Inhaltsarten umbenannt -> gleiche Treffer, Scores, Hinweise, Filter."""
         a = self.szenario(self.NAMEN_A)
@@ -1328,7 +1284,6 @@ print(os.path.exists(os.path.join(verz, "buecher", "nord", "knowledge.jsonl")))
                     out[os.path.relpath(p, self.kopie.repo)] = hashlib.sha256(f.read()).hexdigest()
         return out
 
-    @unittest.skip("devloop: REQ-MB-18 noch nicht implementiert")
     def test_req_mb_18_buecherdateien_nie_neben_dem_code(self):
         """[REQ-MB-18] Einlesen + index unter testumgebung: Repo-Kopie unveraendert; ohne testumgebung sieht der Detektor die Schreibzugriffe."""
         vorher = self.stand()
@@ -1393,7 +1348,6 @@ class TestPerformance(BestandTest):
             zeiten.append((time.perf_counter() - t) * 1000)
         return statistics.median(zeiten), max(zeiten)
 
-    @unittest.skip("devloop: REQ-MB-19 noch nicht implementiert")
     def test_req_mb_19_mehrbuch_bestand_typisch_15_max_45_ms(self):
         """[REQ-MB-19] 5 Buecher, 3.000 Haeppchen, 1.024 Dim., Filter + Fassungsregel: typisch <= 15 ms, Maximum <= 45 ms."""
         fassungen = ("alpha", "alpha", "beta", "gamma", "gamma")
@@ -1414,7 +1368,6 @@ class TestPerformance(BestandTest):
         self.assertLessEqual(typ, 15.0)
         self.assertLessEqual(mx, 45.0)
 
-    @unittest.skip("devloop: REQ-MB-19 noch nicht implementiert")
     def test_req_mb_19_altbestand_hoechstens_20_prozent_ueber_dem_stand_vor_der_spec(self):
         """[REQ-MB-19] Altbestand 2.000 Haeppchen, 1.024 Dim.: typisch <= 1,2 x Basis; Maximum = Median der 5 Maxima je Seite <= 1,2 x Median der Basis (Fassung 7)."""
         meta = rag.lege_spiel_an("Altspiel")
@@ -1477,7 +1430,6 @@ class TestVorabmessung(unittest.TestCase):
     SCHLUESSEL = {"docling_version", "pdfplumber_version", "seiten", "zweispalten_mit_tabelle", "talentseiten",
                   "L", "T", "H"}
 
-    @unittest.skip("devloop: REQ-MB-23 noch nicht implementiert")
     def test_req_mb_23_messergebnis_strukturell(self):
         """[REQ-MB-23] vorabmessung.json (Fassung 6): 10 Stichprobenseiten, Talentseiten fuer H, L/T/H mit anker/handgeprueft, beide Versionen, sonst nur Zahlen."""
         with open(self.PFAD, encoding="utf-8") as f:

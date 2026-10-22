@@ -274,12 +274,18 @@ def _normalisiere(text):
     return t
 
 
+# Mehr-Buecher-Bestand (rag.fundstelle): "Titel (Fassung), S. 12" bzw. "..., Seite 12", ohne arabische
+# Seitenzahl "PDF-S. 2"/"PDF-Seite 2", optional "(Hinweistext)"; getrennt mit ";" bzw. "und" (REQ-MB-6).
+_BUCH_FUNDSTELLE = r"[^;()\n]+?\s\([^()\n]*\),\s+(?:pdf-)?(?:s\.|seite)\s*\d+(?:\s+\([^()\n]*\))?"
+
+
 def _verweigerung_regex():
     def liste(item, verbinder):
         return rf"{item}(?:(?:{verbinder}){item})*"
     # Chat: "S. 14, S. 12"; Sprache: "Seite 14, Seite 12 und Seite 4"
     fundstellen = (r"(?:\s+naechste fundstellen:\s+(?:" + liste(r"s\.\s*\d+", r"\s*,\s*") + "|"
-                   + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + r")\.?)?")
+                   + liste(r"seite\s+\d+", r"\s*,\s*|\s+und\s+") + "|"
+                   + liste(_BUCH_FUNDSTELLE, r"\s*;\s*|\s+und\s+") + r")\.?)?")
     teile = []
     for satz in VERWEIGERUNGS_SAETZE_FEST:
         n = re.escape(_normalisiere(satz))

@@ -530,10 +530,15 @@ def inhaltsart_fuer(buch, pfad):
     """Inhaltsart eines Abschnittspfads: laengstes passendes Pfad-Praefix, sonst der Standard des Buchs."""
     beste, laenge = buch["inhaltsart"], -1
     for z in buch.get("inhaltsarten") or []:
-        p = list(z["praefix"])
+        p = [titelnorm(t) for t in z["praefix"]]          # Praefixe normalisiert wie die Pfade (REQ-MB-33)
         if len(p) > laenge and list(pfad[:len(p)]) == p:
             beste, laenge = z["inhaltsart"], len(p)
     return beste
+
+
+def titelnorm(titel):
+    """REQ-MB-33: NFC, jede Leerraumfolge (CR, LF, Tab, U+00A0 ...) -> ein Leerzeichen, ohne Rand-Leerraum."""
+    return " ".join(unicodedata.normalize("NFC", titel or "").split())
 
 
 def titelvorsatz(abschnittspfad):
@@ -1484,12 +1489,13 @@ def _lade_buecher(con, spiel_id, drop, konfig, dim, buecher, regeln):
     zeilen = con.execute("SELECT id, spiel_id, seite, typ, text, emb, buch_id, fassung, sprache, abschnittspfad, "
                          "inhaltsart, seite_pdf, seiten FROM chunks WHERE spiel_id=? AND konfig=? ORDER BY pos",
                          (spiel_id, konfig)).fetchall()
-    pruefe_typ_feld([{"typ": z[3]} for z in zeilen if z[3] is not None], drop)
+    # DROP_TYPES gilt nur fuer Altbestaende (REQ-MB-30): hier filtert inhaltsart, typ ist kein Ballast-Filter
     titel = {b["buch_id"]: b.get("titel") or b["buch_id"] for b in buecher}
     json_cache = {}
 
     def lies(s):
-        # Pfade und Seitenlisten wiederholen sich stark -- einmal parsen (Laufzeit REQ-MB-19)
+        # Pfade und Seitenlisten wiederholen sich stark -- einmal parsen (Laufzeit REQ-MB-19); jeder Chunk
+        # bekommt davon eine eigene Kopie, geteilte Listen wuerden Aenderungen weiterreichen (REQ-MB-2)
         w = json_cache.get(s)
         if w is None:
             w = json_cache[s] = json.loads(s)
@@ -1497,8 +1503,6 @@ def _lade_buecher(con, spiel_id, drop, konfig, dim, buecher, regeln):
 
     chunks, behalten = [], []
     for z in zeilen:
-        if z[3] in drop:
-            continue
         hinweis = ""
         regel = regeln.get(z[10])
         if regel is not None and z[7] not in regel["massgeblich"]:
@@ -1508,8 +1512,8 @@ def _lade_buecher(con, spiel_id, drop, konfig, dim, buecher, regeln):
         behalten.append(z[5])
         chunks.append({"doc": z[6], "seite": lies(z[2]), "text": z[4], "spiel_id": z[1], "chunk_id": z[0],
                        "buch_id": z[6], "titel": titel.get(z[6], z[6]), "fassung": z[7], "sprache": z[8],
-                       "abschnittspfad": lies(z[9]), "inhaltsart": z[10], "seite_pdf": z[11],
-                       "seiten": lies(z[12]), "hinweis": hinweis})
+                       "abschnittspfad": list(lies(z[9])), "inhaltsart": z[10], "seite_pdf": z[11],
+                       "seiten": list(lies(z[12])), "hinweis": hinweis})
     embs = np.frombuffer(b"".join(behalten), dtype="<f4").reshape(len(behalten), dim)
     return chunks, embs.astype(np.float32, copy=False)
 
@@ -2392,6 +2396,11 @@ def pruefe_golden_buecher(gs, meta, pfad):
     ids = {b["buch_id"] for b in pruefe_buecher(meta)}
     for f in gs.get("fragen") or []:
         for s in f.get("seiten") or []:
+            fremd = sorted(set(s) - {"buch_id", "seite"}) if isinstance(s, dict) else []
+            if fremd:
+                raise KonfigFehler(
+                    f"{pfad}: Frage {f.get('id', '?')}: Fundstelle {s!r} hat unbekannte Schluessel {fremd} -- erlaubt "
+                    "sind nur buch_id und seite (ein Zusatzschluessel wuerde nie treffen).")
             if not (isinstance(s, dict) and s.get("buch_id") in ids and isinstance(s.get("seite"), int)
                     and not isinstance(s.get("seite"), bool)):
                 raise KonfigFehler(

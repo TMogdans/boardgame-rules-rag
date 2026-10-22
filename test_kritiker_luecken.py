@@ -67,7 +67,6 @@ class TestBestandWechsel(mb.ZweiBuecher):
         chunks, _ = rag.lade_spiel(self.oeffne(), SID)
         return sorted(mb.kennung(c, mb.NORD_K + mb.SUED_K + [f"altmarke{i}" for i in range(1, 4)]) for c in chunks)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-8")
     def test_req_mb_8_wechsel_mehrbuch_alt_mehrbuch_ohne_verlust(self):
         """[REQ-MB-8] Mehrbuch -> Altbestand -> Mehrbuch: jeweils genau die Haeppchen des Stands, keine Altbestand-Zeile (buch_id NULL) bleibt, FTS deckungsgleich. Faengt: Altbestand-Zeilen beim Wechsel nicht loeschen; Buecher nach dem Zurueckwechseln als "aktuell" stehen lassen."""
         self.lege_zwei_an()
@@ -83,7 +82,6 @@ class TestBestandWechsel(mb.ZweiBuecher):
         self.assertEqual(zahl(self.index, "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH '\"altmarke1\"'"), 0)
         self.assertEqual(zahl(self.index, "SELECT count(*) FROM chunks_fts"), zahl(self.index, "SELECT count(*) FROM chunks"))
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-9")
     def test_req_mb_9_buch_entfernen(self):
         """[REQ-MB-9] Buch aus der Deklaration entfernt -> seine Haeppchen (auch FTS) sind weg, das andere wird nicht neu eingebettet. Faengt: nicht mehr deklarierte Buecher im Index stehen lassen."""
         self.lege_zwei_an()
@@ -95,7 +93,6 @@ class TestBestandWechsel(mb.ZweiBuecher):
         self.assertEqual(zahl(self.index, "SELECT count(*) FROM chunks WHERE buch_id='sued'"), 0)
         self.assertEqual(zahl(self.index, "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH '\"suedeins\"'"), 0)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-1")
     def test_req_mb_1_reine_deklarationsaenderung_erreicht_die_zeilen(self):
         """[REQ-MB-1] Nur sprache/fassung/Inhaltsart-Zuweisung von nord geaendert -> Zeilen und lade_spiel tragen die neuen Werte, Filter greift, 0 Einbettungen. Faengt: Deklarationsaenderung ohne Dateiaenderung nicht nachziehen."""
         self.lege_zwei_an()
@@ -122,7 +119,6 @@ class TestSlugBeobachtbar(mb.ZweiBuecher):
         os.makedirs(os.path.dirname(pfad), exist_ok=True)
         rag.schreibe_jsonl(pfad, [mb.eintrag(bid, 1, 10, "Feuer kaputtmarke")])
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-10")
     def test_req_mb_10_buch_id_ohne_slug_trotz_vorhandener_datei(self):
         """[REQ-MB-10] Buchdatei liegt unter dem kaputten Namen ("Buch A" bzw. ueber "../x") -> trotzdem KonfigFehler, Index unveraendert. Faengt: Slug-Pruefung der buch_id aus (der Fehler kam bisher nur ueber die fehlende Datei)."""
         self.lege_zwei_an()
@@ -137,7 +133,6 @@ class TestSlugBeobachtbar(mb.ZweiBuecher):
                     rag.aktualisiere_index([SID], ausgabe=lambda *_: None)
                 self.assertEqual(self.zeilen(), vorher)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-10")
     def test_req_mb_10_einlesen_unter_pfadausbruch_schreibt_nichts(self):
         """[REQ-MB-10] lies_buch_ein fuer buch_id "../x" -> KonfigFehler, ausserhalb von buecher/ entsteht nichts. Faengt: Slug-Pruefung aus (Pfadausbruch)."""
         self.bestand([mb.buch("nord", "Buch Nord", "alpha"),
@@ -214,7 +209,6 @@ class TestDoclingAdapter(mb.BestandTest):
     def buchtext(self):
         return [json.loads(z) for z in open(self.buchdatei("nord"), encoding="utf-8")]
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-23")
     def test_req_mb_23_versionen_werden_durchgereicht_und_geprueft(self):
         """[REQ-MB-23] Docling-/pdfplumber-Version des Adapters stehen im Protokoll; abweichende Version -> KonfigFehler, keine Buchdatei. Faengt: Adapter reicht die Versionen nicht durch (MBB23d/e)."""
         for falsch in ({"docling": "2.200.0", "pdfplumber": "0.11.10"}, {"docling": "2.131.0", "pdfplumber": "0.12.0"}):
@@ -227,7 +221,6 @@ class TestDoclingAdapter(mb.BestandTest):
         protokoll = json.load(open(os.path.join(os.path.dirname(self.buchdatei("nord")), "einlese_protokoll.json")))
         self.assertEqual((protokoll["docling_version"], protokoll["pdfplumber_version"]), ("2.131.0", "0.11.10"))
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-23")
     def test_req_mb_23_tabellen_roh(self):
         """[REQ-MB-23] Tabellen-Elemente gehen roh (Markdown-Export) in den Text, nicht leer oder verbalisiert. Faengt: Tabelle ueber item.text statt export_to_markdown (X15)."""
         self.lies()
@@ -235,7 +228,6 @@ class TestDoclingAdapter(mb.BestandTest):
         self.assertIn("| Stufe | Wert |", alles)
         self.assertIn("| 1 | 5 |", alles)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-28")
     def test_req_mb_28_docling_lage_nach_oben_links_umgerechnet(self):
         """[REQ-MB-28] Docling-bbox (Ursprung unten links) wird nach oben links umgerechnet: Kolumnentitel oben auf der Seite liegt im Kopfrand und wird verworfen. Faengt: bbox ohne Umrechnung (X16)."""
         p = self.lies()
@@ -244,7 +236,6 @@ class TestDoclingAdapter(mb.BestandTest):
         self.assertEqual(p.randzeilen, 1)
         self.assertIn("alphamarke", alles)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-27")
     def test_req_mb_27_bild_kinder_im_adapter(self):
         """[REQ-MB-27] Text-Kind eines Bild-Elements kommt genau einmal in den Buchtext, Protokoll aus_bildern 1. Faengt: Adapter ohne traverse_pictures."""
         p = self.lies()
@@ -252,7 +243,6 @@ class TestDoclingAdapter(mb.BestandTest):
         self.assertEqual(alles.count("bildmarke"), 1)
         self.assertEqual(p.aus_bildern, 1)
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-20")
     def test_req_mb_20_schriftstufe_aus_pdfplumber_im_adapter(self):
         """[REQ-MB-20] "Talent Alpha" (Klasse text, 14 pt fett im PDF) wird ueber die pdfplumber-Schrift Ueberschrift der Stufe 1: Pfad Kapitel > Talent Alpha. Faengt: Adapter ruft ordne_schrift_zu nicht bzw. mit falscher Lage."""
         self.lies()
@@ -266,7 +256,6 @@ class TestDoclingAdapter(mb.BestandTest):
 # 5. Keine geteilten Listen zwischen Chunks (REQ-MB-2)
 # ===================================================================================
 class TestGeteilteListen(mb.BestandTest):
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-2")
     def test_req_mb_2_aenderung_an_einem_chunk_aendert_keinen_anderen(self):
         """[REQ-MB-2] Zwei Haeppchen mit gleichem Pfad und gleichen Seiten: append an abschnittspfad/seiten des einen laesst das andere unveraendert. Faengt: geparste JSON-Listen zwischen Chunks teilen."""
         self.bestand([mb.buch("nord", "Buch Nord", "alpha")])
@@ -288,7 +277,6 @@ class TestSeitengrenzen(zs.ZerschneideTest):
         self.lies_ein(seiten, liste)
         return self.je_pfad(self.chunks(size, 10))[pfad]
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-16")
     def test_req_mb_16_haeppchen_endet_genau_vor_der_seitengrenze(self):
         """[REQ-MB-16] Stueck endet unmittelbar vor dem ersten Zeichen von Seite 5 -> traegt nur [4]; ein Zeichen weiter -> [4, 5]. Faengt: Seitengrenze inklusiv statt exklusiv (X10)."""
         seiten = {4: [z("Grenzfall", "section_header"), z("Vier vier vier vier vier vier vier vier.")],
@@ -301,7 +289,6 @@ class TestSeitengrenzen(zs.ZerschneideTest):
         erstes = self.erstes_haeppchen(seiten, [listeneintrag("Grenzfall", 4)], o + 1, ("Grenzfall",))[0]
         self.assertEqual(erstes["seiten"], [4, 5])
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-16")
     def test_req_mb_16_seite_der_ueberschriftenzeile(self):
         """[REQ-MB-16] Ueberschrift unten auf Seite 5, Text auf Seite 6 -> Haeppchen traegt [5, 6], Fundstelle Seite 5. Faengt: Seite der Ueberschriftenzeile nicht mitgezaehlt (X11)."""
         seiten = {5: [z("Anfang", "section_header"), z("Text am Anfang."), z("Spaeter", "section_header")],
@@ -310,7 +297,6 @@ class TestSeitengrenzen(zs.ZerschneideTest):
         (c,) = self.je_pfad(self.chunks(400, 150))[("Spaeter",)]
         self.assertEqual((c["seite"], c["seiten"], c["seite_pdf"]), (5, [5, 6], 5))
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-16")
     def test_req_mb_16_seitenwechsel_in_der_trennfuge(self):
         """[REQ-MB-16] "Akti-" (S. 4) + "onswuerfel" (S. 5) -> "Aktionswuerfel"; Seite 5 beginnt bei "ons": Stueck bis vor "o" -> [4], mit "o" -> [4, 5]. Faengt: Offset nach der Trennfuge um eins verschoben (X12)."""
         seiten = {4: [z("Trennfall", "section_header"), z("Hier steht ein Akti-")],
@@ -328,7 +314,6 @@ class TestSeitengrenzen(zs.ZerschneideTest):
 class TestZaehlerGenau(unittest.TestCase):
     LISTE = [listeneintrag("K1", 1)]
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-20")
     def test_req_mb_20_rand_zaehler_nur_wenn_sonst_ueberschrift(self):
         """[REQ-MB-20] Rand-Zaehler zaehlt nur Randzeilen, fuer die 5(a) oder 5(b) zutraefe (2 von 3); randzeilen zaehlt alle (3). Faengt: Rand-Zaehler zaehlt jede Randzeile (X17)."""
         e = einlesen()
@@ -340,7 +325,6 @@ class TestZaehlerGenau(unittest.TestCase):
                           rand={"kopf": 50}, seitenhoehe=SEITENHOEHE, protokoll=p)
         self.assertEqual((p.randzeilen, p.rand_verhindert), (3, 2))
 
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-20")
     def test_req_mb_20_veto_zaehler_nur_wenn_5a_zutraefe(self):
         """[REQ-MB-20] Veto-Zaehler zaehlt nur Veto-Zeilen, deren Schrift eine Stufe trifft (1 von 3). Faengt: Veto-Zaehler zaehlt jede Veto-Zeile (X18)."""
         e = einlesen()
@@ -352,7 +336,6 @@ class TestZaehlerGenau(unittest.TestCase):
 
 
 class TestSchnittImMehrheitsschluessel(unittest.TestCase):
-    @unittest.skip("devloop: Kritiker-Luecke, REQ-MB-29")
     def test_req_mb_29_gleiche_groesse_verschiedener_schnitt_ist_keine_mehrheit(self):
         """[REQ-MB-29] 5 Zeichen 14 pt fett + 5 Zeichen 14 pt normal -> keine eindeutige Mehrheit, keine Schrift; 6 fett + 4 normal -> fett. Faengt: Mehrheit nur nach Groesse (X27)."""
         import tempfile

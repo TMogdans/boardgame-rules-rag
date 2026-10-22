@@ -317,6 +317,13 @@ oder neues Buch wird allein eingebettet, die anderen nicht.
 - `rand`: Kopf-/Fussrand in PDF-Punkten; Zeilen darin (Kolumnentitel, Seitenzahlen) werden
   verworfen und gezaehlt. `vorspann`: Name des Abschnitts vor dem ersten Listeneintrag.
 - `reparatur`: Trennungen an Zeilenenden (`true` oder `{"konjunktionen": [...]}`).
+- `layout` und `rand` werden gegen ihr Schema geprueft (unbekannte Schluessel, falsche Typen,
+  leere Stufen, Bereiche mit von > bis -> Abbruch vor dem Schreiben). Listentitel, Praefixe und
+  alle Pfadelemente werden normalisiert (NFC, Leerraum -> ein Leerzeichen). Eine zugeordnete
+  Listenueberschrift zieht Elemente, die vor ihr geliefert wurden, aber unter ihr liegen, hinter
+  sich (Protokoll "umsortiert"). Auf dem Docling-Weg bleibt der Elementtext an Zeilenenden und
+  Strichen unveraendert (nur U+00AD im Wort faellt); das Protokoll zaehlt Verdachtsfaelle
+  (Binnen-Grossbuchstabe, Strichrest) mit Seiten. `DROP_TYPES` gilt nur fuer Altbestaende.
 
 Einlesen (Ingest-venv, Docling-Layout ohne LLM, mit Schriftstufen oder Rand zusaetzlich
 pdfplumber; Docling- und pdfplumber-Version muessen denen der Vorab-Messung in
