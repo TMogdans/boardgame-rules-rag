@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 9a). (Historie: Fassung 9a arbeitet Tobias' Nachträge F9a-1 und F9a-2 ein (Messpfad der Bücherdeklaration, Lesart Zeile ohne Lage); Fassung 9 abgenommen durch Tobias am 2026-10-22; Fassung 9 arbeitet Tobias' vorab getroffene Entscheidungen F9-1 bis F9-3 nach dem zweiten Kritiker-Review am echten Buch ein (MB-31 zurückgezogen, Judge-Muster exakt, Lage aus mehreren Kästen); Fassung 8 abgenommen durch Tobias am 2026-10-22; Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 9b). (Historie: Fassung 9b ergänzt nur den Abschnitt „Bekannte Grenzen" nach Kritiker 3, abgenommen durch Tobias am 2026-10-22, keine Anforderung geändert; Fassung 9a arbeitet Tobias' Nachträge F9a-1 und F9a-2 ein (Messpfad der Bücherdeklaration, Lesart Zeile ohne Lage); Fassung 9 abgenommen durch Tobias am 2026-10-22; Fassung 9 arbeitet Tobias' vorab getroffene Entscheidungen F9-1 bis F9-3 nach dem zweiten Kritiker-Review am echten Buch ein (MB-31 zurückgezogen, Judge-Muster exakt, Lage aus mehreren Kästen); Fassung 8 abgenommen durch Tobias am 2026-10-22; Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -762,6 +762,39 @@ Fassung 9a (Tobias, 2026-10-22, abgenommen als Nachtrag zu Fassung 9):
 
 - **F9a-1** Messpfad: `messung` übergibt dem Judge die Bücherdeklaration des Bestands (über die `spiel_id` des Golden Sets, wie `rag.lies_buecher`); Altbestände ohne Deklaration bleiben unverändert (MB-6, MB-3).
 - **F9a-2** Zeile ohne Lageangabe gilt bei deklariertem Rand als nicht im Rand und wird im Einlese-Protokoll als `ohne_lage` gezählt (MB-28).
+
+## Bekannte Grenzen (Kritiker 3, dokumentiert, nicht blockierend)
+
+Kritiker 3 war nach der vorab festgelegten Abbruchbedingung die letzte Runde: Blockieren darf nur
+eine falsche Zahl auf einem echten Nutzungspfad (Einlesen des echten Buchs, Pipe, Gleichstand der
+Altbestände, Messung und Judge). Gemessen auf Branch-Stand `9e2c381`; folgende Punkte bleiben
+bewusst offen (Tobias, 2026-10-22):
+
+- **G1** Eichlauf und Messpfad ohne Datenverzeichnis: `judge.py eichen` ohne `--daten` und ohne
+  `DATA_DIR` sowie `bewerte_lauf` mit flacher Golden-Kopie laden keine Bücherdeklaration; feste
+  Sätze eines Mehr-Bücher-Bestands gehen dann ans Modell (gemessen 0/4 statt 4/4). Kein
+  `KonfigFehler` möglich, weil Altbestände genau so laufen. Abhilfe vor dem Merge: `--daten` für
+  Mehr-Bücher-Bestände in Docstring und README vorgeschrieben, dazu eine Warnung auf stderr, wenn
+  eine Antwort wie ein Buch-Verweigerungssatz aussieht, aber keine Deklaration übergeben wurde.
+  Heute ohne Wirkung (es gibt noch kein Earthdawn-Golden-Set).
+  Umgesetzt in `90446d8` (`bewerte.py --daten`, Warnung je Lauf einmal); Warnung und
+  `--daten`-Weitergabe der CLI sind ungetestet (kein Test prüft stderr). Auf den echten
+  Altbestands-Antworten (2.442) löst die Warnung 0-mal aus.
+- **G2** Direkter Judge-Aufruf mit der bloßen Liste aus `rag.lies_buecher` (ohne Hinweistexte der
+  Fassungsregeln) erkennt feste Sätze mit Fundstellen-Hinweis nicht (gemessen 0/8). Alle echten
+  Pfade nutzen `rag.buecher_fuer_judge`. Testlücke: die Mutationen „Judge ignoriert Hinweistexte"
+  und „`buecher_fuer_judge` ohne Hinweise" bleiben grün.
+- **G3** Mutation MBB6m („Eichlauf übergibt die Deklaration nicht") hat keinen roten Test.
+- **G4** Kastenvereinigung (F9-3): eine Impressumzeile auf S. 313 bleibt im Text (Abschnitt
+  „Index", +89 Zeichen) statt im Fußrand; netto neutral (539 = 539 Abschnitte, 1 anders, keiner
+  schlechter).
+- **G5** 4 von 148 Lesezeichen nicht gefunden (S. 1, 9, 10, 216); bei S. 10 und 216 trennt die
+  Zierschrift den Umlaut ab — Fehlerklasse 3, Rückfall nach REQ-MB-13, im Protokoll sichtbar.
+  Die Rückseite (U4) landet im Abschnitt „Index".
+- **G6** `chunks.seite` ist in SQLite als TEXT gespeichert (auch `'null'`); `lade_spiel` liefert
+  int/None, die Fundstelle ist korrekt. Nur intern.
+- Ketten protokollieren in Zwischenschritten unter `abgerufen` nur Seiten ohne `buch_id`; wird
+  nicht bewertet.
 
 ## Tier
 
