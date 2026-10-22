@@ -1202,7 +1202,8 @@ class TestDropTypesNurAltbestand(ZweiBuecher):
         self.lege_ohne_typ_an()
         alt = self.lege_alt_an()                                    # ALT: ein Eintrag typ flavor
         meta = rag.lege_spiel_an("Altohne")
-        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]), ohne_typ(ALT))
+        rag.schreibe_jsonl(rag.knowledge_pfad(meta["spiel_id"]),
+                           [dict(e, spiel_id=meta["spiel_id"], spiel=meta["name"]) for e in ohne_typ(ALT)])
         self.baue()
         with mock.patch.dict(os.environ, {"DROP_TYPES": "flavor"}):
             with self.assertRaises(rag.KonfigFehler):
