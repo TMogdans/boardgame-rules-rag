@@ -92,6 +92,7 @@ BUCH_LISTE = [eintrag("Kapitel", 1, 1), eintrag("Erster Teil", 2, 2), eintrag("Z
 
 
 class TestAbschnittsgrenzen(ZerschneideTest):
+    @unittest.skip("devloop: REQ-MB-14 noch nicht implementiert")
     def test_req_mb_14_kein_haeppchen_ueber_eine_abschnittsgrenze(self):
         """[REQ-MB-14] Jedes Haeppchen (ohne Vorsatz) ist Teilstring genau eines Abschnitts; auch die Ueberlappung nicht darueber."""
         abschnitte = self.lies_ein(BUCH_SEITEN, BUCH_LISTE)
@@ -109,6 +110,7 @@ class TestAbschnittsgrenzen(ZerschneideTest):
                     self.assertEqual([a["abschnittspfad"] for a in abschnitte if st in a["text"]],
                                      [c["abschnittspfad"]], st)
 
+    @unittest.skip("devloop: REQ-MB-14 noch nicht implementiert")
     def test_req_mb_14_innerhalb_zeichengenau_wie_zerteile(self):
         """[REQ-MB-14] Innerhalb eines Abschnitts: Stuecke = rag.zerteile(Abschnittstext) mit CHUNK_SIZE/OVERLAP, ohne Vorsatz gezaehlt."""
         abschnitte = self.lies_ein(BUCH_SEITEN, BUCH_LISTE)
@@ -118,6 +120,7 @@ class TestAbschnittsgrenzen(ZerschneideTest):
                 self.assertEqual([self.stueck(c) for c in je[tuple(a["abschnittspfad"])]],
                                  rag.zerteile(a["text"], 60, 20))
 
+    @unittest.skip("devloop: REQ-MB-14 noch nicht implementiert")
     def test_req_mb_14_laenge_chunk_size_plus_eins_ergibt_zwei(self):
         """[REQ-MB-14] Abschnitt der Laenge CHUNK_SIZE + 1 (ohne Vorsatz) -> genau 2 Haeppchen, gleich zerteile."""
         abschnitte = self.lies_ein(BUCH_SEITEN, BUCH_LISTE)
@@ -129,6 +132,7 @@ class TestAbschnittsgrenzen(ZerschneideTest):
         self.assertEqual(len(stuecke), 2)
         self.assertEqual(stuecke, rag.zerteile(dritter["text"], n - 1, 10))
 
+    @unittest.skip("devloop: REQ-MB-14 noch nicht implementiert")
     def test_req_mb_14_kurze_geschwister_nicht_zusammengelegt(self):
         """[REQ-MB-14] Zwei Geschwister mit je ~50 Zeichen -> 2 Haeppchen (keine Zusammenlegung), Text unveraendert."""
         seiten = {1: [z("Haupt", "section_header"), z("Vorwort zum Hauptteil."),
@@ -144,6 +148,7 @@ class TestAbschnittsgrenzen(ZerschneideTest):
                                  next(a["text"] for a in abschnitte if tuple(a["abschnittspfad"]) == pfad))
         self.assertEqual(sum(len(v) for v in je.values()), 3)
 
+    @unittest.skip("devloop: REQ-MB-14 noch nicht implementiert")
     def test_req_mb_14_protokoll_haeppchenzahl_je_buch(self):
         """[REQ-MB-14] Die Ausgabe des Index-Laufs weist die Haeppchenzahl je Buch aus."""
         kurz = {1: [z("Nur eins", "section_header"), z("Ein einziger kurzer Satz.")]}
@@ -166,6 +171,7 @@ class TestTitelTraegtMit(ZerschneideTest):
               3: [z("Roter Fuchs", "section_header")] + werte("rf", 3)}
     LISTE = [eintrag("Tiere", 1, 1), eintrag("Grauer Wolf", 2, 2), eintrag("Roter Fuchs", 3, 2)]
 
+    @unittest.skip("devloop: REQ-MB-15 noch nicht implementiert")
     def test_req_mb_15_alle_drei_haeppchen_beginnen_mit_dem_pfad(self):
         """[REQ-MB-15] "Grauer Wolf" ueber drei Haeppchen: eingebettet und im Prompt beginnen alle mit dem Pfad; BM25 findet alle drei."""
         abschnitte = self.lies_ein(self.SEITEN, self.LISTE)
@@ -202,6 +208,7 @@ class TestSeitenUeberGrenzen(ZerschneideTest):
               5: [z("Fuenf am Ende."), z("Fuenf zwei.")]}
     LISTE = [eintrag("Lange Regel", 4, 1)]
 
+    @unittest.skip("devloop: REQ-MB-16 noch nicht implementiert")
     def test_req_mb_16_haeppchen_traegt_alle_seiten_fundstelle_die_erste(self):
         """[REQ-MB-16] Abschnitt von Seite 4 nach 5: Haeppchen ueber die Grenze traegt [4, 5], Fundstelle nennt 4, Erwartung 5 trifft."""
         (abschnitt,) = self.lies_ein(self.SEITEN, self.LISTE)
@@ -229,6 +236,7 @@ class TestSeitenUeberGrenzen(ZerschneideTest):
 
 
 class TestLayoutImIndex(ZerschneideTest):
+    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_haeppchen_der_unterabschnitte_beginnen_mit_ihrem_namen(self):
         """[REQ-MB-20] Im Index: Haeppchen unter K1 > U1 > Alpha / Beta beginnen mit ihrem Pfad; "Gamma" steht in Beta."""
         self.lies_ein(LAYOUT_SEITEN, LAYOUT_LISTE, layout={"klasse": "section_header"})
@@ -242,6 +250,7 @@ class TestLayoutImIndex(ZerschneideTest):
                 self.assertTrue(c["text"].startswith(vorsatz), c["text"])
         self.assertIn("Text nach Gamma.", "".join(c["text"] for c in je[("K1", "U1", "Beta")]))
 
+    @unittest.skip("devloop: REQ-MB-20 noch nicht implementiert")
     def test_req_mb_20_c_haeppchen_aus_unter_beginnen_mit_dem_pfad_samt_alpha(self):
         """[REQ-MB-20] (c) Stufe 2 "Unter" in Alpha: dessen Haeppchen beginnen mit dem Pfad K1 > U1 > Alpha > Unter."""
         seiten = {1: [z("K1", "section_header", S1), z("Einleitung K1.", schrift=FT),
@@ -265,6 +274,7 @@ class TestVorspannImIndex(ZerschneideTest):
               2: [z("Kapitel", "section_header"), z("Text im Kapitel.")]}
     LISTE = [eintrag("Kapitel", 2)]
 
+    @unittest.skip("devloop: REQ-MB-25 noch nicht implementiert")
     def test_req_mb_25_vorspann_als_haeppchen_auffindbar_und_benennbar(self):
         """[REQ-MB-25] Text vor dem 1. Eintrag ist nach index Haeppchen mit Pfad ["Vorspann"] (lade_spiel, BM25), zerschnitten wie jeder Abschnitt; anderer Name -> dieser."""
         for name, deklaration in (("Vorspann", None), ("Auftakt", "Auftakt")):

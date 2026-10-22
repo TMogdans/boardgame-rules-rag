@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-21 (Fassung 6). (Historie: Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 8). (Historie: Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -27,7 +27,7 @@ nur in den Daten, nie im Code.**
 | **Buch** | Eine Quelle innerhalb eines Bestands, mit stabiler `buch_id`, Titel, Fassung, Sprache, Quelldatei. |
 | **Fassung** | Allgemeiner Name für Edition/Auflage/Version eines Buchs (z. B. `ED4`, `ED1`, `v3`). Ein freier Text, den nur die Daten deuten. |
 | **Abschnittspfad** | Überschriften-Hierarchie eines Häppchens, z. B. `["Talente", "Talentbeschreibungen", "Ablenken"]`. |
-| **Inhaltsart** | Themenbereich eines Abschnitts (z. B. `regel`, `welt` (Vokabular frei)); eigenes Feld, **orthogonal** zu `typ` aus `classify.py` (regel/flavor/meta bleibt Ballast-Filter für `DROP_TYPES`). |
+| **Inhaltsart** | Themenbereich eines Abschnitts (z. B. `regel`, `welt` (Vokabular frei)); eigenes Feld, **orthogonal** zu `typ` aus `classify.py` (regel/flavor/meta bleibt Ballast-Filter für `DROP_TYPES` in Altbeständen; in Mehr-Bücher-Beständen wird `DROP_TYPES` nicht angewendet, REQ-MB-30). |
 | **Überschriften-Liste** | Deklarierte Gliederung eines Buchs: Einträge (Titel, Ebene, Seite) aus PDF-Lesezeichen oder Inhaltsverzeichnis. |
 | **Layout-Überschrift** | Überschrift, die unterhalb der Liste aus Zeilenmerkmalen der Extraktion erkannt wird (REQ-MB-20). |
 | **Altbestand** | Ein Bestand, dessen `spiel.json` keine Bücherliste hat (heutiges Format, ein `quelle_pdf`). |
@@ -106,16 +106,37 @@ In einem Mehr-Bücher-Bestand nennen Quellenkopf im Prompt (`baue_kontext`), Pip
 und die Seitenangaben des Entscheidungsschritts (C-Text, B-Hinweis, Sprachmodus) je Fundstelle
 **Buch (Titel oder Kurzname), Fassung und gedruckte Seite** (REQ-MB-22). CLI und Pipe erzeugen
 dieselben Köpfe aus derselben Funktion.
+
+*Fassung 8 (a), Judge:* Der Judge (`judge.py`, deterministische Vorstufe) erkennt den festen
+Verweigerungssatz eines Mehr-Bücher-Bestands mit Buch-Fundstellen („Buch …, S. n") in Chat- und
+Sprachmodus wie bei Altbeständen (also als Verweigerung, nicht als inhaltliche Antwort).
+*Fassung 8 (b), Messlauf:* `messung/lauf.py` protokolliert in `antworten.jsonl` die abgerufenen
+Fundstellen eines Mehr-Bücher-Bestands **mit Buch** (`buch_id` und Seite je Fundstelle), nicht nur
+die Seite; Altbestände: Ausgabe unverändert (REQ-MB-3).
+*Fassung 8 (c), Sprachmodus:* Im Sprachmodus nennt die Fundstelle eines Mehr-Bücher-Bestands die
+Seite ausgeschrieben als „Seite n" (wie bei Altbeständen), nicht „S. n"; Buch und Fassung stehen
+weiterhin dabei.
+*Detektor (Fassung 8):* (a) Verweigerungssatz mit „Buch A, S. 12" in Chat- und Sprachmodus → Judge
+wertet Verweigerung, gleich dem Altbestand-Fall; gleicher Satz mit Antworttext → keine Verweigerung.
+(b) Messlauf auf synthetischem Zwei-Bücher-Bestand mit gleicher Seitenzahl in beiden Büchern →
+`antworten.jsonl` enthält je abgerufener Fundstelle `buch_id` und Seite, die beiden sind
+unterscheidbar; Altbestand-Zeile byte-gleich zum Stand vor der Änderung. (c) Sprachmodus-Ausgabe
+für Fundstelle Seite 12 enthält „Seite 12" und kein „S. 12".
 *Detektor:* Prompt-Nachrichten und Pipe-Ausgabe für einen synthetischen Zwei-Bücher-Bestand
 mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; Mutation der Kopf-Funktion
 (liefert Marker) ändert CLI- **und** Pipe-Ausgabe. Altbestände: REQ-MB-3.
 
 **REQ-MB-7** — *If/Then, Messung*
 Golden-Set-Fragen eines Mehr-Bücher-Bestands geben erwartete Fundstellen als
-(`buch_id`, gedruckte Seite) an; ein Treffer zählt nur bei passendem Buch. Wenn ein Golden Set
+(`buch_id`, gedruckte Seite) an; ein Treffer zählt nur bei passendem Buch. Ein Fundstelleneintrag
+eines Mehr-Bücher-Bestands darf **nur** die Schlüssel `buch_id` und `seite` enthalten; jeder
+unbekannte Zusatzschlüssel (z. B. `notiz`) bricht `eval`/`messung` mit `KonfigFehler` ab (kein
+stilles Nie-Treffen; Fassung 8). Wenn ein Golden Set
 eines Mehr-Bücher-Bestands eine Seite ohne Buch angibt, dann bricht `eval`/`messung` mit
 `KonfigFehler` ab (keine stille Wertung gegen ein beliebiges Buch). Altbestände: REQ-MB-3.
 *Detektor:* Frage mit erwarteter Seite 12 in Buch A, Treffer auf Seite 12 in Buch B → verfehlt.
+Fundstelleneintrag `{"buch_id": "a", "seite": 12, "notiz": "x"}` → `KonfigFehler`; derselbe Eintrag
+ohne `notiz` → gültig.
 
 ### B. Quelle ersetzen und inkrementell einbetten
 
@@ -147,8 +168,9 @@ Spielen).
 
 Die Reparatur ist eine reine Funktion auf den Textzeilen der Extraktion **vor** jedem
 Whitespace-Zusammenfassen und wird je Buch eingeschaltet (für Altbestände und den rohen
-PDF-Weg aus: REQ-MB-3). Reihenfolge: (1) Überschriften-Abgleich auf Zeilen (REQ-MB-12, -20),
-(2) Trennungsreparatur (REQ-MB-11) im Text zwischen den Überschriften — sonst würde der
+PDF-Weg aus: REQ-MB-3). Reihenfolge: (1) Überschriften-Abgleich auf Zeilen (REQ-MB-12, -20)
+samt Einsortieren der Listenüberschriften nach Lage (REQ-MB-31),
+(2) Trennungsreparatur (REQ-MB-11, nur auf Wegen mit Zeilenenden) im Text zwischen den Überschriften — sonst würde der
 gewöhnliche Umbruch (`Wurf⏎Stufe`) Überschriftenzeilen mit dem Folgetext verschmelzen.
 Zeilen im Kopf- oder Fußrand (Position nach REQ-MB-20) werden in (1) erkannt und gezählt, nehmen
 aber weder am Listenabgleich (REQ-MB-12) teil noch gelangen sie in einen Häppchentext (REQ-MB-28).
@@ -170,8 +192,21 @@ Für die folgenden Eingaben (`⏎` = Zeilenumbruch, `·` = U+00AD) liefert die R
 
 Regelwerk nur wie in der Tabelle (keine Wörterbuchprüfung); die Konjunktionsliste ist
 sprachabhängig und Teil der Konfiguration.
+
+*Geltungsbereich (Fassung 7):* Die Reparatur der Zeilenenden (alle Tabellenzeilen mit `⏎`) gilt
+nur für Extraktionswege, die die Zeilenenden des Satzes liefern (Seitenzeilen, deren Elementtexte
+die Zeilenumbrüche enthalten). Auf dem **Docling-Weg**, der die Zeilen eines Elements selbst
+zusammenfügt und dabei Zeilenend-Striche streicht, **entfällt** sie: ein Elementtext dieses Wegs
+wird an `⏎` und Strichen nicht verändert, auch wenn er ein `⏎` enthält. Der Weg ist eine
+Eigenschaft des Einlesens, nicht des Texts. Das Entfernen des weichen Trennstrichs im Wort
+(Tabellenzeile 2, kein Zeilenende beteiligt) gilt auf allen Wegen. Auf dem Docling-Weg zählt
+stattdessen das Protokoll Verdachtsfälle (REQ-MB-32).
 *Detektor:* Tabelle als Testfälle; Einlese-Protokoll zählt „zusammengefügte Trennungen" und
 „Strich behalten" — Zähler auf einer definierten Eingabe mit bekannter Anzahl je Fall exakt.
+Docling-Weg (synthetische Extraktionsstruktur ohne echtes Docling, wie REQ-MB-27): Element
+`Akti-⏎onswürfel` bleibt byte-gleich, Element `Bewusstlosigkeits·schwelle` →
+`Bewusstlosigkeitsschwelle`, Zähler „zusammengefügte Trennungen" = 0; dasselbe Element
+`Akti-⏎onswürfel` auf dem Zeilenweg → `Aktionswürfel`.
 
 **REQ-MB-12** — *Where, Überschriften-Liste und unscharfer Abgleich*
 Wo ein Buch eine Überschriften-Liste deklariert, gilt sie als Wahrheit für die Ebenen, die sie
@@ -184,7 +219,8 @@ Rand vom Abgleich **ausgenommen**: sie passen zu keinem Eintrag, sind kein Kandi
 Auswahl unter mehreren Zeilen und zählen nicht für „mehrdeutig". Ohne Randangabe gilt der Abgleich
 wie bisher über alle Zeilen der Seite.
 
-*Abgleichregel:* `norm(s)` = Unicode-NFC, alle Leerraumzeichen entfernen, `casefold`.
+*Abgleichregel:* `norm(s)` = Unicode-NFC, alle Leerraumzeichen und alle Unicode-Formatzeichen
+(Kategorie `Cf`, u. a. weicher Trennstrich U+00AD, U+200B) entfernen, `casefold`.
 Eine Zeile **passt** zu Titel `t`, wenn `norm(zeile)` durch Streichen von höchstens `k`
 Zeichen aus `norm(t)` entsteht (Teilfolge, nur Auslassungen — keine Vertauschungen, keine
 Einfügungen) mit `k = 0` für `len(norm(t)) < 6`, sonst `k = max(1, ⌊len(norm(t)) / 10⌋)`.
@@ -207,6 +243,7 @@ sichtbar unter REQ-MB-13.
 | `Stufen/Aktionswürfel` | `Stufen/Aktionsw rfel` | ersetzt | 1 Auslassung, k = 2 |
 | `Ätherhaut` | `therhaut` | ersetzt | 1 Auslassung, k = 1 |
 | `Bonuswürfel` | `BONUSWÜRFEL` | ersetzt | nur Groß/Klein |
+| `Bewusstlosigkeitsschwelle` | `Bewusstlosigkeits·schwelle` (`·` = U+00AD) | ersetzt | Formatzeichen (`Cf`) entfernt, 0 Auslassungen |
 | `Bonuswürfel` | `Bonusw rf l` | **nicht** ersetzt | 2 Auslassungen > k = 1 |
 | `Bonuswürfel` | `Bonus` | **nicht** ersetzt | 6 Auslassungen |
 | `Bonuswürfel` | `Bonuswürfel einsetzen …` (Fließtext) | **nicht** ersetzt | Zeile länger als Titel |
@@ -284,10 +321,21 @@ Laden und Vektorsuche in einem Bestand mit 5 Büchern und zusammen 3.000 Häppch
 REQ-MB-4/-5): **typisch ≤ 15 ms, Maximum ≤ 45 ms** je Frage über 200 Fragen. Altbestände sind
 nicht langsamer als der Stand vor dieser Spec, gemessen **auf derselben Maschine** (Referenzlauf
 des alten Codes bzw. im selben Testlauf gemessene Basis): typisch und Maximum je höchstens
-**+20 %** gegenüber der Basis. Die README-Zahlen (2.000 Häppchen typisch 9,1 ms, max 13,5) dienen
-nur noch zur Information, nicht als Sollwert.
+**+20 %** gegenüber der Basis. Für Altbestände gilt dabei (Fassung 7): **typisch** wird wie bisher
+verglichen; das **Maximum** ist je Seite (neuer Code bzw. Basis) der **Median der Maxima aus
+5 Wiederholungen** (je Wiederholung 200 Fragen, Wiederholungen von neu und Basis abwechselnd),
+und der Median von neu darf höchstens Median der Basis × 1,2 sein. Median statt Mittelwert:
+gemessen schwankt das Verhältnis zweier Einzel-Maxima zwischen 0,47 und 2,35 bei typisch 1,002;
+ein einzelner Ausreißerlauf (Planer, GC) verschiebt einen Mittelwert aus 5 Werten um bis zu ein
+Fünftel seiner Höhe, den Median nicht, solange höchstens 2 von 5 Läufen ausreißen. Die absoluten
+Grenzen für den Mehr-Bücher-Bestand (typisch ≤ 15 ms, Maximum ≤ 45 ms) bleiben unverändert.
+Die README-Zahlen (2.000 Häppchen typisch 9,1 ms, max 13,5) dienen nur noch zur Information,
+nicht als Sollwert. Zeittests nach REQ-MB-19 zählen in den Mutationsproben **nicht als Fang**: eine
+Mutation gilt nur als gefangen, wenn ein Test außerhalb der Zeitmessung rot wird.
 *Detektor:* Messskript mit typisch und Maximum, wie die README-Messung; für Altbestände Basis
-und neuer Code im selben Lauf auf derselben Maschine, Vergleich gegen Basis × 1,2.
+und neuer Code im selben Lauf auf derselben Maschine, typisch gegen Basis × 1,2, Maximum als
+Median der 5 Maxima je Seite gegen Median der Basis × 1,2; das Messergebnis nennt alle 5 Maxima
+je Seite.
 
 ### F. Ergänzungen (Entwurf 2)
 
@@ -303,21 +351,24 @@ Buch konfigurierbar), werden Layout-Überschriften aus drei Merkmalsquellen best
   optional Laufweite von–bis. Eine Schrift **trifft** Stufe n, wenn sie alle Angaben der Stufe n
   erfüllt; trifft sie mehrere, gilt die kleinste n.
 - **Position:** Kopf- und Fußrand je Buch als Abstand in PDF-Punkten von der oberen bzw. unteren
-  Seitenkante. Eine Zeile liegt im Rand, wenn ihr vertikaler Mittelpunkt darin liegt.
+  Seitenkante. Eine Zeile liegt im Rand, wenn ihr vertikaler Mittelpunkt darin liegt; die **Grenze ist inklusiv**
+  (Mittelpunkt genau auf der Randgrenze → Randzeile; Fassung 8).
 - **Layout-Klasse** der Docling-Extraktion: (i) die deklarierte Überschriften-Klasse (z. B.
   `section_header`) für den Rückfall; (ii) eine je Buch deklarierte **Veto-Menge** von Klassen,
   deren Zeilen nie Überschrift sind. Default der Veto-Menge sind mindestens Tabelle samt
   Tabellenzellen, Bildunterschrift, Seitenkopf und Seitenfuß (Docling `table`, `caption`,
   `page_header`, `page_footer`); eine Veto-Deklaration des Buchs **ergänzt** diese Menge und ersetzt sie nicht.
 
-Optional deklarierte Zeilenmerkmale (eigene Zeile, Höchstlänge) gelten zusätzlich.
+Optional deklarierte **Höchstlänge** (Zeichenzahl der Zeile ohne Leerraum am Anfang und Ende)
+gilt zusätzlich. Weitere Zeilenmerkmale gibt es nicht (das Merkmal „eigene Zeile" ist ab
+Fassung 7 gestrichen). Die Deklaration wird gegen ihr Schema geprüft (REQ-MB-34).
 
 *Kombinationsregel.* Eine Zeile ist genau dann Layout-Überschrift der Stufe n, wenn alle fünf
 Bedingungen gelten:
 1. *notwendig:* sie liegt nicht im Kopf- oder Fußrand;
 2. *notwendig:* ihre Layout-Klasse gehört nicht zur Veto-Menge des Buchs;
 3. *notwendig:* sie ist nicht schon einem Listeneintrag zugeordnet (REQ-MB-12);
-4. *notwendig:* sie erfüllt alle deklarierten Zeilenmerkmale;
+4. *notwendig:* ist eine Höchstlänge deklariert, ist sie nicht länger;
 5. entweder (a) ihr ist eine Schrift zugeordnet und diese trifft Stufe n — zusammen mit 1–4
    **hinreichend**; die Layout-Klasse wirkt hier nur über das Veto (Bedingung 2), nicht als
    Voraussetzung; oder (b) ihr ist keine Schrift zugeordnet und ihre Layout-Klasse ist die
@@ -358,7 +409,7 @@ Position, zwei Schriftstufen deklariert:
 - (c) In `Alpha`: Text, Zeile `Unter` mit Schrift der Stufe 2, Text, dann `Beta` → Pfade
   `K1 › U1 › Alpha` (Text davor), `K1 › U1 › Alpha › Unter` (Text danach), `K1 › U1 › Beta`; kein
   Abschnitt `K1 › U1 › Unter`; die Häppchen aus `Unter` beginnen mit dem Pfad samt `Alpha`.
-- (d) Negativfall: kurze Fließtextzeile `Gamma` auf eigener Zeile, Klasse `text`, Schrift in
+- (d) Negativfall: kurze Fließtextzeile `Gamma` als eigenes Element, Klasse `text`, Schrift in
   Fließtextgröße (außerhalb aller Stufen) → bleibt Fließtext in `Beta`.
 - (e) Zeile `Epsilon` mit Überschriften-Klasse, aber Fließtextschrift → bleibt Fließtext (Klasse
   nicht hinreichend).
@@ -368,6 +419,8 @@ Position, zwei Schriftstufen deklariert:
   Gegenprobe: dieselbe Zeile mit Klasse `text` → Überschrift `… › Zeta`.
 - (h) Veto Bildunterschrift: Zeile `Eta` mit Klasse `caption` und Schrift der Stufe 1 → keine
   Überschrift, kein Pfad enthält `Eta`.
+- Randgrenze (Fassung 8): Mittelpunkt genau auf der Grenze → Randzeile (keine Überschrift, Rand-Zähler);
+  Mittelpunkt Grenze + 0,01 pt → nicht im Rand. Gilt gleich für REQ-MB-12, -28 und -29.
 - Ohne deklarierte Merkmale: Pfade nur aus der Liste (Wirkung von REQ-MB-12 unverändert).
 
 **REQ-MB-21** — *Contract, Hinweis gekennzeichneter Fassungen*
@@ -500,7 +553,9 @@ je Buch. Bücher ohne Randangabe und Altbestände bleiben unverändert (REQ-MB-3
 *Detektor:* synthetisches Buch, zwei Seiten, je Seite Kopfzeile mit Marker `KOPFMARKE-n`,
 Fußzeile mit Marker `FUSSMARKE-n` und Fließtext mit eigenem Marker; Kopf- und Fußrand deklariert
 → nach `index` enthält kein Häppchen (BM25 bzw. `lade_spiel`) und kein Pfad einen Kopf- oder
-Fußmarker, jeder Fließtextmarker ist auffindbar, Protokoll-Zähler = 4. Zwei Bücher im Bestand,
+Fußmarker, jeder Fließtextmarker ist auffindbar, Protokoll-Zähler = 4. Grenzfall (Fassung 8): Zeile mit
+Mittelpunkt genau auf der Randgrenze wird verworfen und gezählt, mit Grenze + 0,01 pt bleibt sie.
+Zwei Bücher im Bestand,
 nur eines mit Randangabe → Zähler nur bei diesem, das andere enthält seine Kopf-/Fußmarker wie
 vor dieser Änderung (Häppchentexte gleich dem Lauf ohne Randangabe). Mutation: Randzeilen nur
 zählen, nicht verwerfen → Test rot.
@@ -518,8 +573,126 @@ Schnitte), z. B. per `reportlab` (reine Testabhängigkeit, darf in der Testumgeb
 - gemischte Zeile mit Mehrheit X und einem kürzeren Teil in Schrift Y → Schrift X;
 - Zeile mit gleich vielen Zeichen in X und Y → keine zugeordnete Schrift;
 - zwei Spalten mit gleich hohen Zeilen in Schrift X (links) und Y (rechts) → links X, rechts Y;
-- Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht.
+- Zeile im deklarierten Kopfrand → als Rand erkannt; dieselbe Zeile 1 pt außerhalb → nicht;
+  Mittelpunkt genau auf der Grenze → Rand (inklusiv), Grenze + 0,01 pt → nicht (Fassung 8).
 Mutation: Zuordnung ohne Spaltentrennung (alle Zeichen gleicher Höhe) → Spaltenfall rot.
+
+### J. Ergänzungen (Fassung 7, nach Kritiker-Review)
+
+**REQ-MB-30** — *If/Then, `DROP_TYPES` nur für Altbestände*
+Wenn ein Bestand ein Mehr-Bücher-Bestand ist, dann wird `DROP_TYPES` für ihn **nicht angewendet** —
+weder beim `index`-Lauf (CLI) noch in der Pipe noch in `eval`/`messung`: kein Häppchen wird wegen
+seines `typ` ausgelassen, und ein fehlendes `typ`-Feld ist kein Fehler (auch nicht über die heutige
+Prüfung „`DROP_TYPES` ohne `classify.py`-Lauf"). Die Rolle des Ballast-Filters übernimmt dort
+`inhaltsart` (REQ-MB-4, -5). Die Prüfung des `DROP_TYPES`-Werts selbst (unbekannte Typen →
+`KonfigFehler`) bleibt wie heute. Für Altbestände wirkt `DROP_TYPES` unverändert (REQ-MB-3).
+*Detektor:* synthetischer Mehr-Bücher-Bestand, Häppchen ohne `typ`, `DROP_TYPES="flavor,meta"`
+(Pipe-Default) → `rag.py index`, Pipe-Antwort und `eval` laufen ohne Fehler; Häppchenzahl im Index
+gleich der mit `DROP_TYPES=""`. Wirkungsprobe: Häppchen eines Mehr-Bücher-Bestands, die (künstlich)
+`typ: "flavor"` tragen, bleiben im Index und sind per BM25 bzw. `lade_spiel` auffindbar.
+Altbestand: bestehende Suite und Referenzen unverändert grün (REQ-MB-3); Altbestand ohne `typ` mit
+`DROP_TYPES=flavor` bricht wie heute ab, Altbestand mit `typ: "flavor"` verliert diese Häppchen wie
+heute.
+
+**REQ-MB-31** — *If/Then, Listenüberschrift nach Lage einsortieren*
+Wenn auf einer Seite eine Zeile `Ü` einem Listeneintrag zugeordnet ist (REQ-MB-12), dann werden die
+Elemente der Seite nach der Lage von `Ü` umsortiert. Lage eines Elements = `x0`, `x1`, `oben`, `unten`
+in PDF-Punkten (Ursprung oben links, wie REQ-MB-20). Ein Element `E` derselben Seite **liegt unter
+`Ü`**, wenn beide eine Lage haben und gilt:
+1. der vertikale Mittelpunkt von `E` liegt unterhalb der Unterkante von `Ü`:
+   `(E.oben + E.unten) / 2 > Ü.unten`, und
+2. `E` und `Ü` überlappen sich waagrecht: `E.x0 < Ü.x1` und `Ü.x0 < E.x1`.
+
+Jedes Element, das in der Extraktionsfolge **vor** `Ü` steht und unter `Ü` liegt, wird hinter `Ü`
+verschoben: die verschobenen Elemente stehen unmittelbar hinter `Ü`, untereinander in ihrer
+bisherigen Reihenfolge, danach die bisherigen Nachfolger von `Ü`; alle übrigen Elemente behalten
+ihre Reihenfolge. Eine spaltenübergreifende Überschrift überlappt waagrecht beide Spalten und zieht
+damit die unter ihr liegenden Elemente **beider** Spalten hinter sich; eine Überschrift, die nur in
+einer Spalte steht, verschiebt kein Element der Nachbarspalte. Sind auf einer Seite mehrere Zeilen
+zugeordnet, wird die Regel für sie in Listenreihenfolge nacheinander auf die jeweils aktuelle Folge
+angewandt.
+
+Unverändert bleibt: hat `Ü` keine Lage, wird nichts verschoben; ein Element ohne Lage wird nicht
+verschoben; Elemente, die in der Extraktionsfolge **nach** `Ü` stehen, bleiben, wo sie sind (auch
+wenn sie über `Ü` liegen); Randzeilen (REQ-MB-12, -28) werden nicht verschoben; Layout-Überschriften
+(REQ-MB-20) und nicht gefundene Einträge (REQ-MB-13) lösen kein Umsortieren aus. Der Abgleich
+(REQ-MB-12, einschließlich „erste in Lesereihenfolge" bei Gleichstand) läuft auf der ursprünglichen
+Folge; Abschnittsbildung, REQ-MB-13 und REQ-MB-20 arbeiten auf der umsortierten. Das
+Einlese-Protokoll zählt die verschobenen Elemente je Buch („umsortiert").
+Anlass (gemessen): Docling liefert auf zweispaltigen Seiten mit spaltenübergreifender
+Kapitelüberschrift die Überschrift **nach** dem ersten Eintrag der linken Spalte (S. 76: das erste
+Talent landet unter dem vorherigen Kapitel; S. 114 analog).
+*Detektor:* synthetische Seitenzeilen mit Lage, Liste `Alt` (Vorseite), `Neu` (diese Seite):
+`Oben` (links, über `Neu`, Marker `OBENMARKE`), `Links` (links, unter `Neu`, Marker `LINKSMARKE`),
+`Neu` (über beide Spalten), `Rechts` (rechts, unter `Neu`) in dieser Extraktionsfolge → `LINKSMARKE`
+und `Rechts` liegen im Abschnitt `Neu`, `OBENMARKE` in `Alt`; Protokoll „umsortiert = 1".
+Gegenproben: (a) `Neu` nur über der rechten Spalte (`x0` rechts von `Links.x1`) → `LINKSMARKE`
+bleibt in `Alt`, „umsortiert = 0"; (b) dieselbe Seite ohne Lageangaben → Folge unverändert,
+`LINKSMARKE` in `Alt`; (c) `Links` mit Mittelpunkt 1 pt über `Neu.unten` → nicht verschoben.
+Mutation: Umsortieren aus → Test rot.
+
+**REQ-MB-32** — *Contract, Verdachtszähler für Striche*
+Das Einlese-Protokoll zählt je Buch auf jedem Extraktionsweg, nach der Reparatur (REQ-MB-11), in den
+Abschnittstexten (ohne Titelvorsatz) zwei Arten von Verdachtsfällen und nennt je Art Anzahl und
+Seiten (gedruckt, sonst physisch); der Text wird dadurch **nicht** verändert:
+- **Binnen-Großbuchstabe:** ein Kleinbuchstabe (Unicode `Ll`), unmittelbar gefolgt von einem
+  Großbuchstaben (`Lu`), z. B. `NovizenTalent` — Verdacht auf einen gestrichenen Bindestrich;
+- **Strichrest:** ein Buchstabe, `-`, ein oder mehrere Leerzeichen, dann ein Wort, das mit einem
+  Kleinbuchstaben beginnt und nicht in der Konjunktionsliste der Buchsprache steht (REQ-MB-11),
+  z. B. `Akti- onswürfel` — Verdacht auf eine nicht zusammengefügte Trennung.
+
+Anlass (gemessen, Docling-Weg): Silbentrennungen zu 99,3 % richtig zusammengefügt, aber echte
+Binde-/Ergänzungsstriche in 26 von 69 Fällen zusammengezogen; die Reparatur nach REQ-MB-11 griff nur
+bei 0,8 % der Trennungen.
+*Detektor:* synthetische Docling-Struktur (ohne echtes Docling) mit den Elementen `Das NovizenTalent
+wirkt` (S. 1), `die Akti- onswürfel` (S. 2), `Nah- und Fernkampf`, `ED4-Regeln`, `Zwerg-Krieger`
+(S. 3) → Protokoll „Binnen-Großbuchstabe = 1 (S. 1)", „Strichrest = 1 (S. 2)"; alle Elementtexte
+byte-gleich im Häppchentext. Mutationen: Konjunktionsausnahme fehlt (`Nah- und` zählt mit) → rot;
+Zähler zählt nicht → rot.
+
+**REQ-MB-33** — *Contract, Listentitel normalisiert*
+Titel der Überschriften-Liste (aus Lesezeichen und Inhaltsverzeichnis, REQ-MB-12, -24) werden vor
+jeder Verwendung normalisiert: `titelnorm(t)` = Unicode-NFC, jede Folge von Leerraumzeichen
+(`str.isspace`, u. a. Leerzeichen, Tab, CR, LF, U+00A0) → ein Leerzeichen, Leerraum am Anfang und Ende
+entfernt. Abschnittspfad, Titelvorsatz (REQ-MB-15), die ersetzte Zeile (REQ-MB-12) und die
+Protokolleinträge (REQ-MB-13) verwenden die normalisierte Form. Jedes Element eines
+Abschnittspfads — auch Layout-Überschriften (REQ-MB-20) und der Vorspann-Name (REQ-MB-25) — wird
+mit `titelnorm` gebildet; der Titelvorsatz ist damit **einzeilig** (genau ein Zeilenumbruch, der am
+Ende vor dem Text). Die Präfixe der Inhaltsart-Zuweisung (REQ-MB-1, O-3) werden mit derselben
+Funktion normalisiert und dann wie bisher exakt mit den Pfadelementen verglichen.
+Anlass (gemessen): 48 von 148 Lesezeichen-Titeln enthalten `\r\n`, 73 abweichenden Leerraum →
+28,9 % der Häppchen mit CR/LF im Titelvorsatz; Präfix-Zuweisungen griffen still nicht.
+*Detektor:* synthetisches PDF (wie REQ-MB-24) mit Lesezeichen `"Kapitel\r\nZwei"`,
+`"Teil  Drei\t"` (Doppelleerzeichen, Tab) und `"Übersicht"` (NFD), dazu eine
+Inhaltsverzeichnis-Liste mit einem Titel `"Anhang\r\nEins"`; Zuweisung `["Kapitel Zwei"]` → `welt`
+bei Standard `regel` → Pfade `["Kapitel Zwei"]`, `["Teil Drei"]`, `["Übersicht"]` (NFC),
+`["Anhang Eins"]`; kein Abschnittspfad und kein Titelvorsatz enthält CR, LF (außer dem einen am
+Vorsatzende), Tab oder Doppelleerzeichen; Häppchen unter `Kapitel Zwei` tragen `welt`, die übrigen
+`regel`. Mutation: Normalisierung aus → Test rot.
+
+**REQ-MB-34** — *If/Then, Schema der Layout-Deklaration*
+Wenn die Deklaration eines Buchs für `layout` (samt `stufen` und `veto`) oder `rand` gegen ihr Schema
+verstößt, dann bricht das Einlesen dieses Buchs mit `KonfigFehler` ab, bevor eine Buchdatei
+geschrieben wird (eine vorhandene bleibt unverändert); die Meldung nennt den fehlerhaften Schlüssel.
+Schema:
+- `layout`: Objekt, nur die optionalen Schlüssel `klasse` (nicht-leere Zeichenkette), `stufen`
+  (nicht-leere Liste von Stufen), `veto` (Liste nicht-leerer Zeichenketten), `hoechstlaenge`
+  (ganze Zahl ≥ 1);
+- Stufe: Objekt mit **mindestens einem** der Schlüssel `groesse` (Bereich, `von` > 0), `laufweite`
+  (Bereich), `fett`, `kursiv`, `kapitaelchen` (je Wahrheitswert), keine anderen;
+- Bereich: Liste aus genau zwei Zahlen `[von, bis]` mit `von ≤ bis`;
+- `rand`: Objekt mit mindestens einem der Schlüssel `kopf`, `fuss` (je Zahl ≥ 0), keine anderen.
+
+Unbekannte Schlüssel (auch Tippfehler und das gestrichene Merkmal „eigene Zeile"), falsche Typen
+(Wahrheitswerte zählen nicht als Zahl), leere Stufen und Bereiche mit `von > bis` sind Verstöße.
+Anlass (gemessen): ein Tippfehler `groese` ergab eine Stufe ohne Angabe — jede Zeile wurde
+Überschrift.
+*Detektor:* je Fall ein synthetisches Buch → `KonfigFehler`, keine Buchdatei bzw. alte byte-gleich:
+Stufe `{"groese": [10, 12]}`; `layout` `{"groese": …}`; Stufe `{}`; `groesse` `[14, 12]`;
+`groesse` `[12]`; `rand` `{"kopf": "40"}`; `rand` `{"kopf": true}`; `veto` `"table"`;
+`hoechstlaenge` `0`; `layout` `{"eigene_zeile": true}`. Gegenprobe: eine gültige Deklaration mit
+allen Schlüsseln liest ein und ergibt dieselben Abschnitte wie vor der Prüfung. Mutation:
+Schemaprüfung aus → Test rot.
 
 ## Lesarten (festgelegt)
 
@@ -542,9 +715,15 @@ Von Tobias bestätigt (Fassung 4):
 - Falsche Lesereihenfolge neben Bildern (gemessen S. 94, rechte Spalte) — Spec 2, zusammen mit
   den Tabellen.
 - OCR-Vertauschungen im Überschriften-Abgleich (Fehlerklasse 3, REQ-MB-12).
+- Rekonstruktion echter Binde- und Ergänzungsstriche auf dem Docling-Weg (z. B. über
+  pdfplumber-Zeilen); Spec 1 zählt nur Verdachtsfälle (REQ-MB-32). Gemessen: 26 von 69 echten
+  Strichen zusammengezogen — Spec 2.
+- Elemente, die die Extraktion **nach** einer Listenüberschrift liefert, die aber über ihr liegen
+  (Gegenrichtung zu REQ-MB-31) — Spec 2, zusammen mit der Lesereihenfolge neben Bildern.
 - FTS5-Trigram bzw. Komposita-Suche.
 - Earthdawn-Testsatz (Golden Set) — Daten, nicht Code; folgt nach Spec 1.
 - Übersetzungs-/Suchfassung für englische Bände (Throal).
+- Gleichstand gleich großer Kästen bei der Zeichenzuordnung (REQ-MB-29) bleibt unspezifiziert (selten; F8-5).
 - Automatische Erkennung, ob eine *Frage* eine Regel- oder Weltfrage ist.
 
 ## Entscheidungen (Tobias, 2026-10-21)
@@ -566,6 +745,25 @@ Von Tobias bestätigt (Fassung 4):
 - **F6-3** Randzeilen werden verworfen und je Buch gezählt; ohne Randangabe unverändert (MB-28).
 - **F6-4** pdfplumber-Version wie die Docling-Version gemessen und geprüft; Zuordnung der Zeichen zu den Zeilen eigenes Kriterium mit synthetischem PDF (`reportlab` als Testabhängigkeit) (MB-23, -29).
 - **F6-5** Falsche Lesereihenfolge neben Bildern (S. 94) in Spec 2, zusammen mit den Tabellen (Abgrenzung).
+
+Fassung 7 (Tobias, 2026-10-22, nach Kritiker-Review am echten Buch):
+
+- **F7-1** `DROP_TYPES` wird für Mehr-Bücher-Bestände nicht angewendet, `inhaltsart` übernimmt; Altbestände unverändert — gemessen: Mehr-Bücher-Häppchen tragen kein `typ`, der Pipe-Default `flavor,meta` brach mit `KonfigFehler` ab (MB-30).
+- **F7-2** Listenüberschrift nach Lage vor die unter ihr liegenden Elemente einsortieren, spaltenübergreifend über beide Spalten — gemessen: S. 76 und S. 114 erstes Talent unter dem vorherigen Kapitel (MB-31).
+- **F7-3** Zeilenend-Reparatur nur auf Wegen mit Zeilenenden, auf dem Docling-Weg Verdachtszähler; Strich-Rekonstruktion in Spec 2 — gemessen: Silbentrennung 99,3 % richtig, echte Striche 26/69 zusammengezogen, MB-11 griff bei 0,8 % der Trennungen (MB-11, -32).
+- **F7-4** `norm()` entfernt zusätzlich Formatzeichen (`Cf`, u. a. U+00AD) — gemessen: 1 Lesezeichen wegen U+00AD im Seitentext nicht gefunden (MB-12).
+- **F7-5** Listentitel vor Verwendung normalisiert (Leerraum → ein Leerzeichen, trim, NFC), Vorsatz einzeilig, Präfixe ebenso — gemessen: 48/148 Titel mit `\r\n`, 73 mit abweichendem Leerraum, 28,9 % der Häppchen mit CR/LF im Vorsatz (MB-33).
+- **F7-6** MB-19 Altbestand: Maximum als Median der Maxima aus 5 Wiederholungen je Seite, Grenze +20 %; Zeittests zählen in Mutationsproben nicht als Fang — gemessen: 2/26 Läufe rot, Verhältnis der Einzel-Maxima 0,47–2,35 bei typisch 1,002 (MB-19).
+- **F7-7** Zeilenmerkmal „eigene Zeile" gestrichen, Layout-/Rand-Deklaration gegen Schema geprüft — gemessen: Tippfehler `groese` machte jede Zeile zur Überschrift; „eigene Zeile" war nie definiert noch umgesetzt (MB-20, -34).
+- **F7-A** Abnahme-Auslegungen (Tobias, 2026-10-22): weicher Trennstrich (U+00AD) im Wort wird auf allen Extraktionswegen entfernt (MB-11 Tabellenzeile 2); MB-31 regelt nur „vorher geliefert, liegt darunter“ (Gegenrichtung Spec 2); MB-19 neu und Basis abwechselnd; MB-33 normalisiert auch Präfixe aus spiel.json und alle Pfadelemente; MB-30 behält die Prüfung unbekannter DROP_TYPES-Werte.
+
+Fassung 8 (Tobias, 2026-10-22, vorab entschieden):
+
+- **F8-1** Golden-Set-Fundstelleneintrag eines Mehr-Bücher-Bestands nur `buch_id` und `seite`; unbekannte Zusatzschlüssel → `KonfigFehler` statt stillem Nie-Treffen (MB-7).
+- **F8-2** Judge erkennt den festen Verweigerungssatz mit Buch-Fundstellen in Chat- und Sprachmodus wie bei Altbeständen; `messung/lauf.py` protokolliert Fundstellen mit Buch in `antworten.jsonl` (MB-6).
+- **F8-3** Sprachmodus nennt „Seite n" (ausgeschrieben), nicht „S. n" (MB-6).
+- **F8-4** Randgrenze inklusiv: Mittelpunkt genau auf der Grenze gehört zum Rand (MB-20, -28, -29; wirkt auch in MB-12).
+- **F8-5** Gleichstand gleich großer Kästen bei der Zeichenzuordnung bleibt unspezifiziert (selten) (MB-29, Abgrenzung).
 
 ## Tier
 
