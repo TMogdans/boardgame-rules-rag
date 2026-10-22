@@ -3,7 +3,7 @@
 - **Spec-ID:** mehrbuch-bestand (Spec 1 von voraussichtlich 2–3)
 - **Kontext-Kürzel:** MB
 - **Tier:** T3 — siehe Abschnitt „Tier"
-- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 9). (Historie: Fassung 9 arbeitet Tobias' vorab getroffene Entscheidungen F9-1 bis F9-3 nach dem zweiten Kritiker-Review am echten Buch ein (MB-31 zurückgezogen, Judge-Muster exakt, Lage aus mehreren Kästen); Fassung 8 abgenommen durch Tobias am 2026-10-22; Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
+- **Status:** **Abgenommen** durch Tobias am 2026-10-22 (Fassung 9a). (Historie: Fassung 9a arbeitet Tobias' Nachträge F9a-1 und F9a-2 ein (Messpfad der Bücherdeklaration, Lesart Zeile ohne Lage); Fassung 9 abgenommen durch Tobias am 2026-10-22; Fassung 9 arbeitet Tobias' vorab getroffene Entscheidungen F9-1 bis F9-3 nach dem zweiten Kritiker-Review am echten Buch ein (MB-31 zurückgezogen, Judge-Muster exakt, Lage aus mehreren Kästen); Fassung 8 abgenommen durch Tobias am 2026-10-22; Fassung 7 abgenommen durch Tobias am 2026-10-22; Fassung 8 arbeitet Tobias' vorab getroffene Entscheidungen F8-1 bis F8-5 ein (Golden-Set-Schlüssel, Judge/Messlauf, Sprachmodus-Seite, Randgrenze); Fassung 4 abgenommen durch Tobias am 2026-10-21; Fassung 5 (nach Vorab-Messung) durch Tobias' Entscheidungen F6-1 bis F6-5 nachgeschärft; Fassung 6 abgenommen durch Tobias am 2026-10-21; Fassung 7 arbeitet Tobias' Entscheidungen F7-1 bis F7-7 nach dem Kritiker-Review am echten Buch ein.)
 
 ## User Story
 
@@ -133,6 +133,8 @@ für Fundstelle Seite 12 enthält „Seite 12" und kein „S. 12".
 *Detektor:* Prompt-Nachrichten und Pipe-Ausgabe für einen synthetischen Zwei-Bücher-Bestand
 mit gleicher Seitenzahl in beiden Büchern sind unterscheidbar; Mutation der Kopf-Funktion
 (liefert Marker) ändert CLI- **und** Pipe-Ausgabe. Altbestände: REQ-MB-3.
+*Fassung 9a (a), Messpfad:* In `messung` (Bewerten und Eichen, überall dort, wo der Judge die Antwort eines Bestands bewertet) wird die Bücherdeklaration des Bestands über die `spiel_id` des Golden Sets geladen (wie `rag.lies_buecher`) und an den Judge übergeben. Für Altbestände wird keine Deklaration übergeben; ihre Bewertung bleibt wie bisher (REQ-MB-3).
+*Detektor (Fassung 9a):* Messlauf über einen Mehr-Bücher-Bestand mit festem Verweigerungssatz (deklariertes Buch) → Judge wertet als Verweigerung. Mutation: Deklaration im Messpfad nicht übergeben → derselbe Lauf wertet den Satz falsch → Test rot.
 
 **REQ-MB-7** — *If/Then, Messung*
 Golden-Set-Fragen eines Mehr-Bücher-Bestands geben erwartete Fundstellen als
@@ -567,6 +569,8 @@ nur eines mit Randangabe → Zähler nur bei diesem, das andere enthält seine K
 vor dieser Änderung (Häppchentexte gleich dem Lauf ohne Randangabe). Mutation: Randzeilen nur
 zählen, nicht verwerfen → Test rot.
 
+*Lesart (Fassung 9a, F9a-2):* Eine Zeile **ohne Lageangabe** gilt bei deklariertem Rand als **nicht im Rand**; sie bleibt im Text und kann Überschrift werden. Das Einlese-Protokoll zählt solche Zeilen je Buch im Zähler `ohne_lage`. Detektor: vorhanden in `test_einlesen_reparatur.py`, `test_req_mb_28_zeile_ohne_lage_gilt_als_nicht_im_rand` (Rand deklariert, Zeile ohne Lage → bleibt im Text, `randzeilen` = 0, `ohne_lage` = 2).
+
 **REQ-MB-29** — *Contract, Zuordnung der pdfplumber-Zeichen zu den Extraktionszeilen*
 Für ein Buch mit Schriftinfo werden jeder Extraktionszeile die pdfplumber-Zeichen zugeordnet,
 die auf derselben Seite zu dieser Zeile gehören; daraus ergeben sich ihre Schrift (Mehrheit nach
@@ -753,6 +757,11 @@ Fassung 9 (Tobias, 2026-10-22, vorab entschieden, nach zweitem Kritiker-Review a
 - **F9-1** REQ-MB-31 zurückgenommen; Lesereihenfolge-Korrekturen gemeinsam in Spec 2 mit Detektoren nach echtem Buchmaß (z. B. deklariertes Spaltenraster je Buch) — gemessen: im ganzen Buch 2 Abschnitte geändert, beide schlechter (Alchemie 2.805 → 78 Zeichen, S. 76 148 statt 149 Talente) (MB-31, Abgrenzung).
 - **F9-2** Judge-Muster exakt: fester Verweigerungssatz nur, wenn jede Fundstelle exakt der `fundstelle()`-Form eines deklarierten Buchs entspricht; Altbestand byte-gleich zu main — gemessen: 6/6 Antworttexte mit Inhalt galten als fester Satz (MB-6, MB-3).
 - **F9-3** Lage eines Elements mit mehreren Kästen = Vereinigung — gemessen: 127 von 8.095 Textelementen haben mehrere Kästen, Implementierung nutzte `prov[0]` (MB-29).
+
+Fassung 9a (Tobias, 2026-10-22, abgenommen als Nachtrag zu Fassung 9):
+
+- **F9a-1** Messpfad: `messung` übergibt dem Judge die Bücherdeklaration des Bestands (über die `spiel_id` des Golden Sets, wie `rag.lies_buecher`); Altbestände ohne Deklaration bleiben unverändert (MB-6, MB-3).
+- **F9a-2** Zeile ohne Lageangabe gilt bei deklariertem Rand als nicht im Rand und wird im Einlese-Protokoll als `ohne_lage` gezählt (MB-28).
 
 ## Tier
 
