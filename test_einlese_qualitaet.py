@@ -19,8 +19,9 @@ test_lesefolge.py, test_striche_zeichen.py, test_tabellenkopf.py):
       "seiten": [...]}, "urteil": {"besser", "gleichwertig", "schlechter", "strittig"}}}     (REQ-EQ-1)
   Protokoll.wirkung = {"REQ-EQ-<n>": {"abschnittsaenderungen": n, "textaenderungen": n,
       "seiten": [...]}} je eingeschalteter Text-Regel (EQ-3, -5, -6, -7, -8, -10), inkrementell gegen
-      den Lauf mit allen vorangehenden Regeln (K1); "REQ-EQ-21": {"haeppchen_mit_vorsatz": n},
-      zerteilt mit rag.CHUNK_SIZE/CHUNK_OVERLAP wie rag.py index                              (REQ-EQ-2)
+      den Lauf mit allen vorangehenden Regeln (K1); Regel ohne Fall mit Nullwerten (U2)    (REQ-EQ-2)
+  Ausgabe von rag.aktualisiere_index: je Buch eine Zeile mit buch_id und der Zahl der Haeppchen mit
+      Tabellenkopf-Vorsatz neben dem Wort "Vorsatz"/"Vorsaetze" (U1, wie REQ-MB-14)             (REQ-EQ-2/-21)
   Protokoll.zahlenprotokoll = {"quelle": n, "fehlend": {"gar_nicht", "seltener"},
       "zusaetzlich": {"erfunden", "vervielfacht"}, "textverlust": n,
       "seiten": {physische Seite: {"gar_nicht", "seltener", "erfunden", "vervielfacht", "textverlust"}}}
@@ -250,23 +251,37 @@ class TestWirkungszaehler(BuchTest):
 
     @unittest.skip("devloop: REQ-EQ-2 noch nicht implementiert")
     def test_req_eq_2_tabellenkopf_zaehlt_die_haeppchen_mit_vorsatz(self):
-        """[REQ-EQ-2] EQ-21 zaehlt im Protokoll die Haeppchen mit Vorsatz (K1), zerteilt wie rag.py index mit CHUNK_SIZE/CHUNK_OVERLAP: Sollzahl aus dem Wortlaut-Orakel (test_tabellenkopf.soll_vorsatz) auf dem Abschnittstext; der Index traegt genau so viele Vorsaetze."""
+        """[REQ-EQ-2] U1: EQ-21 zaehlt die Haeppchen mit Vorsatz in der Ausgabe des Index-Laufs je Buch (wie die Haeppchenzahl, REQ-MB-14), nicht im Einlese-Protokoll. Sollzahl aus dem Wortlaut-Orakel (test_tabellenkopf.soll_vorsatz); Buch ohne tabellenkopf meldet keine Vorsaetze."""
+        import re
         import test_tabellenkopf as tk
-        self.deklariere(eqa.buchdekl(liste=LISTE, **eqa.ALLE_REGELN))
-        with mock.patch.multiple(rag, CHUNK_SIZE=120, CHUNK_OVERLAP=20):
-            p = self.lies_alle()
+        self.deklariere(eqa.buchdekl("nord", "Buch Nord", quelle="nord.pdf", liste=LISTE, **eqa.ALLE_REGELN),
+                        eqa.buchdekl("sued", "Buch Sued", quelle="sued.pdf", liste=LISTE, **ohne("REQ-EQ-21")))
+        p = self.lies_alle(bid="nord")
+        self.lies_alle(bid="sued")
+        self.assertNotIn("REQ-EQ-21", getattr(p, "wirkung", {}))          # das Einlesen kennt CHUNK_SIZE nicht
         _, el = alle_regeln_buch()
-        md = el[7][1]._markdown
         kopftext = "Würfeltabelle\nStufe | Würfel\n"
-        (a,) = [e for e in self.eintraege() if e["abschnittspfad"] == ["Tabelle"]]
-        tabellen = [(b, kopftext) for b in tk.bereiche(a["text"], md)]
+        (a,) = [e for e in self.eintraege("nord") if e["abschnittspfad"] == ["Tabelle"]]
+        tabellen = [(b, kopftext) for b in tk.bereiche(a["text"], el[7][1]._markdown)]
         stuecke = rag.zerteile(a["text"], 120, 20)
         soll = sum(bool(tk.soll_vorsatz(tabellen, i * 100, i * 100 + len(st), a["text"])) for i, st in enumerate(stuecke))
         self.assertGreater(soll, 0)
+        meldungen = []
+        with mock.patch.multiple(rag, CHUNK_SIZE=120, CHUNK_OVERLAP=20):
+            self.baue(ausgabe=meldungen.append)
+            chunks, _ = rag.lade_spiel(self.oeffne(), mb.SID)
         kopf = rag.titelvorsatz(["Tabelle"]) + kopftext
-        self.assertEqual(sum(c["text"].startswith(kopf) for c in self.haeppchen(120, 20)), soll)
-        self.assertEqual(p.wirkung["REQ-EQ-21"]["haeppchen_mit_vorsatz"], soll)
-        self.assertEqual(self.protokoll_datei()["wirkung"]["REQ-EQ-21"]["haeppchen_mit_vorsatz"], soll)
+        self.assertEqual(sum(c["text"].startswith(kopf) for c in chunks if c["buch_id"] == "nord"), soll)
+        self.assertNotEqual(sum(c["buch_id"] == "nord" for c in chunks), soll)   # nicht mit der Haeppchenzahl verwechselbar
+
+        def zeile_mit(bid, n):
+            vors = r"Vors(?:atz|ätze|aetze)"
+            return re.compile(rf"(?<![\w-]){bid}(?![\w-]).*(?:(?<!\d){n}(?!\d)[^\d\n]{{0,25}}{vors}"
+                              rf"|{vors}[^\d\n]{{0,25}}(?<!\d){n}(?!\d))")
+        self.assertTrue(any(zeile_mit("nord", soll).search(m) for m in meldungen), meldungen)
+        for m in meldungen:                                               # Buch ohne tabellenkopf: kein Vorsatz gemeldet
+            treffer = re.search(r"(?<![\w-])sued(?![\w-]).*?(\d+)[^\d\n]{0,25}Vors(?:atz|ätze|aetze)", m)
+            self.assertTrue(treffer is None or treffer.group(1) == "0", m)
 
     @unittest.skip("devloop: REQ-EQ-2 noch nicht implementiert")
     def test_req_eq_2_zwei_regeln_auf_derselben_seite(self):
@@ -363,9 +378,10 @@ class TestZahlenprotokoll(eqa.EQTest):
                 self.deklariere()
                 self.lies_alt(el, pdf)
                 alt = self.roh()
-                self.deklariere(lesefolge=eqa.LESEFOLGE)
+                self.deklariere(lesefolge=eqa.LESEFOLGE)       # deklarierte Regel ohne Fall (U4)
                 p = self.lies(el, pdf)
                 self.assertEqual(self.roh(), alt)
+                self.assertIn("zahlenprotokoll", self.protokoll_datei())    # im Einlese-Protokoll, nicht in der Buchdatei
                 self.assertNotEqual(p.zahlenprotokoll, "nicht_gemessen")
 
     @unittest.skip("devloop: REQ-EQ-9 noch nicht implementiert")
@@ -506,6 +522,26 @@ class TestAbschaltbar(BuchTest):
         for feld in set(neu) - set(vorher):
             with self.subTest(neues_feld=feld):
                 self.assertTrue(eqa.ist_leer(neu[feld]), (feld, neu[feld]))
+
+    @unittest.skip("devloop: REQ-EQ-16 noch nicht implementiert")
+    def test_req_eq_16_alle_schalter_aus_gilt_wie_keine_deklaration(self):
+        """[REQ-EQ-16] U3: Spec-2-Deklaration mit allen Schaltern false (striche, zeichen) -> wie keine Deklaration: Buchdatei byte-gleich zum Stand vor der Spec, pdfplumber nicht geoeffnet, kein Zahlenprotokoll, pdfplumber_version None, keine Wirkungszaehler."""
+        import pdfplumber
+        z, el = alle_regeln_buch()
+        pdf = self.pdf_aus(z, 7)
+        self.deklariere(eqa.buchdekl(liste=LISTE))
+        self.lies_alt(el, pdf)
+        alt = self.roh()
+        aus = {"striche": {"zeilenenden": False, "strichrest": False},
+               "zeichen": {"zierumlaut": False, "steuerzeichen": False, "listennummern": False}}
+        self.deklariere(eqa.buchdekl(liste=LISTE, **aus))
+        with mock.patch.object(pdfplumber, "open", side_effect=AssertionError("pdfplumber geoeffnet")):
+            p = self.lies(el, pdf)
+        self.assertEqual(self.roh(), alt)
+        self.assertTrue(eqa.ist_leer(getattr(p, "zahlenprotokoll", None)))
+        self.assertTrue(eqa.ist_leer(self.protokoll_datei().get("zahlenprotokoll")))
+        self.assertIsNone(p.pdfplumber_version)
+        self.assertTrue(eqa.ist_leer(getattr(p, "wirkung", None)))
 
     @unittest.skip("devloop: REQ-EQ-16 noch nicht implementiert")
     def test_req_eq_16_je_regel_aus_aendert_sich_nur_deren_fall(self):
