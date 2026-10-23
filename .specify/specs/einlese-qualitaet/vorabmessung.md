@@ -1,6 +1,6 @@
-# Vorab-Messung Spec 2 (Einlesequalität), Fassung 1
+# Vorab-Messung Spec 2 (Einlesequalität), Fassung 2
 
-Gemessen am 2026-10-22 am Zielbuch (Spielerhandbuch ED4, 3. Aufl., 314 S., physische Seite =
+Fassung 1 gemessen am 2026-10-22, Fassung 2 am 2026-10-23 (gleiche Daten neu erzeugt, gleiche Versionen) am Zielbuch (Spielerhandbuch ED4, 3. Aufl., 314 S., physische Seite =
 gedruckte + 1). Zahlen in `vorabmessung.json`. In diesem Ordner steht kein Buchtext; Abschnittsnamen
 und Wortpaare stehen nur als Stichworte da. Die Seitenangaben sind physisch.
 
@@ -21,10 +21,31 @@ und Wortpaare stehen nur als Stichworte da. Die Seitenangaben sind physisch.
   Abschnittstexten gelesen. Damit ist für jede Zeile bekannt, in welchem Abschnitt sie landet: mit
   Docling-Folge und mit Kandidatenregel. Listenüberschriften verschwinden dabei aus dem Text (sie
   werden durch den Listentitel ersetzt). Man erkennt sie daran, dass ihre Marke fehlt.
-- **Urteil „besser/schlechter":** Jeder Abschnittswechsel wurde von Hand am Seitenbild (60 dpi) und
-  an der Elementliste der Seite beurteilt. Maßstab: Folgt der Text dem Satzfluss der Seite (Spalte für
+- **Urteil „besser/schlechter" (Fassung 2):** Jede Änderung wird einzeln beurteilt, und zwar an
+  der Elementliste der Seite, an den **Fugen** (Ende des neuen Vorgängers ‖ Anfang des bewegten Blocks
+  … Ende ‖ Anfang des Nachfolgers, z. B. eine Silbentrennung über den Spaltenwechsel) und, wo die Fuge
+  nichts entscheidet, am Seitenbild bzw. Ausschnitt mit 100–110 dpi. Die Änderungsliste läuft über
+  (Pfad, Vorkommen). Gemischte Fälle (andere Menge **und** andere Folge) zählen mit. Eine Klasse ist
+  nur für die 2×2-Werteblock-Tausche zugelassen, und auch dort mechanisch belegt.
+- **Urteil Fassung 1** (60 dpi, Stichproben): Maßstab: Folgt der Text dem Satzfluss der Seite (Spalte für
   Spalte, Fortsetzung über den Spaltenwechsel)? Steht ein Element unter der Überschrift, zu der es
   inhaltlich gehört?
+
+## 0. Korrekturen gegenüber Fassung 1 (blinde Gegenprüfung vom 2026-10-23)
+
+Die Gegenprüfung hat mit 100–150 dpi geurteilt und ihre Urteile festgeschrieben, bevor sie diese
+Messung gelesen hat. Ihre Befunde gelten; die Fassung-1-Aussagen unten sind damit korrigiert:
+
+| Fassung 1 | korrigiert |
+|---|---|
+| Rasterregel: 10 Seiten besser, 1 strittig (S. 53) | 10 besser, **1 schlechter** (S. 53): Der Kasten gehört thematisch zur neuen Kapitelüberschrift |
+| 37 innere Umstellungen ohne Werteblock: 25 „Spaltenrücksprung", Stichprobe 3/3 besser, 12 nicht beurteilt | **31 besser, 5 schlechter, 1 strittig** (S. 58 überbreiter Block; S. 237 zweispaltiger Kasten; S. 274 Tabellenkopf aus Text-Elementen; S. 285–291 Passionsnamen ohne Bandgrenze; S. 299–306 Werte-Raster; S. 307–314 strittig). „Spaltenrücksprung" ist **kein** Gütesignal |
+| Änderungsliste nach Pfad | `innen.py`/`innen2.py` übersahen 7 gemischte Abschnitte (andere Menge und andere Folge); `vergleich2.py` zählte nach Pfad statt nach Vorkommen. Fassung 2 zählt nach (Pfad, Vorkommen) und schließt gemischte Fälle ein |
+| Strichrest ohne Prüfung: 5 schlechter, mit Liste 0 | **6 schlechter**, mit `als`/`beziehungsweise` noch **1** (S. 287: `gro- durch`, die Fortsetzung `-ßer` steht in der anderen Spalte) |
+| Zierschrift-Umlaut: 4 Zeilen | **3 Zeilen** (S. 9, 10, 20); S. 216 trifft die Regel nicht (kein Vokal vor den Punkten). 4 geänderte *Abschnitte* bleiben richtig |
+| — | 16 Formen `X- Großbuchstabe` und Flussbrüche (`beispiels- Die`) erfasste weder Regel noch Zähler |
+| 2×2-Werteblöcke 156 gleichwertig | bestätigt (Stichprobe 20/20) |
+| Zeilenend-Striche 59/59 besser | bestätigt |
 
 ## 1. Spaltenraster
 
@@ -46,7 +67,7 @@ Lücken über 15 pt getrennt), auf allen 314 Seiten:
   56 `list_item`, 23 Tabellen, 5 Fußnoten).
 - **Deklaration für das Buch:** Spalten `[[35, 292], [304, 560]]`, Toleranz 4 pt.
 
-## 2. Lesereihenfolge: Rasterregel
+## 2. Lesereihenfolge Fassung 1: Rasterregel (überholt, siehe Abschnitt 0 und 2a)
 
 **Kandidat:**
 - Je Seite liegen Bänder zwischen den spaltenübergreifenden Elementen (sortiert nach Oberkante des
@@ -107,6 +128,74 @@ Falle wie bei REQ-MB-31. Die Variante ist verworfen.
 
 **Laufzeit:** Rasterregel je Seite typisch 0,018 ms, Maximum 0,171 ms.
 
+## 2a. Lesereihenfolge Fassung 2: Bänder an Überschriften
+
+**Regel (Prototyp `raster_w4`):**
+1. **Seitenwächter:** Trägt die Seite ein spaltenübergreifendes Element, das keine Überschrift ist und
+   schmaler als 80 % des Satzspiegels (35–560 pt) ist, bleibt die Docling-Folge. Das betrifft 27
+   Seiten. Geänderte Fälle verhindert der Wächter auf S. 58 (überbreiter Block) und S. 299–306
+   (Werte-Raster der Beispielcharaktere). Auf den übrigen 25 Seiten hätte die Regel ohnehin nichts
+   geändert.
+2. **Ausnahmeseiten** (deklariert): S. 237 (zweispaltiger Kasten) und S. 274 (Tabellenkopf aus
+   Text-Elementen). Das sind **2 Ausnahmen**.
+3. **Mehrspaltige Elemente** (Docling-Element mit Kästen in verschiedenen Spalten; 104 im Buch)
+   behalten ihre Stelle hinter ihrem Docling-Vorgänger.
+4. **Bandgrenzen:** alle spaltenübergreifenden Elemente, dazu Überschriften in einer Spalte. Als
+   Überschrift zählen Listen- und Layout-Köpfe aus Spec 1 sowie Docling-`section_header`. Eine solche
+   Überschrift ist Bandgrenze, wenn die Nachbarspalte auf ihrer Höhe (±2 pt) frei ist (auch von
+   Bildern) **und** sich darunter fortsetzt, vor dem nächsten spaltenübergreifenden Element.
+5. In jedem Band kommt links vor rechts, jeweils nach Oberkante; bei Gleichstand gilt die
+   Docling-Folge.
+
+**Warum diese Grenzen:**
+- Alle erkannten Köpfe als Bandgrenze (wörtlich „unabhängig von der Kastenbreite"): **444 Fälle**.
+  Die Talentnamen stehen mitten in der Spalte, und die Nachbarspalte setzt das vorige Talent fort; die
+  Regel zerlegt damit alle Talent- und Zauberseiten (S. 77–107, 163–215).
+- Nur „Nachbarspalte frei": Die Fortsetzung oben rechts wandert vor kleine Spaltenüberschriften
+  (S. 28: Text einer Rassenfähigkeit vor „Rassenfähigkeiten"). Deshalb gilt zusätzlich „setzt sich
+  darunter fort".
+- Kästen per Einzug erkennen: verworfen (Fassung 1, S. 20).
+
+| Zahl | Docling-Folge | Fassung 2 |
+|---|---|---|
+| Fälle (Pfad, Vorkommen) | – | 206 |
+| davon 2×2-Werteblock-Tausch | – | 156 |
+| einzeln beurteilt | – | 50 (25 nur Folge, 8 gemischt, 17 nur Menge) |
+| Elemente in einem anderen Abschnitt | – | 55 |
+| Abschnitte mit anderer Elementmenge | – | 25 |
+| Abschnittsköpfe nach ihrem Inhalt | 3 (S. 76, 114, 190) | 0 |
+| Abschnitte / Liste gefunden / Stufe 1 / Stufe 2 | 539 / 144 / 386 / 5 | 539 / 144 / 386 / 5 |
+
+**Urteile, alle 50 einzeln:**
+- **49 besser.** Darunter: S. 16, 19/20, 22/23, 24, 25, 27/28, 30, 31, 32, 34, 37, 52, 76, 94, 100, 114,
+  121, 124/126, 128/130, 140, 144, 148, 149, 171/172, 177, 190/191, 217, 222, 233, 257, 283, 286–291
+  (Passionen: jede Passionsüberschrift wird Bandgrenze, die Fortsetzungen stehen unter der richtigen
+  Passion), 297. Belegt ist das an Fugen, die eine Trennung über den Spaltenwechsel schließen (z. B.
+  `gro- ‖ ßer`, `Grup- ‖ pentagebuch`, `ein- ‖ ladend`, `erzählst du ‖ dem`), sonst am Ausschnitt.
+- Davon **2 nur teilweise besser** (S. 28 Elfen, S. 34 Windlinge): Ein mehrspaltiges Element hält
+  Text beider Spalten. Das bewegte Stück steht jetzt im richtigen Unterabschnitt neben seinem Absatz,
+  aber nicht direkt an der Trennstelle. Abhilfe wäre die Teilung (O-10).
+- **1 gleichwertig:** Index S. 308 (Indexzeile nach statt vor der Seitentabelle).
+- **0 schlechter, 0 strittig.**
+- Ohne die 2 Ausnahmen kämen S. 237 und S. 274 als schlechter hinzu.
+- S. 53 ändert sich nicht mehr: Die rechte Kapitelüberschrift ist Bandgrenze, der Kasten bleibt unter
+  ihr.
+
+**2×2-Werteblöcke (156):** Mechanisch belegt ist für jeden Fall:
+- Es weichen genau 2 Positionen ab (ein Tausch).
+- Beide Elemente sind `Schlüssel: Wert`-Zeilen in einem zusammenhängenden Lauf von höchstens 7 solchen
+  Zeilen.
+- Die Menge des Laufs ist gleich.
+- Die Paare bleiben ganz. Das Urteil ist gleichwertig (Gegenprüfung 20/20).
+
+**Gemessene Varianten (nicht gewählt):**
+- **Teilung mehrspaltiger Elemente** an Doclings `charspan` (je Kasten ein Stück): Sie ergibt 238
+  Fälle, davon 91 einzeln zu beurteilen; beurteilt sind sie nicht. Die Fugen zeigen, dass sie die
+  Flussbrüche schließt (`einset- ‖ zen`). An Kastengrenzen mitten im Wort fällt aber ein Zeichen weg
+  bzw. ein Wort wird zerteilt (`verbleib ‖ nden`). Das braucht eine eigene Regel (O-10).
+
+**Laufzeit:** Regel je Seite typisch 0,041 ms, Maximum 0,257 ms.
+
 ## 3. Striche
 
 **Zeilenend-Striche der Quelle:**
@@ -141,7 +230,29 @@ Silbentrennung ist zu 99,2 % richtig (4.616 von 4.654 gefundenen Fällen).
 - Das nächste Element der Docling-Folge beginnt in 30 Fällen klein, in 5 groß, in 1 mit Konjunktion.
 - Mit der Rasterregel: 31 / 4 / 1.
 
-**Regel „Strichrest im Text"** (verbleibendes `X- y` mit kleinem `y`, keine Konjunktion → `Xy`):
+**Fassung 2, Striche auf der Fassung-2-Lesefolge** (Konjunktionsliste des Buchs um `als`,
+`beziehungsweise` ergänzt):
+
+- **Zeilenende aus der Quelle (EQ-5):** 60 Stellen in 50 Abschnitten (41 Strich wiederhergestellt,
+  19 zusammengefügt). Alle 60 einzeln gelesen: **60 besser, 0 schlechter**. Gegenüber Fassung 1 kommt
+  eine Stelle hinzu, weil die neue Folge eine Form eindeutig macht.
+- **Strichrest mit Nachweis (EQ-6):** `X- y` (`y` klein, keine Konjunktion) wird nur zusammengefügt,
+  wenn pdfplumber eine Zeile zeigt, die auf `X-` endet, und deren Quell-Folgezeile mit `y` beginnt.
+  Folgezeile ist die nächste Zeile derselben Spalte (höchstens 20 pt tiefer); am Spaltenende ist es
+  ein Blockanfang der anderen Spalte bzw. der nächsten Seite.
+  - Ergebnis: **36 Stellen in 26 Abschnitten, 36 besser, 0 schlechter.** `gro- ßer` wird `großer`,
+    weil die neue Folge die richtige Fortsetzung liefert. `gro- durch` (Docling-Folge) bekäme keinen
+    Nachweis.
+  - Die 5 Ergänzungsstriche vor `als`/`beziehungsweise` bleiben stehen.
+- **`X- Großbuchstabe`:** 15 Stellen, alle **ohne** Nachweis über die Folgezeile derselben Spalte.
+  9 davon sind Flussbrüche mehrspaltiger Elemente (`beispiels- Die`, `sei- Viele` …), 6 sind
+  Komposita (`Karma- Modifikator`, `Mindest- Talentrang`, `Gesamt- Legendenpunkte` …).
+  - Mit dem lockereren Nachweis (Blockanfang) hätte die Regel 4 Flussbrüche fälschlich zu
+    `beispiels-Die` usw. gemacht. Deshalb gibt es für Großbuchstaben **keine Regel, nur einen Zähler**.
+- **Verdachtszähler REQ-MB-32** (Fassung-2-Folge, ergänzte Liste): Binnen-Großbuchstabe 63 → 27
+  (nach EQ-5), Strichrest 47 → 36 (nach EQ-5) → 0 (nach EQ-6).
+
+**Fassung 1, Regel „Strichrest im Text" ohne Nachweis** (verbleibendes `X- y` mit kleinem `y`, keine Konjunktion → `Xy`; korrigiert in Abschnitt 0):
 - 39 Stellen in 32 Abschnitten: 33 besser, 1 ungeklärt (S. 284).
 - **5 schlechter** mit der heutigen Konjunktionsliste: 4 × Ergänzungsstrich vor `als` (sowohl … als
   auch), 1 × vor `beziehungsweise`.
@@ -157,7 +268,10 @@ Leerzeichen bei einer Lücke über 0,25 × Schriftgröße, Zeilen mit der MB-11-
 
 ## 4. Zierschrift-Umlaut (G5)
 
-- Docling liefert auf 4 Zeilen einen Umlaut als Grundvokal mit zwei abgesetzten Punkten
+- **Korrigiert (Fassung 2):** Die Regel ändert **3 Zeilen** (S. 9, 10, 20) und dadurch 4 Abschnitte,
+  4 besser. S. 216 (`Beschworung . .`, Punkte am Wortende, ohne Vokal davor) erfasst sie nicht;
+  welcher Vokal gemeint ist, bleibt offen (`o` oder `u`). Das ist eine bekannte Grenze.
+- Fassung 1: Docling liefert auf 4 Zeilen einen Umlaut als Grundvokal mit zwei abgesetzten Punkten
   (`U . . ber`, `Fu . . r`, `…wu . . rfel`), dazu einmal mit den Punkten am Wortende (S. 216). Die
   Zeilen stehen auf S. 9, 10, 20 und 216.
 - Regel „Vokal + ` . .` → Umlaut": 4 Abschnitte ändern sich, **4 besser, 0 schlechter**.
@@ -198,7 +312,7 @@ S. 3/4 (Inhaltsverzeichnis), 108 auf S. 117 und 3 auf S. 14.
 | Docling-Tabellen | 79 auf 58 Seiten; 1.196 Rasterzeilen, 5.741 Zellen (455 leer) |
 | Lage (Kasten ganz links bzw. rechts von x = 298 pt) | 21 links, 35 rechts, 23 spaltenübergreifend |
 | Markdown-Text | 261.238 Zeichen = 17,0 % des Abschnittstexts (1.535.444); ohne Füll-Leerzeichen 95.127 (−63,6 %) |
-| Länge je Tabelle | typisch 1.361, Maximum 27.521 (Index S. 307–313 je Seite als eine Tabelle); 52 von 79 länger als `CHUNK_SIZE` 800 |
+| Länge je Tabelle | typisch 1.361, Maximum 27.521 (Beispielcharakter S. 49; korrigiert in Fassung 2, Fassung 1 nannte fälschlich den Index). Der Index S. 307–311 kommt als je eine Tabelle pro Seite; 52 von 79 länger als `CHUNK_SIZE` 800 |
 | Häppchen (800/150, nachgerechnet mit `rag.zerteile`) | 2.638 gesamt; **366 mit Tabellenteil, 316 davon ohne Tabellenkopf** |
 | dasselbe ohne Füll-Leerzeichen | 2.383 / 186 / 131 |
 | Spannzellen im Raster doppelt | 50 Tabellen, 271 Zellen |
@@ -207,6 +321,42 @@ S. 3/4 (Inhaltsverzeichnis), 108 auf S. 117 und 3 auf S. 14.
 | Tabelle in einem fremden Abschnitt | 1 (S. 22; Rasterregel behebt) |
 | Werteblock als Tabelle | 4 (S. 96, 117, 118 zweimal) |
 | Zeilen-Schablone `Kopf: Wert; …` (erste Rasterzeile als Kopf, Spannzellen einmal) | 1.117 Zeilen, Länge typisch 85, p95 177, Maximum 712; 938 Zeilen höchstens 150 Zeichen lang (`CHUNK_OVERLAP`) |
+
+## 7a. Tabellenkopf je Häppchen (Fassung 2, neu)
+
+- **Kopf** ist die erste Rasterzeile mit Text unter den Zeilen 0–2, die Docling als Spaltenkopf
+  (`column_header`) markiert oder die einen über alle Spalten gleichen Titel trägt. Der Vorsatz ist
+  diese Markdown-Zeile ohne Füll-Leerzeichen.
+- Er kommt vor jedes Häppchen (800/150, Fassung-2-Folge), das eine Tabelle anschneidet und ihre
+  Kopfzeile nicht ganz enthält.
+- Die Zerteilung bleibt zeichengenau: Der Vorsatz zählt **nicht** zu `CHUNK_SIZE`, wie der
+  Titelvorsatz.
+
+| Zahl | Wert |
+|---|---|
+| Tabellen / mit Vorsatz / ohne Docling-Kopf / Ausnahme Index S. 307–311 | 79 / 54 / 20 / 5 |
+| Häppchen gesamt / mit Tabellenteil | 2.639 / 368 |
+| Häppchen mit Vorsatz | **104** |
+| Häppchen mit Tabellenteil ohne Kopf, die ohne Kopf bleiben | 223 (Tabellen ohne Docling-Kopf: Beispielcharaktere S. 49, 300–306, Preislisten S. 263–266 u. a.; Index) |
+| Zuwachs je betroffenem Häppchen | typisch 106, Maximum 395 Zeichen; Summe 14.470 (+0,9 % Text) |
+| Häppchenlänge mit Vorsatz | typisch 902, Maximum 1.195 Zeichen |
+
+**Urteil je Tabelle (54):**
+- **53 besser**: Spaltenkopf bzw. Titel steht jetzt in jedem Teilhäppchen.
+- **1 gleichwertig**: S. 136, der Kopf ist schon in Docling verstümmelt.
+- **0 schlechter**.
+- **Ausnahme Index** (5 Tabellen): Docling markiert dort die erste Indexzeile als Kopf. Der Vorsatz
+  wäre eine Datenzeile, und das ist schlechter.
+
+**Gemessene Varianten:**
+- Alle Docling-Kopfzeilen als Vorsatz: 195 Häppchen, 63.389 Zeichen. In 25 Tabellen markiert Docling
+  aber die erste **Datenzeile** mit als Kopf (`[0, 1]`), sodass Daten im Vorsatz stünden und Zahlen
+  vervielfacht würden. Verworfen.
+- Rückfall „erste Zeile", wenn kein Docling-Kopf da ist: 331 Häppchen, 183.564 Zeichen, mit
+  Datenzeilen als Kopf bei Tabellen ohne Kopfzeile. Verworfen (O-11).
+- Zählte der Vorsatz zu `CHUNK_SIZE`, würden alle 58 Tabellenseiten neu zerteilt; die Grenzen hingen
+  dann vom Vorsatz ab, und ein Vorsatz von bis zu 395 Zeichen ließe für den Tabellentext nur 405 von
+  800 Zeichen (O-12).
 
 ## 8. Werteblöcke
 

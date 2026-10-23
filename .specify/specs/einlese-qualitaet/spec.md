@@ -1,10 +1,19 @@
 # Spec: Einlesequalität: Lesereihenfolge, Tabellen und Werteblöcke, Zahlentreue
 
-- **Spec-ID:** einlese-qualitaet (Spec 2; Schnitt-Vorschlag 2a/2b siehe O-1)
+- **Spec-ID:** einlese-qualitaet (Spec 2; Schnitt 2a/2b abgenommen, O-1)
 - **Kontext-Kürzel:** EQ
 - **Tier:** T3 (siehe Abschnitt „Tier")
-- **Status:** **Entwurf Fassung 1, nicht abgenommen.** Die Vorab-Messung liegt daneben
-  (`vorabmessung.md`, `vorabmessung.json`). Offene Entscheidungen O-1 bis O-9 stehen am Ende.
+- **Status:** **Entwurf Fassung 2, nicht abgenommen.** Fassung 2 arbeitet die blinde Gegenprüfung
+  vom 2026-10-23 und Tobias' Vorgaben vom selben Tag ein:
+  - Die Rasterregel ist neu gefasst (Bänder an Überschriften).
+  - Gemessen ist vollständig und einzeln.
+  - Strichrest nur mit pdfplumber-Nachweis.
+  - Der Umlaut-Zähler ist korrigiert.
+  - Neu ist der Tabellenkopf je Häppchen (REQ-EQ-21).
+  - O-1, O-4, O-6, O-7, O-8 und O-9 sind abgenommen.
+
+  Die Vorab-Messung liegt daneben (`vorabmessung.md`, Abschnitt 0 mit den Korrekturen, und
+  `vorabmessung.json`). Offene Entscheidungen: O-2, O-3, O-5 (neu gefasst), O-10 bis O-14.
 
 ## User Story
 
@@ -23,22 +32,38 @@ Docling-Kästen abgenommen. Am Buch hat die Regel genau 2 Abschnitte geändert, 
 Deshalb gilt hier für **jede** Regel ein Messtor (REQ-EQ-1): Vor der Abnahme wird am echten Buch
 gezählt, wie viele Abschnitte sich ändern und wie viele davon besser oder schlechter werden.
 
+**Lehre aus Fassung 1:** Die Bilanz der Rasterregel (10 besser, 1 strittig) hielt der blinden
+Gegenprüfung nicht stand. Richtig sind 1 schlechter auf den Abschnittswechseln und 5 schlechter, 1
+strittig auf den inneren Umstellungen. Die Ursachen:
+- Klassen-Urteile („Spaltenrücksprung") wurden aus einer Stichprobe von 3 hochgerechnet.
+- Geurteilt wurde mit 60 dpi.
+- Die Änderungsliste übersah gemischte Fälle.
+
+Deshalb verlangt das Messtor jetzt Einzelurteile, Bilder mit mindestens 100 dpi und eine
+Änderungsliste über (Pfad, Vorkommen).
+
 ## Begriffe
 
 | Begriff | Bedeutung |
 |---|---|
-| **Regel** | Eine Korrektur dieser Spec (EQ-3 bis EQ-14), je Buch einzeln eingeschaltet. |
-| **Spec-2-Deklaration** | Die neuen Schlüssel eines Buchs in `spiel.json` (Entwurf: `lesefolge`, `striche`, `zeichen`, `tabellen`, `werteblock`; Schema REQ-EQ-15). Fehlt ein Schlüssel, ist die zugehörige Regel aus. |
+| **Regel** | Eine Korrektur dieser Spec (EQ-3 bis EQ-14, EQ-21), je Buch einzeln eingeschaltet. |
+| **Spec-2-Deklaration** | Die neuen Schlüssel eines Buchs in `spiel.json` (Entwurf: `lesefolge`, `striche`, `zeichen`, `tabellenkopf`, `tabellen`, `werteblock`; Schema REQ-EQ-15). Fehlt ein Schlüssel, ist die zugehörige Regel aus. |
 | **Spaltenraster** | Je Buch deklarierte x-Bereiche der Satzspalten in PDF-Punkten, z. B. `[[35, 292], [304, 560]]`, dazu eine Toleranz. |
 | **Spalte eines Elements** | Spalte *i*, wenn der **erste** Kasten des Elements in `[a_i − tol, b_i + tol]` liegt; sonst ist das Element **spaltenübergreifend**. |
-| **Band** | Bereich einer Seite zwischen zwei spaltenübergreifenden Elementen (nach Oberkante). |
+| **Band** | Bereich einer Seite zwischen zwei Bandgrenzen (nach Oberkante). |
+| **Bandgrenze** | (1) jedes spaltenübergreifende Element; (2) eine **Überschrift in einer Spalte** (Listen- oder Layout-Kopf aus Spec 1 oder Docling-Klasse `section_header`), wenn die Nachbarspalte auf ihrer Höhe ±2 pt frei ist (keine Zeile, kein Bild) **und** sich darunter vor dem nächsten spaltenübergreifenden Element fortsetzt (REQ-EQ-3). |
+| **Mehrspaltiges Element** | Docling-Element mit Kästen (`prov`) in verschiedenen Spalten; Docling hat Text über den Spaltenwechsel zusammengelegt. |
+| **Seitenwächter** | Eine Seite mit einem spaltenübergreifenden Element, das keine Überschrift ist und schmaler als der deklarierte Anteil des Satzspiegels (Zielbuch 80 %), wird nicht umgeordnet. |
+| **Fall** | Eine Änderung der Regel, gezählt über (Abschnittspfad, Vorkommen): andere Elementmenge, andere Folge oder beides. |
+| **Fuge** | Übergang zwischen zwei Elementen in der neuen Folge (Ende des Vorgängers ‖ Anfang des Nachfolgers). Eine Fuge, die eine Silbentrennung über Spalten schließt (`gro- ‖ ßer`), belegt die Folge. |
 | **Abschnittsänderung** | Ein Abschnitt verliert oder gewinnt Elemente gegenüber dem Lauf ohne die Regel. Ein Abschnitt, dessen Elementmenge gleich bleibt, dessen Text sich aber ändert (Folge innen, Zeichen), heißt **Textänderung**. |
-| **Urteil** | Von Hand am Seitenbild: `besser`, `gleichwertig`, `schlechter`, `strittig`. „Strittig" zählt für das Messtor wie `schlechter`, bis Tobias anders entscheidet. |
+| **Urteil** | Von Hand, je Fall, an Elementliste, Fugen und Seitenbild bzw. Ausschnitt mit mindestens 100 dpi: `besser`, `gleichwertig`, `schlechter`, `strittig`. „Strittig" zählt für das Messtor wie `schlechter`, bis Tobias anders entscheidet. |
 | **Regel-Messung** | Der Abschnitt der Vorab-Messung für eine Regel: Prototyp am echten Buch, Zählung, Urteile (REQ-EQ-1). |
 | **Zeilenend-Strich** | In der Quelle (pdfplumber-Zeile) endet eine Zeile auf Buchstabe oder Ziffer + `-`, und die nächste Zeile derselben Spalte gehört zum selben Docling-Element. |
 | **Werteblock** | Folge kurzer `Schlüssel: Wert`-Zeilen unter einer Überschrift (Talent, Zauber, Fertigkeit). Die Schlüssel sind Daten des Buchs. |
 | **Werteblock-Paar** | Schlüssel + Wert einer Werteblock-Zeile der Quelle. Es ist **intakt**, wenn `Schlüssel Wert` (Leerraum normalisiert) im Text der Seite steht. |
-| **Tabellen-Schablone** | Textform einer Tabelle: je Rasterzeile eine Zeile mit `Spaltenkopf: Zellwert`-Paaren (REQ-EQ-10). |
+| **Tabellen-Schablone** | Textform einer Tabelle: je Rasterzeile eine Zeile mit `Spaltenkopf: Zellwert`-Paaren (REQ-EQ-11). |
+| **Tabellenkopf** | Die erste Rasterzeile mit Text unter den Zeilen 0–2 einer Docling-Tabelle, die Docling als Spaltenkopf (`column_header`) markiert oder die über alle Spalten denselben Titel trägt. |
 | **Zahlenprotokoll** | Vergleich der Ziffernfolgen (`\d+`) je Seite zwischen Quelle und Buchdatei (REQ-EQ-9). |
 
 ## Akzeptanzkriterien
@@ -46,26 +71,33 @@ gezählt, wie viele Abschnitte sich ändern und wie viele davon besser oder schl
 ### A. Messtor und Wirkungszähler (für alle Regeln)
 
 **REQ-EQ-1**: *Vorbedingung, Messtor je Regel*
-- Für jede Regel EQ-3 bis EQ-14 liegt **vor der Abnahme** des Commits, der sie umsetzt, eine
+- Für jede Regel EQ-3 bis EQ-14 und EQ-21 liegt **vor der Abnahme** des Commits, der sie umsetzt, eine
   Regel-Messung im Spec-Ordner (`vorabmessung.json`, Schlüssel `regeln.<REQ-ID>`).
 - Gemessen wird am echten Zielbuch, mit den Docling- und pdfplumber-Versionen von REQ-EQ-19.
 - Die Regel-Messung enthält:
-  - die Zahl der **Abschnittsänderungen** und der **Textänderungen**, mit Seiten;
-  - je Abschnittsänderung ein Urteil (alle beurteilt, keine Stichprobe);
-  - für Textänderungen ein Urteil je Fall oder je dokumentierter Fallklasse. Eine Fallklasse braucht
-    eine automatische Abgrenzung (z. B. „nur Werteblock-Zeilen umgestellt") und eine Stichprobe von
-    mindestens 10 Fällen bzw. allen, wenn es weniger sind. Fälle außerhalb jeder Klasse werden
-    einzeln beurteilt;
-  - die Bilanz `besser / gleichwertig / schlechter / strittig`.
-- **Ziel:** `schlechter + strittig = 0`. Sonst entscheidet Tobias **vor** dem Weiterbauen: Regel
-  ändern und neu messen, Ausnahme deklarieren (REQ-EQ-4) oder Regel streichen.
-- Die Zielzahlen der Kriterien unten stammen aus der Vorab-Messung Fassung 1. Sie gelten als
+  - die **Änderungsliste über (Abschnittspfad, Vorkommen)**, je Fall mit Art (andere Menge,
+    andere Folge, beides) und Seiten. Gemischte Fälle zählen mit; eine Liste nur nach Pfad genügt
+    nicht;
+  - je Fall ein **Einzelurteil**, auch für **innere Umstellungen** (gleiche Elementmenge, andere
+    Folge). Grundlage sind Elementliste, Fugen und Seitenbild bzw. Ausschnitt mit **mindestens
+    100 dpi**;
+  - **einzige zugelassene Klasse:** der Tausch zweier `Schlüssel: Wert`-Zeilen innerhalb eines
+    Werteblocks (2×2-Werteblock). Er gilt als gleichwertig, wenn mechanisch belegt ist: genau 2
+    Positionen weichen ab, beide liegen im selben zusammenhängenden Lauf von höchstens 8
+    `Schlüssel: Wert`-Zeilen, und die Menge des Laufs ist gleich. Jede andere Hochrechnung aus
+    Stichproben ist unzulässig;
+  - die Bilanz `besser / gleichwertig / schlechter / strittig`, dazu die **Zahl der Ausnahmen**
+    (Ausnahmeseiten nach REQ-EQ-4 und durch den Seitenwächter verhinderte Fälle), jeweils mit Seiten.
+- **Ziel:** `schlechter + strittig = 0`, **nach** Ausnahmen; die Ausnahmen stehen als Zahl in der
+  Messung. Sonst entscheidet Tobias **vor** dem Weiterbauen: Regel ändern und neu messen, Ausnahme
+  deklarieren (REQ-EQ-4) oder Regel streichen.
+- Die Zielzahlen der Kriterien unten stammen aus der Vorab-Messung Fassung 2. Sie gelten als
   **Erwartung**, nicht als Spielraum.
 
 *Detektor:*
 - `vorabmessung.json` enthält für jede umgesetzte Regel den Schlüssel mit den Feldern
-  `abschnittsaenderungen`, `textaenderungen`, `seiten`, `urteil{besser, gleichwertig, schlechter,
-  strittig}`, und zwar bevor ein Commit die Regel umsetzt (Prüfung im Review über die
+  `faelle`, `faelle_art{menge, folge, beides}`, `seiten`, `ausnahmen`, `urteil{besser, gleichwertig,
+  schlechter, strittig}`, und zwar bevor ein Commit die Regel umsetzt (Prüfung im Review über die
   Git-Historie).
 - Ein Test prüft das Format: Zahlen nichtnegativ, Summe der Urteile = Zahl der beurteilten Fälle,
   nur Zahlen und Versionen (REQ-EQ-18).
@@ -73,8 +105,9 @@ gezählt, wie viele Abschnitte sich ändern und wie viele davon besser oder schl
 **REQ-EQ-2**: *Contract, Wirkungszähler und Messgleichheit*
 - Das Einlese-Protokoll zählt je eingeschalteter Regel die Abschnittsänderungen und Textänderungen
   mit Seiten. Verglichen wird mit einem Lauf, in dem nur diese Regel aus ist.
-- Die Regeln wirken in fester Reihenfolge: EQ-8, EQ-10, EQ-13, EQ-14 (Elementtexte), EQ-3/-4
-  (Folge), EQ-7 (Zeilen vor dem Listenabgleich), EQ-11 (Tabellentext), EQ-5, EQ-6 (Striche).
+- Die Regeln wirken in fester Reihenfolge: EQ-8, EQ-10, EQ-13, EQ-14 (Elementtexte), EQ-7 (Zeilen),
+  Listenabgleich (REQ-MB-12, nur Zuordnung), EQ-3/-4 (Folge), EQ-11 (Tabellentext), EQ-5, EQ-6
+  (Striche), EQ-21 (Tabellenkopf beim Zerteilen).
   Gezählt wird jeweils gegen den Lauf mit allen vorangehenden Regeln.
 - Text und Abschnitte entstehen nur aus dem Lauf mit allen eingeschalteten Regeln. Die
   Vergleichsläufe sind reine Funktionsaufrufe auf denselben Zeilen.
@@ -91,52 +124,74 @@ gezählt, wie viele Abschnitte sich ändern und wie viele davon besser oder schl
 
 ### B. Lesereihenfolge (Teil 2a)
 
-**REQ-EQ-3**: *Where, Spaltenraster und Bandregel*
+**REQ-EQ-3**: *Where, Bänder an Überschriften (Fassung 2)*
 - Wo ein Buch `lesefolge.spalten` deklariert, ordnet das Einlesen die Elemente jeder Seite (ohne
   Randzeilen, REQ-MB-28) neu:
-  1. Die spaltenübergreifenden Elemente teilen die Seite nach der Oberkante ihres ersten Kastens in
-     Bänder.
-  2. In jedem Band kommen die Elemente der Spalten von links nach rechts. Innerhalb einer Spalte
-     zählt die Oberkante des ersten Kastens, bei Gleichstand die Docling-Folge.
-  3. Danach folgt das spaltenübergreifende Element, das das Band abschließt.
-  4. Ein Element ohne Lage behält seinen Platz hinter seinem Docling-Vorgänger.
-  5. Randzeilen bleiben unberührt (sie werden nach REQ-MB-28 verworfen).
-  6. Bild-Elemente sind keine Bandgrenze. Text aus Bild-Elementen (REQ-MB-27) wird wie jedes andere
-     Element einsortiert.
-- Erst danach laufen Listenabgleich, Layout-Überschriften und Zerschneiden (REQ-MB-12, -20, -14).
+  1. **Seitenwächter:** Trägt die Seite ein spaltenübergreifendes Element, das keine Überschrift ist
+     und schmaler als `lesefolge.waechter` × Satzspiegelbreite ist (Zielbuch: 0,8), bleibt die
+     Docling-Folge der Seite. Ebenso auf Ausnahmeseiten (REQ-EQ-4).
+  2. **Mehrspaltige Elemente** behalten ihre Stelle direkt hinter ihrem Docling-Vorgänger.
+  3. Die **Bandgrenzen** (Begriffe) teilen die Seite nach der Oberkante des ersten Kastens in Bänder.
+     Welche Zeilen Listen- oder Layout-Köpfe sind, bestimmt der Listenabgleich (REQ-MB-12) und
+     REQ-MB-20 vorab auf den Zeilen der Seite. Die Zuordnung hängt nur bei Gleichstand von der Folge
+     ab.
+  4. In jedem Band kommen die Elemente der Spalten von links nach rechts, innerhalb einer Spalte nach
+     Oberkante des ersten Kastens, bei Gleichstand in Docling-Folge. Danach folgt die Bandgrenze.
+  5. Ein Element ohne Lage behält seinen Platz hinter seinem Docling-Vorgänger. Bild-Elemente sind
+     keine Bandgrenze, belegen aber die Nachbarspalte für die Freiheitsprüfung. Text aus
+     Bild-Elementen (REQ-MB-27) wird wie jedes andere Element einsortiert.
+- Danach laufen Abschnittsbildung, Layout-Überschriften und Zerschneiden (REQ-MB-12, -20, -14).
 
-*Ziel (Vorab-Messung):*
-- Am Zielbuch ändern sich **25 Abschnitte auf 11 Seiten** (58 Elemente wechseln den Abschnitt):
-  23 besser, 2 strittig (S. 53, Kasten, siehe REQ-EQ-4), 0 schlechter.
-- Abschnittsköpfe nach ihrem Inhalt: 3 → 0 (S. 76, 114, 190).
-- Tabelle in einem fremden Abschnitt: 1 → 0 (S. 22).
-- Unter „Talentbeschreibungen" stehen 149 Talente (statt 148).
+*Ziel (Vorab-Messung Fassung 2, Ausnahmen S. 237 und 274):*
+- **206 Fälle**: 156 2×2-Werteblock-Tausche (gleichwertig, mechanisch belegt) und **50 einzeln
+  beurteilte** (25 nur Folge, 8 gemischt, 17 nur Menge).
+- Davon **49 besser** (2 davon nur teilweise: S. 28, S. 34, Restfehler durch ein mehrspaltiges
+  Element), **1 gleichwertig** (Index S. 308), **0 schlechter, 0 strittig**.
+- **Ausnahmen:** 2 Seiten deklariert (S. 237 zweispaltiger Kasten, S. 274 Tabellenkopf aus
+  Text-Elementen; ohne sie je 1 schlechter). Der Seitenwächter greift auf 27 Seiten und verhindert
+  dabei die beiden schlechten Fälle S. 58 und S. 299–306.
+- 55 Elemente wechseln den Abschnitt, 25 Abschnitte ändern ihre Elementmenge.
+- Abschnittsköpfe nach ihrem Inhalt: 3 → 0 (S. 76, 114, 190). Unter „Talentbeschreibungen" stehen
+  149 Talente.
+- Passionen S. 285–291: Jede Passionsüberschrift wird Bandgrenze. S. 53 ändert sich nicht mehr (der
+  Kasten bleibt unter „Disziplinbeschreibungen").
 - Gleich bleiben: Abschnittszahl 539, Lesezeichen gefunden 144, Layout-Stufen 386/5.
-- Textänderungen: 193. Davon sind 156 nur umgestellte Werteblock-Zeilen (gleichwertig) und 25
-  Spaltenrücksprünge der Docling-Folge (Stichprobe 3/3 besser). 12 sind noch nicht beurteilt und
-  müssen in der Regel-Messung beurteilt werden.
-- Zusatzzeit je Seite: typisch 0,02 ms, Maximum 0,2 ms.
+- Zusatzzeit je Seite: typisch 0,041 ms, Maximum 0,257 ms.
 
 *Detektor:* synthetische Seiten mit Kästen in absichtlich falscher Docling-Folge:
 - (a) Eine spaltenübergreifende Überschrift oben kommt nach dem ersten Element der linken Spalte →
   sie steht zuerst, das Element liegt in ihrem Abschnitt.
 - (b) Der Kopf der rechten Spalte kommt als Bild-Kind am Seitenende → er steht hinter der linken
-  Spalte und vor der nächsten spaltenübergreifenden Überschrift.
+  Spalte und vor der nächsten Bandgrenze.
 - (c) Eine Tabelle oben rechts kommt hinter allen Absätzen der Seite → sie liegt im Abschnitt der
   Überschrift über ihr.
 - (d) Ein Bild reicht über beide Spalten, rechts daneben steht ein schmales Element → dieses folgt
   dem Ende der linken Spalte.
-- (e) Ein 2×2-Werteblock mit gleichen Oberkanten → zeilenweise Folge.
-- (f) Ohne `lesefolge` → Folge und Buchdatei byte-gleich zum Lauf vor dieser Spec.
-- Mutationen „Bänder ignorieren", „rechte vor linke Spalte" und „Oberkante des letzten statt des
-  ersten Kastens" machen je einen Fall rot.
+- (e) **Schmale Überschrift mit freier, fortgesetzter Nachbarspalte** (Passionsfall): links
+  `Kopf A`, Text A1; rechts A2 darüber, B2 darunter; dann links `Kopf B` auf Höhe einer Lücke
+  rechts → Folge A1, A2, `Kopf B`, B…; A2 liegt in A.
+- (f) **Überschrift in der Spalte** (Talentfall): links `Talent X` auf Höhe eines rechten Absatzes →
+  keine Bandgrenze, rechte Spalte folgt nach der ganzen linken.
+- (g) **Kurze Nachbarspalte** (Fall S. 28): links eine Überschrift, rechts nur ein Element darüber,
+  darunter nichts → keine Bandgrenze.
+- (h) Mehrspaltiges Element bleibt hinter seinem Docling-Vorgänger.
+- (i) Teilbreites spaltenübergreifendes Element (z. B. 50 % Breite) → Docling-Folge der ganzen
+  Seite.
+- (j) Ein 2×2-Werteblock mit gleichen Oberkanten → zeilenweise Folge.
+- (k) Ohne `lesefolge` → Folge und Buchdatei byte-gleich zum Lauf vor dieser Spec.
+- Mutationen machen je einen Fall rot: „Bänder ignorieren", „Fortsetzungsbedingung weglassen" (g
+  rot), „alle Köpfe als Bandgrenze" (f rot), „Wächter aus" (i rot), „mehrspaltige Elemente
+  einsortieren" (h rot).
 
 **REQ-EQ-4**: *Where, Ausnahmeseiten*
 - Wo ein Buch `lesefolge.ausnahmen` deklariert (Liste physischer Seiten), gilt auf diesen Seiten
   die Docling-Folge. Das Protokoll nennt die Ausnahmeseiten.
 - Jede Ausnahme braucht in der Regel-Messung eine Begründung (Seite, Urteil ohne Ausnahme).
-- *Ziel:* Mit der Ausnahme S. 53 lautet die Bilanz von REQ-EQ-3 23 besser, 0 strittig, 0 schlechter
-  (Entscheidung O-2).
+- Ein Buch kann für REQ-EQ-21 eigene Ausnahmeseiten deklarieren (`tabellenkopf.ausnahmen`); sie
+  wirken nur dort.
+- *Ziel:* `lesefolge.ausnahmen = [237, 274]`. Ohne sie wären es je 1 schlechter (S. 237: der rechte
+  Kastenteil reißt einen Satz; S. 274: Tabellenkopf aus Text-Elementen zeilenweise zerlegt). Mit
+  ihnen gilt die Bilanz von REQ-EQ-3 (Entscheidung O-2).
 
 *Detektor:* synthetisches Buch mit zwei Seiten im Fall (a) von REQ-EQ-3, Seite 2 als Ausnahme →
 Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
@@ -162,9 +217,11 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
 - Die Verdachtszähler aus REQ-MB-32 laufen danach.
 
 *Ziel (Vorab-Messung):*
-- **59 Stellen in 49 Abschnitten:** 40 Striche wiederhergestellt, 19 Trennungen zusammengefügt;
-  59 besser, 0 schlechter.
-- Binnen-Großbuchstabe 63 → 28, Strichrest 50 → 39.
+- Auf der Fassung-2-Lesefolge: **60 Stellen in 50 Abschnitten**, 41 Striche wiederhergestellt, 19
+  Trennungen zusammengefügt; einzeln gelesen 60 besser, 0 schlechter. Die Gegenprüfung hat 59/59 der
+  Fassung 1 bestätigt.
+- Binnen-Großbuchstabe 63 → 27, Strichrest 47 → 36 (Konjunktionsliste um `als`,
+  `beziehungsweise` ergänzt).
 - 4.616 richtig zusammengefügte Trennungen bleiben unverändert.
 
 *Detektor:*
@@ -178,34 +235,58 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
 - Mutationen „Konjunktionsprüfung fehlt" und „Großbuchstabe → zusammenfügen" machen je einen Fall
   rot.
 
-**REQ-EQ-6**: *Where, Strichrest an Elementgrenzen und im Text*
+**REQ-EQ-6**: *Where, Strichrest mit Quellnachweis (Fassung 2)*
 - Wo ein Buch `striche.strichrest` einschaltet, wird im Abschnittstext nach REQ-EQ-5 jede Folge
-  „Buchstabe, `-`, ein oder mehrere Leerzeichen, Wort mit Kleinbuchstaben am Anfang, nicht in der
-  Konjunktionsliste" zu „Buchstabe + Wort" zusammengefügt.
-- Das betrifft vor allem Trennungen über Spalten- und Seitenwechsel: Dort endet ein Docling-Element
-  auf `X-`, und `_Verbinder` setzt ein Leerzeichen.
-- Die Konjunktionsliste ist die der Buchdeklaration (`reparatur.konjunktionen`, REQ-MB-11).
+  „Wortstück `X`, `-`, ein oder mehrere Leerzeichen, Wort `y` mit Kleinbuchstaben am Anfang, nicht in
+  der Konjunktionsliste" **nur dann** zu `Xy` zusammengefügt, wenn pdfplumber auf einer Seite des
+  Abschnitts eine Zeile zeigt, deren letztes Wort auf `X-` endet, und deren **Quell-Folgezeile** mit
+  `y` beginnt.
+  - Quell-Folgezeile ist die nächste Zeile derselben Spalte (höchstens 20 pt tiefer).
+  - Hat die Zeile keine solche (Spalten- oder Seitenende), ist es ein Blockanfang der anderen Spalte
+    derselben Seite, ein Blockanfang darunter in derselben Spalte oder (rechte Spalte) ein
+    Blockanfang der nächsten Seite. Blockanfang heißt: keine Zeile derselben Spalte höchstens 20 pt
+    darüber.
+- Ohne Nachweis bleibt der Text unverändert.
+- **`X- Großbuchstabe`** wird nie geändert. Das Protokoll zählt solche Stellen mit Seiten als
+  neuen Verdachtsfall `strich_vor_grossbuchstabe` (Komposita wie `Karma- Modifikator` und Flussbrüche
+  wie `beispiels- Die`; die Fuge entscheidet nicht zwischen beiden).
+- Die Konjunktionsliste ist die der Buchdeklaration (`reparatur.konjunktionen`, REQ-MB-11). Für das
+  Zielbuch ist sie um `als` und `beziehungsweise` ergänzt.
 
-*Ziel (Vorab-Messung):*
-- 39 Stellen in 32 Abschnitten. Mit der heutigen Liste wären 33 besser, **5 schlechter**
-  (Ergänzungsstrich vor `als` ×4, vor `beziehungsweise` ×1) und 1 ungeklärt.
-- Die Deklaration des Zielbuchs ergänzt deshalb `als` und `beziehungsweise` → 0 schlechter.
-- Strichrest danach 0. Der ungeklärte Fall (S. 284) wird in der Regel-Messung beurteilt.
+*Ziel (Vorab-Messung Fassung 2, nach REQ-EQ-3 und -5):*
+- **36 Stellen in 26 Abschnitten**, einzeln gelesen 36 besser, 0 schlechter.
+  - Darunter `gro- ßer` → `großer`: Die neue Folge liefert die richtige Fortsetzung. Unter
+    Docling-Folge (`gro- durch`) gäbe es keinen Nachweis.
+  - Die 5 Ergänzungsstriche vor `als`/`beziehungsweise` bleiben stehen.
+- Strichrest 36 → 0.
+- `strich_vor_grossbuchstabe`: 15 Stellen (9 Flussbrüche, 6 Komposita).
+- Gegenprobe ohne Nachweis (Fassung 1): 6 schlechter. Mit Liste bleibt 1 schlechter (S. 287).
+  Ein lockerer Nachweis auch für Großbuchstaben (Blockanfang) machte 4 Flussbrüche fälschlich zu
+  `beispiels-Die` u. a.
 
 *Detektor:*
-- Synthetische Docling-Struktur: Element 1 endet `Verteidi-`, Element 2 beginnt `gung`; dazu
-  `Fertigkeits- als auch` und `Nah- und`. Liste mit `als` → `Verteidigung`, `Fertigkeits- als auch`,
-  `Nah- und`.
-- Liste ohne `als` → `Fertigkeitsals auch`. Das ist der dokumentierte Schaden und belegt die Wirkung
-  der Liste.
+- Synthetisches PDF (`reportlab`): links unten endet eine Zeile auf `Verteidi-`, rechts oben beginnt
+  eine Zeile mit `gung`.
+- Docling-Struktur mit `Verteidi-` am Ende von Element 1 und `gung …` am Anfang von Element 2 →
+  `Verteidigung`.
+- Dieselbe Struktur, aber Element 2 beginnt mit `durch` (Fortsetzung steht anderswo) → unverändert,
+  kein Zähler.
+- `Fertigkeits- als auch`, Liste mit `als` → unverändert.
+- `Karma- Modifikator` mit Quellzeile `Karma-` / `Modifikator` → unverändert,
+  `strich_vor_grossbuchstabe = 1`.
+- Mutationen machen je einen Fall rot: „Nachweis aus" (`durch`-Fall rot) und „Großbuchstabe
+  zusammenfügen" (`Karma`-Fall rot).
 - Ohne `striche.strichrest` → byte-gleich.
 
 **REQ-EQ-7**: *Where, Zierschrift-Umlaut (G5)*
 - Wo ein Buch `zeichen.zierumlaut` einschaltet, wird in jeder Zeile **vor** dem Listenabgleich
   (REQ-MB-12) die Folge „Vokal `a o u A O U`, optional ein Leerzeichen, ` . .`" durch den Umlaut des
   Vokals ersetzt.
-- *Ziel:* 4 Zeilen (S. 9, 10, 20, 216). 4 Abschnitte ändern sich, 4 besser, 0 schlechter.
-  Lesezeichen gefunden 144 → 146. S. 1 und 216 bleiben nicht gefunden (Grenze).
+- *Ziel (korrigiert in Fassung 2):* **3 Zeilen** (S. 9, 10, 20) ändern sich, dadurch 4 Abschnitte,
+  4 besser, 0 schlechter. Lesezeichen gefunden 144 → 146.
+- S. 216 (`Beschworung . .`, Punkte am Wortende ohne Vokal davor) erfasst die Regel nicht. Welcher
+  Vokal gemeint ist, ist aus der Zeile nicht entscheidbar, und Lesezeichen (Mehrzahl) und Zeile
+  (Einzahl) unterscheiden sich zusätzlich. Bekannte Grenze, wie S. 1.
 
 *Detektor:*
 - Zeilen `U . . ber dies`, `Fu . . r den`, `Stufen/Aktionswu . . rfel` → `Über dies`, `Für den`,
@@ -222,6 +303,48 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
 
 *Detektor:* Element `Wirkung: \x07WIL + 5` → `Wirkung: WIL + 5`; `\n` bleibt; ohne Schalter →
 byte-gleich.
+
+### C2. Tabellenkopf je Häppchen (Teil 2a, neu in Fassung 2)
+
+**REQ-EQ-21**: *Where, Tabellenkopf-Vorsatz*
+- Wo ein Buch `tabellenkopf` einschaltet, schreibt das Einlesen für jede Docling-Tabelle mit
+  Tabellenkopf (Begriffe) dessen Lage im Abschnittstext (Zeichenbereich der Tabelle, Bereich der
+  Kopfzeile) und den Kopftext in die Buchdatei. Der Kopftext ist die Markdown-Zeile des Kopfs ohne
+  Füll-Leerzeichen.
+- `rag.py index` setzt beim Zerteilen (REQ-MB-14) jedem Häppchen, das den Zeichenbereich einer
+  Tabelle anschneidet, aber ihre Kopfzeile nicht ganz enthält, den Kopftext als **Tabellenkopf-
+  Vorsatz** voran: nach dem Titelvorsatz (REQ-MB-15) und vor dem Häppchentext, im eingebetteten wie im
+  Prompt-Text.
+- Der Vorsatz zählt **nicht** zu `CHUNK_SIZE`. Die Zerteilung bleibt zeichengenau wie heute, wie beim
+  Titelvorsatz (Entscheidung O-12).
+- Schneidet ein Häppchen mehrere Tabellen ohne ihren Kopf an, kommen die Vorsätze in
+  Tabellenreihenfolge.
+- Der Tabellentext selbst bleibt unverändert (Markdown roh; die Schablone ist REQ-EQ-11, Teil 2b).
+- Tabellen ohne Tabellenkopf bekommen keinen Vorsatz. Das Protokoll zählt sie mit Seite
+  (`tabellen_ohne_kopf`), dazu die Zahl der Häppchen mit Vorsatz je Buch.
+- Ausnahmeseiten `tabellenkopf.ausnahmen` (REQ-EQ-4): Dort entsteht kein Vorsatz.
+
+*Ziel (Vorab-Messung Fassung 2, 800/150, Ausnahme Index S. 307–311):*
+- 79 Tabellen: 54 mit Vorsatz, 20 ohne Docling-Kopf, 5 Ausnahme Index.
+- **104 Häppchen** bekommen einen Vorsatz. Zuwachs je Häppchen typisch 106, Maximum 395 Zeichen,
+  Summe 14.470 (+0,9 % Text); Häppchenlänge mit Vorsatz typisch 902, Maximum 1.195.
+- 223 Häppchen mit Tabellenteil bleiben ohne Kopf (Tabellen ohne Docling-Kopf: Beispielcharaktere,
+  Preislisten; Index).
+- Urteil je Tabelle: 53 besser, 1 gleichwertig (S. 136, Kopf schon in Docling verstümmelt),
+  0 schlechter. Die Ausnahme Index (5 Tabellen) ist nötig, weil Docling dort die erste Indexzeile als
+  Kopf markiert.
+- Häppchenzahl unverändert.
+
+*Detektor:*
+- Synthetische Tabelle mit Kopfzeile (`column_header`) und 30 Datenzeilen in einem Abschnitt,
+  `CHUNK_SIZE` so klein, dass sie über 3 Häppchen läuft. Häppchen 2 und 3 beginnen (nach dem
+  Titelvorsatz) mit dem Kopftext, Häppchen 1 nicht (es enthält den Kopf).
+- Die Häppchentexte ohne Vorsatz sind gleich `zerteile` auf dem Abschnittstext.
+- Tabelle ohne Kopfkennung → kein Vorsatz, `tabellen_ohne_kopf = 1`.
+- Ausnahmeseite → kein Vorsatz.
+- BM25-Suche nach einem Wort des Kopfs findet alle 3 Häppchen.
+- Mutation „Vorsatz zählt zu `CHUNK_SIZE`" → Textgleichheit mit `zerteile` rot.
+- Ohne `tabellenkopf` → Index-Inhalt byte-gleich.
 
 ### D. Zahlentreue-Protokoll (Teil 2a, Detektor für 2b)
 
@@ -348,12 +471,14 @@ nur das dritte Kind steht im Text, Protokoll = 2; Kind knapp außerhalb (1 pt) �
 ### F. Nicht-funktional
 
 **REQ-EQ-15**: *If/Then, Schema der Spec-2-Deklaration*
-- Wenn `lesefolge`, `striche`, `zeichen`, `tabellen` oder `werteblock` gegen ihr Schema verstoßen,
+- Wenn `lesefolge`, `striche`, `zeichen`, `tabellenkopf`, `tabellen` oder `werteblock` gegen ihr Schema verstoßen,
   bricht das Einlesen ab wie in REQ-MB-34: `KonfigFehler` vor dem Schreiben, die Meldung nennt den
   Schlüssel.
 - Schema:
   - `lesefolge`: `spalten` (Liste ≥ 1 von Bereichen `[a, b]`, `a < b`, aufsteigend, nicht
-    überlappend), `toleranz` (Zahl ≥ 0, Default 4), `ausnahmen` (Liste ganzer Zahlen ≥ 1);
+    überlappend), `toleranz` (Zahl ≥ 0, Default 4), `waechter` (Zahl in (0, 1], Default 0,8),
+    `ausnahmen` (Liste ganzer Zahlen ≥ 1);
+  - `tabellenkopf`: Objekt mit optional `ausnahmen` (Liste ganzer Zahlen ≥ 1);
   - `striche`: `zeilenenden`, `strichrest` (Wahrheitswerte);
   - `zeichen`: `zierumlaut`, `steuerzeichen`, `listennummern` (Wahrheitswerte);
   - `tabellen`: `form` ∈ {`markdown`, `schablone`};
@@ -384,7 +509,8 @@ nur das dritte Kind steht im Text, Protokoll = 2; Kind knapp außerhalb (1 pt) �
 
 **REQ-EQ-17**: *Architektur, generisch*
 - Jede Wirkung ist mit einem synthetischen Buch ohne Earthdawn-Bezug erreichbar.
-- Spaltenraster, Ausnahmeseiten, Konjunktionen, Werteblock-Schlüssel und Schalter sind Daten.
+- Spaltenraster, Wächteranteil, Ausnahmeseiten, Konjunktionen, Werteblock-Schlüssel und Schalter
+  sind Daten.
 - Es gibt keinen Code-Pfad, der nur bei bestimmten Buch- oder Bestandsnamen wirkt.
 
 *Detektor:* alle Tests dieser Spec mit Bestand `testwelt` und Fassungen `alpha`/`beta`; Umbenennen
@@ -429,8 +555,13 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
   **vor** dem Implementierungs-Commit der Regel liegt. Messtor und Messgleichheit (EQ-2) sind
   Review-Schritte, kein Code, der eine Messdatei liest. Ein Beobachtungspunkt, den dieselbe Änderung
   mitziehen kann, ist keiner.
-- **EQ-3** Die zeilenweise Folge im 2×2-Werteblock (156 Abschnitte) gilt als gleichwertig: Die Paare
-  bleiben ganz (REQ-EQ-14 zählt sie).
+- **EQ-3** Die zeilenweise Folge im 2×2-Werteblock (156 Fälle) gilt als gleichwertig: Die Paare
+  bleiben ganz (mechanisch belegt nach REQ-EQ-1).
+- **EQ-3** „Teilweise besser" zählt als besser, wenn das bewegte Stück im richtigen Unterabschnitt
+  näher an seiner Fortsetzung steht als in der Docling-Folge und keine andere Fuge schlechter wird.
+  Die Messung weist solche Fälle getrennt aus (2).
+- **EQ-21** „Anschneiden" heißt: Der Zeichenbereich des Häppchens überlappt den der Tabelle.
+  „Kopfzeile ganz enthalten" heißt: Der Bereich der Kopfzeile liegt ganz im Häppchen.
 - **EQ-5/-6** „Konjunktionsliste" ist die von REQ-MB-11 (`reparatur.konjunktionen` ersetzt den
   Sprach-Default). Die Ergänzung um `als`/`beziehungsweise` ist Teil der Buchdeklaration, nicht des
   Codes.
@@ -451,7 +582,7 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
   weg. Die Gliederung kommt aus den Lesezeichen (Entscheidung O-7).
 - **Docling-Zeichenersetzung** von Gedanken- und Anführungszeichen (691 Gedankenstriche → `-`;
   16 Werteblock-Paare betroffen): nicht rückgängig gemacht, nur als Grenze dokumentiert.
-- **Index S. 307–313 als Tabelle** (27.521 Zeichen je Seite in Markdown): Die Schablone behandelt
+- **Index S. 307–311 als Tabelle** (je Seite eine Docling-Tabelle; die längste Tabelle des Buchs, 27.521 Zeichen, ist dagegen der Beispielcharakter S. 49): Die Schablone behandelt
   ihn wie jede Tabelle. Ein Ausschluss über `inhaltsart` ist Datensache.
 - **Elementtext ganz aus pdfplumber:** Am Prototyp waren 218 von 6.037 Elementen anders (Stichprobe
   2/12 schlechter). Spec 2 verwendet pdfplumber nur gezielt (EQ-5, EQ-14).
@@ -461,90 +592,108 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
 
 ## Bekannte Grenzen (vorab)
 
-- **REQ-EQ-3** kennt keine Kästen. Ein Kasten, der eine Spalte füllt, steht nach Spaltenfolge
-  (S. 53). Die Variante „Kasten nach Einzug" hat am Buch neuen Schaden gemacht (S. 20) und ist
-  verworfen. Abhilfe nur über Ausnahmeseiten (REQ-EQ-4).
+- **REQ-EQ-3** kennt keine Kästen und keine Werte-Raster. Den zweispaltigen Kasten (S. 237) und den
+  Tabellenkopf aus Text-Elementen (S. 274) fangen Ausnahmeseiten, überbreite Blöcke und Werte-Raster
+  der Seitenwächter. „Kasten nach Einzug" ist gemessen gescheitert (S. 20).
+- **REQ-EQ-3** lässt mehrspaltige Elemente an ihrer Docling-Stelle. Sie halten Text beider Spalten.
+  Daher bleiben 9 Flussbrüche (`strich_vor_grossbuchstabe`), und 2 Fälle sind nur teilweise besser.
+  Abhilfe wäre die Teilung an `charspan` (O-10).
+- **REQ-EQ-6** fügt `X- Großbuchstabe` nie zusammen; 6 echte Komposita bleiben mit `- `.
+- **REQ-EQ-21** gibt 20 Tabellen ohne Docling-Kopf (223 Häppchen) keinen Vorsatz (O-11).
 - **REQ-EQ-5** findet Fälle nur, wenn Docling-Form und pdfplumber-Wörter übereinstimmen. 5
   echte Striche und 1 Trennung wurden nicht gefunden. Laufweiten-Artefakte von pdfplumber (gemessen
   5 Werteblock-Paare) können Fälle verdecken.
-- **REQ-EQ-7** löst S. 216 nicht (Punkte am Wortende, Ein-/Mehrzahl).
+- **REQ-EQ-7** löst S. 216 nicht (Punkte am Wortende ohne Vokal davor, Ein-/Mehrzahl).
 
-## Offene Entscheidungen
+## Entscheidungen (Tobias, 2026-10-23)
 
-**O-1: Schnitt der Spec.**
-- (a) Eine Spec 2 mit allen Teilen.
-- (b) **Schnitt:** Spec 2a „Lesereihenfolge und Zeichentreue" (EQ-1 bis EQ-10, EQ-15 bis EQ-20)
-  jetzt, Spec 2b „Tabellen und Werteblöcke" (EQ-11 bis EQ-14) danach. Die IDs bleiben stabil.
-- (c) Schnitt wie (b), aber 2b erst nach Spec 3 (Golden Set).
-- **Empfehlung (b)**, mit Tendenz zu (c) für EQ-11. Begründung aus den Zahlen:
-  - 2a ändert wenige, einzeln beurteilbare Stellen: 25 Abschnitte (Lesefolge), 59 + 39 Strichstellen,
-    4 Umlautzeilen, 24 Listennummern. Das Messtor ist dort voll durchführbar, und die Urteile liegen
-    schon zu über 95 % vor.
-  - 2b ändert die Form von 366 Häppchen (13,9 % von 2.638) auf allen 58 Tabellenseiten. Ein
-    Urteil „besser" ist dort ohne Retrieval-Messung nur Formprüfung.
-  - Die Werteblöcke sind auf dem Docling-Weg schon zu 98,8 % intakt (9 echte Brüche). Der größte
-    Hebel ist die Tabelle: 316 Häppchen ohne Kopf, 819 vervielfachte Zahlen.
-  - Das Zahlenprotokoll (EQ-9) gehört in 2a, damit 2b einen Detektor vorfindet.
+- **O-1 (b)** Schnitt: Spec 2a jetzt (EQ-1 bis EQ-10, EQ-15 bis EQ-21), Spec 2b danach (EQ-11 bis
+  EQ-14), IDs stabil. Das Zahlenprotokoll (EQ-9) liegt in 2a als Detektor für 2b.
+- **O-4 (a)+(b)** Tabellen-Schablone: Urteil je Tabelle von Hand jetzt; ein Retrieval-Vergleich mit
+  dem Golden Set aus Spec 3 ist Bedingung, bevor sie am Zielbuch eingeschaltet wird.
+- **O-6 (a)** Steuerzeichen und Listennummern in 2a.
+- **O-7 (a)** Inhaltsverzeichnis S. 3/4 bleibt weg.
+- **O-8 (a)** Textverlust S. 117 nur zählen.
+- **O-9 (b)** Werteblock-Regel (EQ-14) erst mit dem Kreaturenband.
+- **Vorgaben Fassung 2:**
+  - Bandgrenzen an erkannten Überschriften.
+  - Vollständige Einzelmessung.
+  - Strichrest nur mit pdfplumber-Nachweis, `als`/`beziehungsweise` in die Liste.
+  - Umlaut-Zahl korrigiert.
+  - Tabellenkopf je Häppchen in 2a (EQ-21).
 
-**O-2: Strittiger Kasten S. 53 (REQ-EQ-3).**
-- (a) Als gleichwertig werten (beide Abschnitte sind Geschwister unter „Disziplinen").
-- (b) Ausnahmeseiten je Buch (REQ-EQ-4), S. 53 deklariert.
-- (c) Kastenerkennung neu entwerfen und neu messen.
-- **Empfehlung (b):** Das hält „0 strittig" ohne Sonderlogik ein. (c) ist gemessen gescheitert
-  (S. 20, zentrierte Überschrift als Kasten, wie bei MB-31). (a) weicht die Schwelle auf, die
-  gerade die Lehre aus MB-31 ist.
+## Offene Entscheidungen (Fassung 2)
 
-**O-3: Innere Umstellungen beurteilen (REQ-EQ-1).**
-- (a) Jede Textänderung einzeln.
-- (b) Klassen mit automatischer Abgrenzung und Stichprobe ≥ 10, Rest einzeln.
-- (c) Nur Abschnittsänderungen beurteilen.
-- **Empfehlung (b):** 193 Textänderungen allein bei EQ-3, 156 davon in einer klaren Klasse
-  (Werteblock-Zeilen), 25 in einer zweiten (Spaltenrücksprung). Bei (a) prüft man 156-mal dasselbe,
-  bei (c) blieben die 25 Absatzrisse unbewertet, obwohl sie die häufigste echte Verbesserung sind.
+**O-2 (neu gefasst): Ausnahmen der Lesefolge, Ausnahmeseiten oder Erkennung?**
+- (a) Seitenwächter (generisch) + 2 deklarierte Ausnahmeseiten (S. 237, 274), wie gemessen.
+- (b) Alle 11 Problemseiten deklarieren (S. 58, 237, 274, 299–306), kein Wächter.
+- (c) Zusätzliche Erkennung für zweispaltige Kästen (zwei Bildkästen gleicher Höhe nebeneinander als
+  Band) und Tabellenköpfe aus Text-Elementen, neu messen.
+- **Empfehlung (a):** Der Wächter ist generisch und gemessen ohne Preis. Er greift auf 27 Seiten,
+  verhindert genau die 2 schlechten Fälle (S. 58, S. 299–306) und nimmt keinen guten weg; neue Bücher
+  bekommen ihn mit. Für die 2 Einzelseiten ist eine Erkennung teurer als die Deklaration, und jede neue
+  Erkennung braucht ein eigenes Messtor (Lehre MB-31, Kasten-Einzug S. 20).
 
-**O-4: Messtor für die Tabellen-Schablone (REQ-EQ-11).**
-- (a) Urteil je Tabelle von Hand (79), Kriterium „Spaltenkopf zum Wert lesbar, keine Zahl
-  verloren".
-- (b) Zusätzlich ein Retrieval-Vergleich mit dem Golden Set aus Spec 3.
-- (c) Nur der automatische Zahlentreue-Detektor (EQ-12).
-- **Empfehlung (a) jetzt, (b) als Abnahmebedingung für das Einschalten am Zielbuch:** Formfehler
-  fängt (a), den Nutzen nur (b). (c) prüft die Form, nicht die Wirkung.
+**O-3 (neu gefasst): Klassen im Messtor.**
+- (a) Nur die 2×2-Werteblock-Klasse mit mechanischem Beleg (wie jetzt in REQ-EQ-1).
+- (b) Keine Klasse, auch die 156 Werteblock-Tausche einzeln.
+- **Empfehlung (a):** Der Beleg ist kein Stichprobenschluss. Er prüft für jeden der 156 Fälle, dass
+  genau zwei `Schlüssel: Wert`-Zeilen im selben Lauf getauscht sind. Die Gegenprüfung fand in ihrer
+  Stichprobe 20/20 gleichwertig.
 
-**O-5: Strichrest im Text (REQ-EQ-6).**
-- (a) Mit ergänzter Konjunktionsliste (`als`, `beziehungsweise`) einschalten.
-- (b) Nur an Elementgrenzen (Docling-Element endet auf `-`), nicht im Elementinneren.
-- (c) Weglassen, nur der Verdachtszähler bleibt.
-- **Empfehlung (a):** 33 besser, 0 schlechter mit der Liste. Ohne Liste wären es 5 schlechter. Die
-  Liste ist Sprachdatum, kein Earthdawn-Wissen. (b) ließe die 11 Fälle im Elementinneren liegen, die
-  EQ-5 nur auflöst, wenn sie eindeutig sind.
+**O-5 (neu gefasst): Strichrest (REQ-EQ-6).**
+- (a) Mit pdfplumber-Nachweis und ergänzter Liste, Großbuchstaben nur zählen (wie jetzt).
+- (b) Nachweis auch für Großbuchstaben, nur über die Folgezeile derselben Spalte.
+- (c) Weglassen, nur Verdachtszähler.
+- **Empfehlung (a):** 36/36 besser, 0 schlechter. (b) brächte am Zielbuch 0 zusätzliche Treffer
+  (alle 15 Großbuchstaben-Stellen haben keine Folgezeile in derselben Spalte) bei mehr Regelfläche.
 
-**O-6: Steuerzeichen und Listennummern (REQ-EQ-8, -10) in 2a?**
-- (a) Beide aufnehmen.
-- (b) Nur Steuerzeichen.
-- (c) Keins.
-- **Empfehlung (a):** Beide sind klein, gemessen und haben einen Zahlendetektor: 739 → 0 bzw.
-  24 → 0. Die Listennummern sind Regelinhalt („Schritt 3"), Docling liefert sie schon (`marker`,
-  S. 139 5/5).
+**O-10: Teilung mehrspaltiger Elemente an `charspan`.**
+- (a) Nicht in Fassung 2; die mehrspaltigen Elemente bleiben an ihrer Docling-Stelle (wie gemessen).
+- (b) Als eigene Regel EQ-22 in 2a mit eigenem Messtor.
+- **Empfehlung (a) jetzt, (b) als Nachtrag:**
+  - Die Teilung schließt die 9 Flussbrüche und die 2 Teilfälle, die Fugen zeigen es (`einset- ‖ zen`).
+  - Sie ändert aber 238 Fälle, davon 91 einzeln zu beurteilen.
+  - An Kastengrenzen mitten im Wort zerreißt sie Wörter (`verbleib ‖ nden`). Das braucht eine
+    eigene Regel: dort nicht teilen oder ohne Leerzeichen fügen.
+  - 104 Elemente auf 94 Seiten sind betroffen.
 
-**O-7: Inhaltsverzeichnis S. 3/4.**
-- (a) Weglassen wie heute.
-- (b) Als eigenen Abschnitt aus `document_index` übernehmen.
-- **Empfehlung (a):** Die Gliederung kommt aus den Lesezeichen. Ein TOC-Häppchen voller Seitenzahlen
-  stört das Retrieval eher. Das Zahlenprotokoll zeigt die 150 Zahlen weiter als `gar_nicht`; das ist
-  die bekannte Grenze.
+**O-11: Tabellen ohne Docling-Kopf (REQ-EQ-21).**
+- (a) Kein Vorsatz, nur gezählt (wie gemessen).
+- (b) Rückfall „erste Rasterzeile" als Kopf.
+- **Empfehlung (a):** Der Rückfall erfasst 331 statt 104 Häppchen mit 183.564 statt 14.470 Zeichen.
+  Bei Tabellen ohne Kopfzeile wiederholt er eine **Datenzeile** in jedem Häppchen und vervielfacht
+  deren Zahlen. Die betroffenen Tabellen (Beispielcharaktere, Preislisten) sind Fälle für die
+  Schablone in 2b.
 
-**O-8: Textverlust S. 117 (2 Zeilen).**
-- (a) Nur zählen (EQ-9).
-- (b) Zeilen ohne Docling-Kasten aus pdfplumber als eigenes Element an der Lageposition einfügen.
-- **Empfehlung (a):** 1 Fall mit 108 Zeichen im ganzen Buch. Eine Einfügeregel bräuchte ein eigenes
-  Messtor für einen Einzelfall. Dokumentieren reicht.
+**O-12: Zählt der Tabellenkopf-Vorsatz zu `CHUNK_SIZE`?**
+- (a) Nein, wie der Titelvorsatz (REQ-MB-14): Die Zerteilung bleibt zeichengenau, nur der Text
+  wächst.
+- (b) Ja: Die Zerteilung richtet sich nach Text + Vorsatz.
+- **Empfehlung (a):**
+  - Mit (b) würden alle Tabellenabschnitte neu zerteilt, und die Grenzen hingen vom Vorsatz ab, eine
+    zweite Größe neben MB-14.
+  - Ein Vorsatz bis 395 Zeichen ließe für den Tabellentext nur 405 von 800 Zeichen.
+  - Bei (a) wächst das größte Häppchen auf 1.195 Zeichen; das trägt jedes Embedding-Modell des
+    Repos.
 
-**O-9: Werteblock-Regel (REQ-EQ-14) jetzt oder mit dem Kreaturenband?**
-- (a) In 2b mit dem Zielbuch (9 Paare).
-- (b) Erst, wenn der Kreaturenband (Werteblöcke in Fülle) eingelesen wird.
-- **Empfehlung (b):** Im Zielbuch ist der Nutzen 9 von 2.652 Paaren (0,3 %). Der Kreaturenband ist
-  OCR (Fehlerklasse 3) und braucht ohnehin eine eigene Messung. Die 9 Paare bleiben bis dahin
-  dokumentiert.
+**O-13: Index-Ausnahme für den Tabellenkopf.**
+- (a) `tabellenkopf.ausnahmen = [307 … 311]` deklarieren (wie gemessen).
+- (b) Regel: kein Vorsatz, wenn die Kopfzeile Ziffern-Spalten wie die Datenzeilen hat.
+- **Empfehlung (a):** Eine Regel nur für den Index wäre neue Regelfläche mit eigenem Messtor; der
+  Index ist ein Seitenbereich, und die Deklaration ist Daten.
+
+**O-14: Bekannte Grenze S. 216 (Zierschrift-Umlaut).**
+- (a) Als Grenze führen.
+- (b) Regel „Punkte am Wortende → Umlaut auf dem einzigen Kandidaten-Vokal", neu messen.
+- **Empfehlung (a):** `Beschworung` hat zwei Kandidaten (`o`, `u`), die Regel kann nicht entscheiden.
+  Selbst richtig umgesetzt fände der Listenabgleich das Lesezeichen nicht (Ein- und Mehrzahl,
+  2 Auslassungen > k = 1).
+
+## Erledigte Entscheidungen Fassung 1 (Verlauf)
+
+Die Fassung-1-Optionen zu O-2 (Ausnahme S. 53), O-3 (Klasse „Spaltenrücksprung") und O-5 (Strichrest
+ohne Nachweis) sind durch die Gegenprüfung überholt. S. 53 ändert sich mit Fassung 2 nicht mehr.
 
 ## Tier
 
