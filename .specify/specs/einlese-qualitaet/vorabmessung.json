@@ -1,0 +1,660 @@
+{
+ "docling_version": "2.131.0",
+ "pdfplumber_version": "0.11.10",
+ "gemessen_am": "2026-10-23",
+ "zielbuch": {
+  "seiten": 314,
+  "format_pt": [
+   595.28,
+   841.89
+  ],
+  "versatz": 1,
+  "rand_pt": {
+   "kopf": 36,
+   "fuss": 25
+  }
+ },
+ "basis": {
+  "elemente": 8174,
+  "randzeilen": 718,
+  "abschnitte": 539,
+  "haeppchen_800_150": 2638,
+  "abschnittstext_zeichen": 1535444,
+  "liste_gefunden": 144,
+  "liste_nicht_gefunden": 4,
+  "layout_stufe_1": 386,
+  "layout_stufe_2": 5,
+  "verdacht_binnen_grossbuchstabe": 63,
+  "verdacht_strichrest": 50
+ },
+ "spaltenraster": {
+  "spalten_pt": [
+   [
+    35,
+    292
+   ],
+   [
+    304,
+    560
+   ]
+  ],
+  "toleranz_pt": 4,
+  "zeilen_x0_spitzen": {
+   "35": 9292,
+   "304": 6873,
+   "44": 1978,
+   "312": 1922
+  },
+  "zeilen_x1_spitzen": {
+   "292": 6422,
+   "560": 6873
+  },
+  "seiten_zweispaltig": 294,
+  "seiten_ohne_fliesstext": 10,
+  "seiten_gemischt": 10,
+  "seiten_gemischt_liste": [
+   10,
+   58,
+   72,
+   268,
+   307,
+   308,
+   309,
+   310,
+   311,
+   313
+  ],
+  "gerade_und_ungerade_seiten_gleich": true
+ },
+ "lesefolge": {
+  "regel": "raster (Fassung 1, ueberholt)",
+  "seiten_andere_folge": 100,
+  "seiten_andere_folge_ohne_werteblockzeilen": 55,
+  "elemente_in_anderen_abschnitt": 58,
+  "abschnitte_andere_elementmenge_alt": 21,
+  "abschnitte_andere_elementmenge_neu": 20,
+  "abschnitte_beteiligt": 25,
+  "seiten_mit_abschnittswechsel": [
+   22,
+   37,
+   53,
+   76,
+   94,
+   100,
+   114,
+   172,
+   177,
+   190,
+   191
+  ],
+  "urteil_seiten": {
+   "besser": 10,
+   "strittig": 1,
+   "schlechter": 0,
+   "strittig_seiten": [
+    53
+   ]
+  },
+  "urteil_abschnitte": {
+   "besser": 23,
+   "strittig": 2,
+   "schlechter": 0
+  },
+  "innere_umstellung": {
+   "abschnitte": 193,
+   "nur_werteblockzeilen": 156,
+   "spaltenruecksprung_docling": 25,
+   "nicht_beurteilt": 12,
+   "stichprobe_besser": [
+    27,
+    121,
+    293
+   ]
+  },
+  "ueberschrift_nach_inhalt": {
+   "docling": 3,
+   "raster": 0,
+   "seiten": [
+    76,
+    114,
+    190
+   ],
+   "abschnittskoepfe": 538
+  },
+  "tabelle_falscher_abschnitt": {
+   "docling": 1,
+   "raster": 0,
+   "seiten": [
+    22
+   ]
+  },
+  "seiten_mit_inhaltsbild": 154,
+  "andere_folge_mit_bild": 35,
+  "andere_folge_ohne_bild": 20,
+  "variante_kasten_einzug_12pt": {
+   "elemente_verschoben": 55,
+   "neu_falsch": [
+    20
+   ],
+   "grund": "zentrierte Ueberschrift = Kasten"
+  },
+  "zeit_ms_je_seite": {
+   "typisch": 0.018,
+   "maximum": 0.171
+  },
+  "urteil_fassung1_korrigiert": {
+   "seiten_schlechter": [
+    53
+   ],
+   "innere_schlechter": 5,
+   "innere_strittig": 1,
+   "quelle": "blinde Gegenpruefung 2026-10-23",
+   "spaltenruecksprung_kein_guetesignal": true
+  }
+ },
+ "striche": {
+  "zeilenende_quelle": {
+   "grossbuchstabe_folgt": {
+    "strich_behalten": 38,
+    "zusammengezogen": 20,
+    "nicht_gefunden": 5
+   },
+   "ziffer_davor": {
+    "zusammengezogen": 2
+   },
+   "konjunktion_folgt": {
+    "strich_leerzeichen": 5,
+    "zusammengezogen": 4
+   },
+   "kleinbuchstabe_folgt": {
+    "zusammengezogen": 4616,
+    "strich_leerzeichen": 28,
+    "leerzeichen_ohne_strich": 9,
+    "nicht_gefunden": 1
+   },
+   "spalten_oder_seitenende": 67,
+   "echte_striche": 69,
+   "echte_zusammengezogen": 26
+  },
+  "regel_zeilenende": {
+   "stellen": 59,
+   "strich_wiederhergestellt": 40,
+   "zusammengefuegt_strich_leerzeichen": 11,
+   "zusammengefuegt_leerzeichen": 8,
+   "abschnitte": 49,
+   "besser": 59,
+   "schlechter": 0,
+   "verdacht_nachher": {
+    "binnen_grossbuchstabe": 28,
+    "strichrest": 39
+   }
+  },
+  "elementgrenze": {
+   "elemente_mit_strich_am_ende": 36,
+   "folge_klein": 30,
+   "folge_gross": 5,
+   "folge_konjunktion": 1
+  },
+  "regel_strichrest": {
+   "stellen": 39,
+   "abschnitte": 32,
+   "besser": 33,
+   "schlechter_ohne_konjunktionsergaenzung": 5,
+   "ungeklaert": 1,
+   "fehlende_konjunktionen": [
+    "als",
+    "beziehungsweise"
+   ],
+   "verdacht_strichrest_nachher": 0
+  }
+ },
+ "zierschrift_umlaut": {
+  "elemente": 3,
+  "seiten": [
+   9,
+   10,
+   20
+  ],
+  "abschnitte_geaendert": 4,
+  "besser": 4,
+  "schlechter": 0,
+  "liste_gefunden_vorher": 144,
+  "liste_gefunden_nachher": 146,
+  "nicht_loesbar": [
+   1,
+   216
+  ],
+  "zeilen_geaendert": 3,
+  "grenze_seite": 216
+ },
+ "steuerzeichen": {
+  "u0007": 739,
+  "abschnitte": 241,
+  "seiten": 78
+ },
+ "zeichenersetzung_docling": {
+  "gedankenstrich_quelle": 691,
+  "gedankenstrich_haeppchen": 0,
+  "aufzaehlungspunkt_quelle": 115
+ },
+ "zahlen": {
+  "quelle": 8490,
+  "fehlend": 199,
+  "fehlend_gar_nicht": 178,
+  "fehlend_seltener": 21,
+  "fehlend_gar_nicht_seiten": {
+   "3": 85,
+   "4": 65,
+   "37": 9,
+   "117": 4,
+   "130": 3,
+   "139": 5,
+   "221": 3,
+   "225": 4
+  },
+  "zusaetzlich": 820,
+  "zusaetzlich_erfunden": 1,
+  "zusaetzlich_vervielfacht": 819,
+  "zusaetzlich_seiten": {
+   "49": 162,
+   "301": 162,
+   "20": 154,
+   "300": 116,
+   "303": 108,
+   "306": 108
+  },
+  "listennummern_fehlend": 24,
+  "listennummern_seiten": [
+   37,
+   130,
+   139,
+   221,
+   225
+  ],
+  "listenmarker_docling_geprueft": {
+   "seite": 139,
+   "vorhanden": 5,
+   "von": 5
+  }
+ },
+ "textverlust": {
+  "zeichen_quelle": 1153626,
+  "ohne_docling_kasten": 7255,
+  "seiten": {
+   "3": 4062,
+   "4": 3082,
+   "117": 108,
+   "14": 3
+  }
+ },
+ "tabellen": {
+  "anzahl": 79,
+  "seiten": 58,
+  "rasterzeilen": 1196,
+  "zellen": 5741,
+  "leere_zellen": 455,
+  "markdown_zeichen": 261238,
+  "markdown_zeichen_ohne_fuellung": 95127,
+  "anteil_am_buchtext": 0.17,
+  "laenge_median": 1361,
+  "laenge_max": 27521,
+  "ueber_chunk_size": 52,
+  "haeppchen_mit_tabelle": 366,
+  "haeppchen_ohne_tabellenkopf": 316,
+  "ohne_fuellung": {
+   "haeppchen": 2383,
+   "mit_tabelle": 186,
+   "ohne_tabellenkopf": 131
+  },
+  "spannzellen_doppelung": {
+   "tabellen": 50,
+   "zellen": 271
+  },
+  "zahlen_im_kasten": {
+   "quelle": 3498,
+   "markdown": 4156,
+   "fehlend": 7,
+   "zusaetzlich": 665,
+   "fehlend_seiten": {
+    "40": 6,
+    "308": 1
+   }
+  },
+  "doppelt_mit_bildkindern": {
+   "tabellen": 1,
+   "seite": 20,
+   "elemente": 41
+  },
+  "werteblock_als_tabelle": [
+   96,
+   117,
+   118,
+   118
+  ],
+  "index_als_tabelle_seiten": [
+   307,
+   308,
+   309,
+   310,
+   311
+  ],
+  "schablone_zeilenlaenge": {
+   "zeilen": 1117,
+   "typisch": 85,
+   "p95": 177,
+   "maximum": 712,
+   "hoechstens_150": 938
+  },
+  "laengste_tabelle_seite": 49
+ },
+ "werteblock": {
+  "talente": 149,
+  "zauber": 216,
+  "paare": 2652,
+  "intakt": 2620,
+  "getrennt": 9,
+  "getrennt_seiten": [
+   114,
+   117,
+   118,
+   119
+  ],
+  "zeichenersetzung": 16,
+  "messartefakt_laufweite": 5,
+  "wert_nicht_in_zeile": 2,
+  "kreaturenwerte": "nicht im Zielbuch"
+ },
+ "pdfplumber_volltext_prototyp": {
+  "elemente": 6037,
+  "wortfolge_gleich": 5819,
+  "anders": 218
+ },
+ "laufzeit_s_je_seite": {
+  "docling_typisch": 0.315,
+  "docling_maximum": 3.978,
+  "docling_zweithoechste": 2.984,
+  "docling_summe": 152,
+  "schriftzuordnung_buch": 25.1
+ },
+ "fassung": "3a",
+ "lesefolge_f2": {
+  "regel": "baender_an_ueberschriften",
+  "bandgrenze": "kopf_nachbarspalte_frei_und_fortgesetzt",
+  "waechter_teilbreit_anteil": 0.8,
+  "waechter_seiten": 27,
+  "waechter_verhindert_seiten": [
+   58,
+   299,
+   300,
+   302,
+   303,
+   304,
+   305,
+   312
+  ],
+  "mehrspaltige_elemente_fest": 104,
+  "ausnahmen": [
+   237,
+   274
+  ],
+  "ausnahmen_anzahl": 2,
+  "faelle": 206,
+  "faelle_2x2": 156,
+  "faelle_einzeln": 50,
+  "faelle_einzeln_art": {
+   "folge": 25,
+   "beides": 8,
+   "menge": 17
+  },
+  "elemente_anderer_abschnitt": 55,
+  "abschnitte_andere_menge": 25,
+  "urteil_einzeln": {
+   "besser": 49,
+   "davon_teilweise": 5,
+   "gleichwertig": 1,
+   "schlechter": 0,
+   "strittig": 0
+  },
+  "urteil_2x2": {
+   "gleichwertig": 156,
+   "mechanisch_belegt": 156
+  },
+  "ohne_ausnahmen": {
+   "schlechter_seiten": [
+    237,
+    274
+   ]
+  },
+  "ueberschrift_nach_inhalt": {
+   "docling": 3,
+   "regel": 0
+  },
+  "abschnitte": 539,
+  "liste_gefunden": 144,
+  "stufe_1": 386,
+  "stufe_2": 5,
+  "varianten": {
+   "alle_koepfe_als_grenze": {
+    "faelle": 444,
+    "einzeln": 432
+   },
+   "freie_nachbarspalte": {
+    "faelle": 224
+   },
+   "teilung_charspan": {
+    "faelle": 238,
+    "einzeln": 91,
+    "beurteilt": false
+   }
+  },
+  "zeit_ms_je_seite": {
+   "typisch": 0.041,
+   "maximum": 0.257
+  },
+  "teilweise_seiten": [
+   25,
+   28,
+   32,
+   34,
+   34
+  ],
+  "waechter_ohne_wirkung": 19,
+  "waechter_alter_wortlaut_zusaetzlich": [
+   20,
+   59,
+   68
+  ]
+ },
+ "striche_f2": {
+  "eq5": {
+   "stellen": 60,
+   "abschnitte": 50,
+   "strich": 41,
+   "zusammen": 19,
+   "besser": 60,
+   "schlechter": 0
+  },
+  "eq6": {
+   "stellen": 36,
+   "abschnitte": 26,
+   "besser": 36,
+   "schlechter": 0,
+   "pruefung": "pdfplumber_folgezeile",
+   "konjunktionen_ergaenzt": [
+    "als",
+    "beziehungsweise"
+   ]
+  },
+  "eq6_ohne_pruefung_fassung1": {
+   "schlechter": 6,
+   "schlechter_mit_liste": 1,
+   "fall": "S. 287"
+  },
+  "strich_vor_grossbuchstabe": {
+   "anzahl": 15,
+   "flussbruch": 9,
+   "kompositum": 6,
+   "regel": "nur_zaehlen"
+  },
+  "verdacht": {
+   "binnen_grossbuchstabe": [
+    63,
+    27,
+    27
+   ],
+   "strichrest": [
+    47,
+    36,
+    0
+   ],
+   "stufen": [
+    "roh",
+    "nach_eq5",
+    "nach_eq6"
+   ]
+  }
+ },
+ "tabellenkopf": {
+  "tabellen": 79,
+  "mit_vorsatz": 54,
+  "ohne_kopfkennung": 20,
+  "ausnahmen_index": [
+   307,
+   308,
+   309,
+   310,
+   311
+  ],
+  "haeppchen": 2639,
+  "haeppchen_mit_tabelle": 368,
+  "haeppchen_mit_vorsatz": 104,
+  "haeppchen_ohne_kopf_bleibt": 223,
+  "zuwachs_zeichen": {
+   "typisch": 106,
+   "maximum": 395,
+   "summe": 14470
+  },
+  "haeppchenlaenge_mit_vorsatz": {
+   "typisch": 902,
+   "maximum": 1195
+  },
+  "urteil_tabellen": {
+   "besser": 53,
+   "gleichwertig": 1,
+   "schlechter": 0
+  },
+  "varianten": {
+   "docling_kopf_alle_zeilen": {
+    "haeppchen": 195,
+    "summe": 63389,
+    "datenzeile_im_kopf": 25
+   },
+   "rueckfall_erste_zeile": {
+    "haeppchen": 331,
+    "summe": 183564
+   }
+  },
+  "hinweis": "ueberholt, siehe tabellenkopf_f3"
+ },
+ "kopfmenge_f3": {
+  "liste": 146,
+  "layout": 391
+ },
+ "eq5_f3": {
+  "zeilenend_striche": 4726,
+  "unveraendert": 4609,
+  "geaendert": 94,
+  "strich": 52,
+  "trennung": 36,
+  "konj": 6,
+  "gesichert": 1,
+  "mehrdeutig": 16,
+  "nicht_gefunden": 6,
+  "elemente": 83,
+  "urteil": {
+   "besser": 94,
+   "gleichwertig": 0,
+   "schlechter": 0
+  },
+  "ohne_sicherung": {
+   "geaendert": 95,
+   "schlechter": 1,
+   "seite": 296
+  },
+  "prototyp_f2": 60,
+  "grundlinie": "kette",
+  "anker_lesart": {
+   "zeilenend_striche": 4725,
+   "nicht_gefunden": 5
+  }
+ },
+ "eq6_f3": {
+  "stellen": 32,
+  "abschnitte": 27,
+  "besser": 32,
+  "schlechter": 0,
+  "strich_vor_grossbuchstabe": 15
+ },
+ "tabellenkopf_f3": {
+  "tabellen": 79,
+  "gefunden": 79,
+  "mit_kopf": 59,
+  "ohne_kopf": 20,
+  "ausnahmen_index": [
+   307,
+   308,
+   309,
+   310,
+   311
+  ],
+  "mit_vorsatz": 52,
+  "haeppchen_mit_vorsatz": 168,
+  "zuwachs": {
+   "typisch": 82,
+   "maximum": 260,
+   "summe": 15139
+  },
+  "laenge_mit_vorsatz": {
+   "typisch": 880,
+   "maximum": 1060
+  },
+  "haeppchen_ohne_kopf": 172,
+  "urteil": {
+   "besser": 51,
+   "davon_nur_titel": 10,
+   "gleichwertig": 1,
+   "schlechter": 0
+  },
+  "varianten": {
+   "nur_column_header": {
+    "haeppchen": 150,
+    "tabellen": 40
+   },
+   "erste_zeile": {
+    "haeppchen": 173,
+    "nur_erste_von_mehreren": 28
+   }
+  },
+  "fassung2_ueberholt": {
+   "haeppchen": 104
+  },
+  "vorsaetze_mit_steuerzeichen": 0,
+  "zuordnung": "lage",
+  "fuellzeichen_bedingung": {
+   "entfernt": 5,
+   "schlechter_entfernt": [
+    113,
+    141,
+    260
+   ],
+   "gleichwertig_entfernt": [
+    96,
+    231
+   ]
+  },
+  "fassung3": {
+   "haeppchen": 173,
+   "summe": 15568
+  }
+ }
+}
