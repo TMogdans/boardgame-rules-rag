@@ -376,7 +376,7 @@
   "docling_summe": 152,
   "schriftzuordnung_buch": 25.1
  },
- "fassung": 2,
+ "fassung": 3,
  "lesefolge_f2": {
   "regel": "baender_an_ueberschriften",
   "bandgrenze": "kopf_nachbarspalte_frei_und_fortgesetzt",
@@ -386,12 +386,11 @@
    58,
    299,
    300,
-   301,
    302,
    303,
    304,
    305,
-   306
+   312
   ],
   "mehrspaltige_elemente_fest": 104,
   "ausnahmen": [
@@ -411,7 +410,7 @@
   "abschnitte_andere_menge": 25,
   "urteil_einzeln": {
    "besser": 49,
-   "davon_teilweise": 2,
+   "davon_teilweise": 5,
    "gleichwertig": 1,
    "schlechter": 0,
    "strittig": 0
@@ -451,7 +450,20 @@
   "zeit_ms_je_seite": {
    "typisch": 0.041,
    "maximum": 0.257
-  }
+  },
+  "teilweise_seiten": [
+   25,
+   28,
+   32,
+   34,
+   34
+  ],
+  "waechter_ohne_wirkung": 19,
+  "waechter_alter_wortlaut_zusaetzlich": [
+   20,
+   59,
+   68
+  ]
  },
  "striche_f2": {
   "eq5": {
@@ -541,6 +553,85 @@
     "haeppchen": 331,
     "summe": 183564
    }
+  },
+  "hinweis": "ueberholt, siehe tabellenkopf_f3"
+ },
+ "kopfmenge_f3": {
+  "liste": 146,
+  "layout": 391
+ },
+ "eq5_f3": {
+  "zeilenend_striche": 4725,
+  "unveraendert": 4610,
+  "geaendert": 94,
+  "strich": 52,
+  "trennung": 36,
+  "konj": 6,
+  "gesichert": 1,
+  "mehrdeutig": 16,
+  "nicht_gefunden": 5,
+  "elemente": 83,
+  "urteil": {
+   "besser": 94,
+   "gleichwertig": 0,
+   "schlechter": 0
+  },
+  "ohne_sicherung": {
+   "geaendert": 95,
+   "schlechter": 1,
+   "seite": 296
+  },
+  "prototyp_f2": 60
+ },
+ "eq6_f3": {
+  "stellen": 32,
+  "abschnitte": 27,
+  "besser": 32,
+  "schlechter": 0,
+  "strich_vor_grossbuchstabe": 15
+ },
+ "tabellenkopf_f3": {
+  "tabellen": 79,
+  "gefunden": 79,
+  "mit_kopf": 59,
+  "ohne_kopf": 20,
+  "ausnahmen_index": [
+   307,
+   308,
+   309,
+   310,
+   311
+  ],
+  "mit_vorsatz": 52,
+  "haeppchen_mit_vorsatz": 173,
+  "zuwachs": {
+   "typisch": 82,
+   "maximum": 260,
+   "summe": 15568
+  },
+  "laenge_mit_vorsatz": {
+   "typisch": 882,
+   "maximum": 1060
+  },
+  "haeppchen_ohne_kopf": 178,
+  "urteil": {
+   "besser": 51,
+   "davon_nur_titel": 10,
+   "gleichwertig": 1,
+   "schlechter": 0
+  },
+  "varianten": {
+   "nur_column_header": {
+    "haeppchen": 150,
+    "tabellen": 40
+   },
+   "erste_zeile": {
+    "haeppchen": 173,
+    "nur_erste_von_mehreren": 28
+   }
+  },
+  "fassung2_ueberholt": {
+   "haeppchen": 104
   }
  }
 }

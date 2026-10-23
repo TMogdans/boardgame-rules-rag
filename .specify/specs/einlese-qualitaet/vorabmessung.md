@@ -1,4 +1,4 @@
-# Vorab-Messung Spec 2 (Einlesequalität), Fassung 2
+# Vorab-Messung Spec 2 (Einlesequalität), Fassung 3
 
 Fassung 1 gemessen am 2026-10-22, Fassung 2 am 2026-10-23 (gleiche Daten neu erzeugt, gleiche Versionen) am Zielbuch (Spielerhandbuch ED4, 3. Aufl., 314 S., physische Seite =
 gedruckte + 1). Zahlen in `vorabmessung.json`. In diesem Ordner steht kein Buchtext; Abschnittsnamen
@@ -46,6 +46,28 @@ Messung gelesen hat. Ihre Befunde gelten; die Fassung-1-Aussagen unten sind dami
 | — | 16 Formen `X- Großbuchstabe` und Flussbrüche (`beispiels- Die`) erfasste weder Regel noch Zähler |
 | 2×2-Werteblöcke 156 gleichwertig | bestätigt (Stichprobe 20/20) |
 | Zeilenend-Striche 59/59 besser | bestätigt |
+
+## 0b. Korrekturen aus Gegenprüfung 2 (2026-10-23), eingearbeitet in Fassung 3
+
+Ab Fassung 3 misst jede Zahl den Spec-Wortlaut. Die Prototypen sind daran angeglichen, nicht
+umgekehrt. Alle Fassung-3-Läufe nutzen eine gemeinsame Kette (Kopfmenge aus Listenabgleich in
+Docling-Folge + Layout-Köpfe; U+00AD, EQ-8, EQ-10, EQ-5, EQ-7, EQ-3/-4, Abschnitte, EQ-6, EQ-21).
+
+| Fassung 2 | korrigiert |
+|---|---|
+| EQ-5: 60 Änderungen, 0 schlechter | Gemessen war ein Prototyp (Abschnittstext je Seite). Der damalige Wortlaut (Elementtext) ergibt 95, davon 1 schlechter (S. 296 `Throals` → `Thro- als`). Fassung 3: Elementtext-Wortlaut mit Sicherung → **94 geändert, 94 besser, 0 schlechter**, 1 gesichert (Abschnitt 3) |
+| EQ-21: 104 Häppchen mit Vorsatz | Skriptfehler: Zerteilung ohne Kopfzeile (Grenzen verschoben); 11 Tabellen wegen U+00AD nicht gefunden; je Häppchen nur die erste Tabelle; Markdown-Zeile r+1 als Rasterzeile r. Fassung 3 mit genau gefasstem Kopf: **173 Häppchen**, 52 Tabellen (Abschnitt 7a) |
+| EQ-21: „alle Kopfzeilen" verworfen, weil in 25 Tabellen eine Datenzeile Kopf würde | Artefakt der Markdown-Zeilenverschiebung. Am Raster enthält kein Kopf eine Datenzeile |
+| EQ-21: S. 45 | Nach dem Fassung-2-Wortlaut würde die verbundene Datenzeile (Zeile 2) Kopf. Fassung 3: Kopf nur ab Zeile 0 zusammenhängend → kein Kopf |
+| EQ-21: Spaltenköpfe S. 39, 96, 153, 231, 260 übergangen | Fassung 3: Titel + markierter Spaltenkopf |
+| EQ-3: „Wächter verhindert S. 58 und S. 299–306", „25 Seiten ohne Wirkung" | 27 Wächterseiten. Ohne Wächter umsortiert wären **8** (S. 58, 299, 300, 302–305, 312), 19 ohne Änderung (nachgerechnet) |
+| EQ-3: 2 teilweise besser | **5** (S. 25, 28, 32, 34 Windlinge, 34 Zwerge) |
+| EQ-3: Spaltendefinition „Kasten in [a−tol, b+tol]" | Der Prototyp prüft nur die Spaltenlücke. Nach dem alten Wortlaut griffe der Wächter zusätzlich auf S. 20, 59, 68 (auf S. 20 ginge eine richtige Korrektur verloren, nachgerechnet). Wortlaut angeglichen |
+| EQ-3: Freiheitsprüfung | Der Prototyp nimmt mehrspaltige Elemente und Eckbilder aus; Wortlaut angeglichen |
+| Kopfmengen der Skripte | `strich2.py` und `tabkopf.py` bestimmten Listenköpfe anders als `vergleich3.py`. Fassung 3 nutzt eine Menge (146 Listen-, 391 Layout-Köpfe) |
+| `wb_beweis.py` | Eine Bedingung war immer falsch. Korrigiert: genau 2 abweichende Positionen im selben Schlüssel:Wert-Lauf (≤ 8), Menge gleich → **156/156 belegt** (Laufgrößen 4, 6, 7) |
+| EQ-6: „Großbuchstabe nie geändert" | Präzisiert: auch belegte Fälle nie (der Prototyp-Zweig `X-Y` ist verboten, Mutation im Messtor) |
+| Bestätigt | EQ-3/-4 50/50 Urteile, keine verpasste Grenze; EQ-6 36/36; EQ-7 3/3 |
 
 ## 1. Spaltenraster
 
@@ -172,7 +194,8 @@ Falle wie bei REQ-MB-31. Die Variante ist verworfen.
   (Passionen: jede Passionsüberschrift wird Bandgrenze, die Fortsetzungen stehen unter der richtigen
   Passion), 297. Belegt ist das an Fugen, die eine Trennung über den Spaltenwechsel schließen (z. B.
   `gro- ‖ ßer`, `Grup- ‖ pentagebuch`, `ein- ‖ ladend`, `erzählst du ‖ dem`), sonst am Ausschnitt.
-- Davon **2 nur teilweise besser** (S. 28 Elfen, S. 34 Windlinge): Ein mehrspaltiges Element hält
+- Davon **5 nur teilweise besser** (korrigiert in Fassung 3: S. 25, S. 28 Elfen, S. 32, S. 34
+  Windlinge, S. 34 Zwerge): Ein mehrspaltiges Element hält
   Text beider Spalten. Das bewegte Stück steht jetzt im richtigen Unterabschnitt neben seinem Absatz,
   aber nicht direkt an der Trennstelle. Abhilfe wäre die Teilung (O-10).
 - **1 gleichwertig:** Index S. 308 (Indexzeile nach statt vor der Seitentabelle).
@@ -266,6 +289,29 @@ Leerzeichen bei einer Lücke über 0,25 × Schriftgröße, Zeilen mit der MB-11-
   Buchstaben, S. 20), 3 nur andere Wortfolge (Initialen).
 - Nicht als Regel geeignet: Der Prototyp bringt eigene Fehler mit.
 
+**Fassung 3, EQ-5 genau nach Spec-Wortlaut (Elementtext):**
+- Arbeitsbasis ist der Elementtext nach U+00AD, EQ-8 und EQ-10. Zeichen werden den Elementkästen
+  zugeordnet (kleinster Kasten, alle Elemente als Kandidaten), Quellzeilen je Kasten gebildet,
+  Folgezeile nur im selben Kasten.
+- 4.725 Zeilenend-Striche:
+
+| Ergebnis | Anzahl |
+|---|---|
+| unverändert (Sollform steht schon da) | 4.610 |
+| **geändert** | **94** (52 Strich wiederhergestellt, 36 Trennung zusammengefügt, 6 Ergänzungsstrich vor Konjunktion) |
+| gesichert (Konjunktion, aber `LR` im Buch sonst als Wort) | 1 (S. 296 `Throals`) |
+| mehrdeutig (Form mehrfach im Element) | 16 |
+| nicht gefunden | 5 |
+
+- Alle 94 einzeln gelesen: **94 besser, 0 schlechter**. Darunter alle 60 Stellen des Fassung-2-
+  Prototyps, dazu 34 weitere (z. B. `HalbmagieProbe`, `gleich zeitig`, `Blut amulette`,
+  `Drachenund`).
+- Ohne Sicherung: 95 geändert, darunter 1 schlechter (S. 296).
+- 83 Elemente ändern sich.
+- **EQ-6 danach (Fassung 3):** 32 Stellen in 27 Abschnitten, alle aus den von Gegenprüfung 2
+  bestätigten 36 (4 erledigt jetzt EQ-5 im Element); 32 besser, 0 schlechter. `X- Großbuchstabe`:
+  15, unverändert.
+
 ## 4. Zierschrift-Umlaut (G5)
 
 - **Korrigiert (Fassung 2):** Die Regel ändert **3 Zeilen** (S. 9, 10, 20) und dadurch 4 Abschnitte,
@@ -322,41 +368,38 @@ S. 3/4 (Inhaltsverzeichnis), 108 auf S. 117 und 3 auf S. 14.
 | Werteblock als Tabelle | 4 (S. 96, 117, 118 zweimal) |
 | Zeilen-Schablone `Kopf: Wert; …` (erste Rasterzeile als Kopf, Spannzellen einmal) | 1.117 Zeilen, Länge typisch 85, p95 177, Maximum 712; 938 Zeilen höchstens 150 Zeichen lang (`CHUNK_OVERLAP`) |
 
-## 7a. Tabellenkopf je Häppchen (Fassung 2, neu)
+## 7a. Tabellenkopf je Häppchen (Fassung 3, neu gemessen)
 
-- **Kopf** ist die erste Rasterzeile mit Text unter den Zeilen 0–2, die Docling als Spaltenkopf
-  (`column_header`) markiert oder die einen über alle Spalten gleichen Titel trägt. Der Vorsatz ist
-  diese Markdown-Zeile ohne Füll-Leerzeichen.
-- Er kommt vor jedes Häppchen (800/150, Fassung-2-Folge), das eine Tabelle anschneidet und ihre
-  Kopfzeile nicht ganz enthält.
-- Die Zerteilung bleibt zeichengenau: Der Vorsatz zählt **nicht** zu `CHUNK_SIZE`, wie der
-  Titelvorsatz.
+**Wortlaut (REQ-EQ-21):**
+- Kopf = zusammenhängende markierte Rasterzeilen ab Zeile 0 (`column_header` oder Titelzeile).
+- Kopfbereich = erste zwei Markdown-Zeilen.
+- Vorsatz an jedes Häppchen, das die Tabelle überlappt, ohne den Kopfbereich ganz zu enthalten. Alle
+  Tabellen eines Häppchens zählen.
+- Die Zerteilung läuft auf dem vollen Abschnittstext (800/150).
+- Die Tabelle wird ohne U+00AD gesucht; alle 79 werden gefunden.
+- Ausnahme Index S. 307–311.
 
 | Zahl | Wert |
 |---|---|
-| Tabellen / mit Vorsatz / ohne Docling-Kopf / Ausnahme Index S. 307–311 | 79 / 54 / 20 / 5 |
-| Häppchen gesamt / mit Tabellenteil | 2.639 / 368 |
-| Häppchen mit Vorsatz | **104** |
-| Häppchen mit Tabellenteil ohne Kopf, die ohne Kopf bleiben | 223 (Tabellen ohne Docling-Kopf: Beispielcharaktere S. 49, 300–306, Preislisten S. 263–266 u. a.; Index) |
-| Zuwachs je betroffenem Häppchen | typisch 106, Maximum 395 Zeichen; Summe 14.470 (+0,9 % Text) |
-| Häppchenlänge mit Vorsatz | typisch 902, Maximum 1.195 Zeichen |
+| Tabellen / mit Kopf / ohne Kopf / Ausnahme Index | 79 / 59 / 20 / 5 (unter den 59) |
+| Tabellen mit Vorsatz | 52 (2 mit Kopf schneidet kein Häppchen ohne Kopfbereich an) |
+| Häppchen mit Vorsatz | **173** |
+| Zuwachs je Häppchen | typisch 82, Maximum 260 Zeichen; Summe 15.568 (+1,0 %) |
+| Häppchenlänge mit Vorsatz | typisch 882, Maximum 1.060 |
+| Häppchen, die eine Tabelle ohne Kopf anschneiden | 178 (kein Vorsatz) |
 
-**Urteil je Tabelle (54):**
-- **53 besser**: Spaltenkopf bzw. Titel steht jetzt in jedem Teilhäppchen.
-- **1 gleichwertig**: S. 136, der Kopf ist schon in Docling verstümmelt.
-- **0 schlechter**.
-- **Ausnahme Index** (5 Tabellen): Docling markiert dort die erste Indexzeile als Kopf. Der Vorsatz
-  wäre eine Datenzeile, und das ist schlechter.
+**Urteil je Tabelle (52, alle einzeln, am Kopftext gegen das Raster):**
+- **51 besser.** 41 davon mit Titel und/oder Spaltenkopf, 10 nur mit dem Titel (Spaltenkopf in
+  Docling nicht markiert: S. 106, 110, 112, 118, 119, 124, 156, 219, 267, 270).
+- **1 gleichwertig** (S. 136, Kopf in Docling verstümmelt).
+- **0 schlechter.**
+- Keine Datenzeile in einem Kopf.
 
-**Gemessene Varianten:**
-- Alle Docling-Kopfzeilen als Vorsatz: 195 Häppchen, 63.389 Zeichen. In 25 Tabellen markiert Docling
-  aber die erste **Datenzeile** mit als Kopf (`[0, 1]`), sodass Daten im Vorsatz stünden und Zahlen
-  vervielfacht würden. Verworfen.
-- Rückfall „erste Zeile", wenn kein Docling-Kopf da ist: 331 Häppchen, 183.564 Zeichen, mit
-  Datenzeilen als Kopf bei Tabellen ohne Kopfzeile. Verworfen (O-11).
-- Zählte der Vorsatz zu `CHUNK_SIZE`, würden alle 58 Tabellenseiten neu zerteilt; die Grenzen hingen
-  dann vom Vorsatz ab, und ein Vorsatz von bis zu 395 Zeichen ließe für den Tabellentext nur 405 von
-  800 Zeichen (O-12).
+**Varianten:**
+- nur `column_header`-Zeilen: 150 Häppchen, 40 Tabellen; die Titel fehlen.
+- nur erste markierte Zeile (Prototyp Fassung 2): 173 Häppchen, aber bei 28 Tabellen nur die erste
+  von mehreren Kopfzeilen.
+- **Fassung 2 (überholt):** 104 Häppchen, Skriptfehler siehe Abschnitt 0b.
 
 ## 8. Werteblöcke
 
