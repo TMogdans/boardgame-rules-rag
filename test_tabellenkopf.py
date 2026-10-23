@@ -179,13 +179,24 @@ class TestTabellenkopf(KopfTest):
 
     @unittest.skip("devloop: REQ-EQ-21 noch nicht implementiert")
     def test_req_eq_21_steuerzeichen_im_kopf_wird_leerzeichen(self):
-        """[REQ-EQ-21] Kopfzelle "Wurf·Stufe" mit U+0007 (Buch mit zeichen.steuerzeichen) -> Vorsatz "Wurf Stufe | Würfel⏎", kein Steuerzeichen. Mutation "EQ-8 im Kopftext aus" -> rot."""
+        """[REQ-EQ-21] Kopfzelle "Wurf·Stufe" mit U+0007, Buch mit zeichen.steuerzeichen -> Vorsatz "Wurf Stufe | Würfel⏎", kein Steuerzeichen. Mutation "EQ-8 im Kopftext aus" -> rot."""
         zeilen = [["Wurf\x07Stufe", "Würfel"]] + [[str(i), "W6"] for i in range(1, 30)]
         tab = eqa.tabelle(zeilen, kopf=[0], lage=(40, 100, 290, 400))
         vorsatz, _, _ = self.vorsatz_im_rumpf(tab, md_im_text=tab._markdown.replace("\x07", " "),
                                               zeichen={"steuerzeichen": True})
         self.assertEqual(vorsatz, "Wurf Stufe | Würfel\n")
         self.assertFalse(any(ord(ch) < 32 and ch != "\n" for ch in vorsatz))
+
+    @unittest.skip("devloop: REQ-EQ-21 noch nicht implementiert")
+    def test_req_eq_21_steuerzeichen_im_kopf_folgt_dem_schalter(self):
+        """[REQ-EQ-21] K5: ohne zeichen.steuerzeichen (fehlend und false) wird auch im Kopftext nichts ersetzt -> Vorsatz "Wurf·Stufe | Würfel⏎" mit U+0007, wie im Tabellentext. Faengt: EQ-8 im Kopftext unabhaengig vom Schalter."""
+        zeilen = [["Wurf\x07Stufe", "Würfel"]] + [[str(i), "W6"] for i in range(1, 30)]
+        for zeichen in ({}, {"zeichen": {"steuerzeichen": False}}):
+            with self.subTest(zeichen=zeichen):
+                tab = eqa.tabelle(zeilen, kopf=[0], lage=(40, 100, 290, 400))
+                vorsatz, _, a = self.vorsatz_im_rumpf(tab, **zeichen)
+                self.assertEqual(vorsatz, "Wurf\x07Stufe | Würfel\n")
+                self.assertIn("Wurf\x07Stufe", a["text"])
 
     @unittest.skip("devloop: REQ-EQ-21 noch nicht implementiert")
     def test_req_eq_21_ausnahmeseite_kein_vorsatz(self):

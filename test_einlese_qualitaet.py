@@ -18,11 +18,14 @@ test_lesefolge.py, test_striche_zeichen.py, test_tabellenkopf.py):
       "faelle_art": {"menge", "folge", "beides"}, "seiten": [...], "ausnahmen": {"anzahl": n,
       "seiten": [...]}, "urteil": {"besser", "gleichwertig", "schlechter", "strittig"}}}     (REQ-EQ-1)
   Protokoll.wirkung = {"REQ-EQ-<n>": {"abschnittsaenderungen": n, "textaenderungen": n,
-      "seiten": [...]}} je eingeschalteter Text-Regel (EQ-3, -5, -6, -7, -8, -10)             (REQ-EQ-2)
+      "seiten": [...]}} je eingeschalteter Text-Regel (EQ-3, -5, -6, -7, -8, -10), inkrementell gegen
+      den Lauf mit allen vorangehenden Regeln (K1); "REQ-EQ-21": {"haeppchen_mit_vorsatz": n},
+      zerteilt mit rag.CHUNK_SIZE/CHUNK_OVERLAP wie rag.py index                              (REQ-EQ-2)
   Protokoll.zahlenprotokoll = {"quelle": n, "fehlend": {"gar_nicht", "seltener"},
       "zusaetzlich": {"erfunden", "vervielfacht"}, "textverlust": n,
       "seiten": {physische Seite: {"gar_nicht", "seltener", "erfunden", "vervielfacht", "textverlust"}}}
-      oder "nicht_gemessen" (ohne PDF bzw. ohne Textebene); gezaehlt je Seite und Wert (\\d+):
+      oder "nicht_gemessen" (ohne PDF bzw. ohne Textebene); nur mit Spec-2-Deklaration (K4), sonst
+      fehlt es (oder Leerwert) und pdfplumber wird dafuer nicht geoeffnet; gezaehlt je Seite und Wert (\\d+):
       gar_nicht/seltener/erfunden/vervielfacht = Anzahl verschiedener Werte              (REQ-EQ-9)
   einlesen.lies_buch_ein(..., vorabmessung_eq=None)  Pfad der Spec-2-Vorab-Messung (Default
       .specify/specs/einlese-qualitaet/vorabmessung.json), Versionen injiziert wie REQ-MB-23  (REQ-EQ-19)
@@ -49,6 +52,7 @@ import test_mehrbuch as mb  # noqa: E402
 
 E = eqa.Element
 TEXTREGELN = ("REQ-EQ-3", "REQ-EQ-5", "REQ-EQ-6", "REQ-EQ-7", "REQ-EQ-8", "REQ-EQ-10")
+MIT_AUS = {"REQ-EQ-3": {"REQ-EQ-6"}}           # EQ-3 aus erzwingt EQ-6 aus (K2)
 SEITE_DER_REGEL = {"REQ-EQ-3": 1, "REQ-EQ-5": 2, "REQ-EQ-6": 3, "REQ-EQ-7": 4, "REQ-EQ-8": 5, "REQ-EQ-10": 6,
                    "REQ-EQ-21": 7}
 KAPITEL = ("Lesefolge", "Striche", "Rest", "Umlaut", "Steuer", "Liste", "Tabelle")
@@ -56,10 +60,12 @@ LISTE = tuple((t, s, 1) for s, t in enumerate(KAPITEL, 1))
 
 
 def ohne(regel):
-    """ALLE_REGELN mit genau dieser Regel aus (fehlender Schluessel = aus, Begriffe)."""
+    """ALLE_REGELN mit dieser Regel aus (fehlender Schluessel = aus, Begriffe). EQ-3 aus heisst ohne
+    "lesefolge"; damit muss EQ-6 mit aus, denn strichrest ohne lesefolge ist ein Schemafehler (K2)."""
     d = json.loads(json.dumps(eqa.ALLE_REGELN))
     if regel == "REQ-EQ-3":
         del d["lesefolge"]
+        del d["striche"]["strichrest"]
     elif regel == "REQ-EQ-5":
         del d["striche"]["zeilenenden"]
     elif regel == "REQ-EQ-6":
@@ -221,21 +227,50 @@ class TestWirkungszaehler(BuchTest):
         text = self.gesamttext()
         for r, soll in ERWARTET_TEXT.items():
             self.assertIn(soll, text, r)
+        mit = self.texte()                                   # inkrementell: die Zaehler addieren sich (K1)
+        self.deklariere(eqa.buchdekl(liste=LISTE))
+        self.lies_alle()
+        ohne_alle = self.texte()
+        geaendert = sum(mit[k] != ohne_alle[k] for k in mit)
+        self.assertEqual(geaendert, sum(p.wirkung[r]["textaenderungen"] + p.wirkung[r]["abschnittsaenderungen"]
+                                        for r in TEXTREGELN))
 
     @unittest.skip("devloop: REQ-EQ-2 noch nicht implementiert")
     def test_req_eq_2_eine_regel_aus_ihr_zaehler_fehlt(self):
-        """[REQ-EQ-2] Je eine Regel aus (Schluessel fehlt) -> ihr Zaehler fehlt im Protokoll, die Zaehler der anderen bleiben unveraendert."""
-        for regel in TEXTREGELN:
+        """[REQ-EQ-2] Je eine Regel aus (Schluessel fehlt) -> ihr Zaehler fehlt im Protokoll, die Zaehler der anderen bleiben unveraendert; EQ-3 aus nimmt EQ-6 mit (K2); EQ-21 aus -> sein Zaehler fehlt."""
+        for regel in TEXTREGELN + ("REQ-EQ-21",):
             with self.subTest(aus=regel):
                 self.deklariere(eqa.buchdekl(liste=LISTE, **ohne(regel)))
                 p = self.lies_alle()
-                self.assertNotIn(regel, p.wirkung)
-                andere = [r for r in TEXTREGELN if r != regel]
+                aus = {regel} | MIT_AUS.get(regel, set())
+                for r in aus:
+                    self.assertNotIn(r, p.wirkung)
+                andere = [r for r in TEXTREGELN if r not in aus]
                 self.assertEqual({r: p.wirkung.get(r) for r in andere}, self.soll(andere))
 
     @unittest.skip("devloop: REQ-EQ-2 noch nicht implementiert")
+    def test_req_eq_2_tabellenkopf_zaehlt_die_haeppchen_mit_vorsatz(self):
+        """[REQ-EQ-2] EQ-21 zaehlt im Protokoll die Haeppchen mit Vorsatz (K1), zerteilt wie rag.py index mit CHUNK_SIZE/CHUNK_OVERLAP: Sollzahl aus dem Wortlaut-Orakel (test_tabellenkopf.soll_vorsatz) auf dem Abschnittstext; der Index traegt genau so viele Vorsaetze."""
+        import test_tabellenkopf as tk
+        self.deklariere(eqa.buchdekl(liste=LISTE, **eqa.ALLE_REGELN))
+        with mock.patch.multiple(rag, CHUNK_SIZE=120, CHUNK_OVERLAP=20):
+            p = self.lies_alle()
+        _, el = alle_regeln_buch()
+        md = el[7][1]._markdown
+        kopftext = "Würfeltabelle\nStufe | Würfel\n"
+        (a,) = [e for e in self.eintraege() if e["abschnittspfad"] == ["Tabelle"]]
+        tabellen = [(b, kopftext) for b in tk.bereiche(a["text"], md)]
+        stuecke = rag.zerteile(a["text"], 120, 20)
+        soll = sum(bool(tk.soll_vorsatz(tabellen, i * 100, i * 100 + len(st), a["text"])) for i, st in enumerate(stuecke))
+        self.assertGreater(soll, 0)
+        kopf = rag.titelvorsatz(["Tabelle"]) + kopftext
+        self.assertEqual(sum(c["text"].startswith(kopf) for c in self.haeppchen(120, 20)), soll)
+        self.assertEqual(p.wirkung["REQ-EQ-21"]["haeppchen_mit_vorsatz"], soll)
+        self.assertEqual(self.protokoll_datei()["wirkung"]["REQ-EQ-21"]["haeppchen_mit_vorsatz"], soll)
+
+    @unittest.skip("devloop: REQ-EQ-2 noch nicht implementiert")
     def test_req_eq_2_zwei_regeln_auf_derselben_seite(self):
-        """[REQ-EQ-2] EQ-8 (Abschnitt 1) und EQ-5 (Abschnitt 2) auf derselben Seite -> je 1 (gezaehlt gegen den Lauf mit allen vorangehenden Regeln). Mutation "Zaehler vergleicht gegen den Lauf ohne alle Regeln" -> EQ-5 zaehlt 2, rot."""
+        """[REQ-EQ-2] Inkrementell (K1): EQ-8 (Abschnitt 1) und EQ-5 (Abschnitt 2) auf derselben Seite -> je 1; EQ-5 eingeschaltet ohne eigenen Fall -> 0, obwohl der Text gegen den Lauf ohne alle Regeln abweicht. Mutation "Zaehler gegen den Lauf ohne alle Regeln" -> EQ-5 zaehlt 2 bzw. 1, rot."""
         z = eqa.Zeichnung()
         z.zeile(1, 40, 45, "Kapitel", "Helvetica-Bold", 12)
         el = {1: [E("section_header", "Kapitel", (38, 30, 555, 50)),
@@ -248,6 +283,10 @@ class TestWirkungszaehler(BuchTest):
         self.assertEqual({r: p.wirkung[r] for r in ("REQ-EQ-8", "REQ-EQ-5")},
                          {r: {"abschnittsaenderungen": 0, "textaenderungen": 1, "seiten": [1]}
                           for r in ("REQ-EQ-8", "REQ-EQ-5")})
+        el[1][4] = E("text", "Das Talent wirkt.", el[1][4]._lage)      # EQ-5-Fall weg (Quelle bleibt, Form fehlt)
+        p = self.lies(el, self.pdf_aus(z))
+        self.assertEqual(p.wirkung["REQ-EQ-8"], {"abschnittsaenderungen": 0, "textaenderungen": 1, "seiten": [1]})
+        self.assertEqual(p.wirkung["REQ-EQ-5"], {"abschnittsaenderungen": 0, "textaenderungen": 0, "seiten": []})
 
 
 # ===================================================================================
@@ -282,7 +321,8 @@ def null(**k):
 class TestZahlenprotokoll(eqa.EQTest):
     def zaehle(self, texte, **kw):
         z, el = zahlen_buch(texte, **kw)
-        self.deklariere(rand={"kopf": 30}) if kw.get("randzahl") else self.deklariere()
+        rand = {"rand": {"kopf": 30}} if kw.get("randzahl") else {}
+        self.deklariere(lesefolge=eqa.LESEFOLGE, **rand)        # Spec-2-Deklaration (K4); die Lesefolge hat hier keinen Fall
         p = self.lies(el, self.pdf_aus(z))
         return p.zahlenprotokoll
 
@@ -315,7 +355,7 @@ class TestZahlenprotokoll(eqa.EQTest):
 
     @unittest.skip("devloop: REQ-EQ-9 noch nicht implementiert")
     def test_req_eq_9_text_aendert_sich_nicht(self):
-        """[REQ-EQ-9] Das Zahlenprotokoll aendert keinen Text: Buchdatei byte-gleich zum Stand vor der Spec (mit und ohne fehlende Zahl)."""
+        """[REQ-EQ-9] Das Zahlenprotokoll aendert keinen Text: Buch mit Spec-2-Deklaration (lesefolge ohne Fall) -> Buchdatei byte-gleich zum Stand vor der Spec (mit und ohne fehlende Zahl)."""
         for texte in (("Stufe 3", "Probe 12", "12"), ("Stufe 7", "Probe", "Wert")):
             with self.subTest(texte=texte):
                 z, el = zahlen_buch(texte)
@@ -323,14 +363,15 @@ class TestZahlenprotokoll(eqa.EQTest):
                 self.deklariere()
                 self.lies_alt(el, pdf)
                 alt = self.roh()
+                self.deklariere(lesefolge=eqa.LESEFOLGE)
                 p = self.lies(el, pdf)
                 self.assertEqual(self.roh(), alt)
                 self.assertNotEqual(p.zahlenprotokoll, "nicht_gemessen")
 
     @unittest.skip("devloop: REQ-EQ-9 noch nicht implementiert")
     def test_req_eq_9_ohne_pdf_oder_textebene_nicht_gemessen(self):
-        """[REQ-EQ-9] Zeilenweg ohne PDF und Docling-Weg mit PDF ohne Textebene -> "nicht_gemessen" statt 0 (Objekt und Datei)."""
-        self.deklariere()
+        """[REQ-EQ-9] Buch mit Spec-2-Deklaration: Zeilenweg ohne PDF und Docling-Weg mit PDF ohne Textebene -> "nicht_gemessen" statt 0 (Objekt und Datei)."""
+        self.deklariere(lesefolge=eqa.LESEFOLGE)
         p = eqa.einlesen().lies_buch_ein(mb.SID, "nord", {1: [{"text": "Kapitel", "klasse": "section_header"},
                                                              {"text": "Stufe 3", "klasse": "text"}]})
         self.assertEqual(p.zahlenprotokoll, "nicht_gemessen")
@@ -338,6 +379,20 @@ class TestZahlenprotokoll(eqa.EQTest):
         _, el = zahlen_buch(("Stufe 3", "Probe 12", "12"))
         p = self.lies(el, self.pdf_leer(1))
         self.assertEqual(p.zahlenprotokoll, "nicht_gemessen")
+
+
+    @unittest.skip("devloop: REQ-EQ-9 noch nicht implementiert")
+    def test_req_eq_9_ohne_spec2_deklaration_kein_zahlenprotokoll(self):
+        """[REQ-EQ-9] Buch ohne Spec-2-Deklaration (K4): kein Zahlenprotokoll (fehlt oder Leerwert), pdfplumber wird nicht geoeffnet, pdfplumber_version bleibt None."""
+        import pdfplumber
+        z, el = zahlen_buch(("Stufe 7", "Probe", "Wert"))
+        pdf = self.pdf_aus(z)
+        self.deklariere()
+        with mock.patch.object(pdfplumber, "open", side_effect=AssertionError("pdfplumber geoeffnet")):
+            p = self.lies(el, pdf)
+        self.assertTrue(eqa.ist_leer(getattr(p, "zahlenprotokoll", None)))
+        self.assertTrue(eqa.ist_leer(self.protokoll_datei().get("zahlenprotokoll")))
+        self.assertIsNone(p.pdfplumber_version)
 
 
 # ===================================================================================
@@ -373,6 +428,9 @@ VERSTOESSE = [  # (Name, Deklaration, Schluessel in der Meldung)
     ("tabellenkopf kein Objekt", {"tabellenkopf": True}, "tabellenkopf"),
     ("zeilenenden Text", {"striche": {"zeilenenden": "ja"}}, "zeilenenden"),
     ("strichrest Zahl", {"striche": {"strichrest": 1}}, "strichrest"),
+    ("strichrest ohne lesefolge", {"striche": {"strichrest": True}}, "strichrest"),            # K2
+    ("strichrest ohne lesefolge mit Zeichen", {"striche": {"zeilenenden": True, "strichrest": True},
+                                               "zeichen": {"steuerzeichen": True}}, "strichrest"),
     ("striche fremder Schluessel", {"striche": {"trennung": True}}, "trennung"),
     ("zierumlaut ja", {"zeichen": {"zierumlaut": "ja"}}, "zierumlaut"),
     ("steuerzeichen Zahl", {"zeichen": {"steuerzeichen": 1}}, "steuerzeichen"),
@@ -413,8 +471,8 @@ class TestSchema(eqa.EQTest):
 
     @unittest.skip("devloop: REQ-EQ-15 noch nicht implementiert")
     def test_req_eq_15_gueltige_vollstaendige_deklaration_liest_ein(self):
-        """[REQ-EQ-15] Gueltige Deklaration mit allen sechs Schluesseln (auch Defaults weggelassen: toleranz/waechter fehlen) liest ein."""
-        for dekl in (GUELTIG, {"lesefolge": {"spalten": [[35, 560]]}}):
+        """[REQ-EQ-15] Gueltige Deklaration mit allen sechs Schluesseln (auch Defaults weggelassen: toleranz/waechter fehlen) liest ein; strichrest false ohne lesefolge ist zulaessig (K2)."""
+        for dekl in (GUELTIG, {"lesefolge": {"spalten": [[35, 560]]}}, {"striche": {"zeilenenden": True, "strichrest": False}}):
             with self.subTest(dekl=sorted(dekl)):
                 self.deklariere(**dekl)
                 self.lies(SCHEMA_ELEMENTE, self.pdf_leer(1))
@@ -427,7 +485,7 @@ class TestSchema(eqa.EQTest):
 class TestAbschaltbar(BuchTest):
     @unittest.skip("devloop: REQ-EQ-16 noch nicht implementiert")
     def test_req_eq_16_buch_ohne_deklaration_byte_gleich_und_protokoll_behaelt_felder(self):
-        """[REQ-EQ-16] Zwei-Buecher-Bestand, nur Buch A mit Spec-2-Deklaration: Buch B byte-gleich zum Einlesen mit dem Stand vor der Spec (BASIS_COMMIT); B-Protokoll behaelt alle bisherigen Felder mit gleichen Werten, neue nur mit Leerwerten (ausser zahlenprotokoll); A weicht ab."""
+        """[REQ-EQ-16] Zwei-Buecher-Bestand, nur Buch A mit Spec-2-Deklaration: Buch B byte-gleich zum Einlesen mit dem Stand vor der Spec (BASIS_COMMIT); B-Protokoll behaelt alle bisherigen Felder mit gleichen Werten (auch pdfplumber_version), neue nur mit Leerwerten (auch zahlenprotokoll, K4); fuer B wird pdfplumber nicht geoeffnet; A weicht ab."""
         z, el = alle_regeln_buch()
         pdf = self.pdf_aus(z, 7)
         self.deklariere(eqa.buchdekl("a", "Buch A", quelle="a.pdf", liste=LISTE, **eqa.ALLE_REGELN),
@@ -435,24 +493,23 @@ class TestAbschaltbar(BuchTest):
         p_alt = self.lies_alt(el, pdf, bid="b")
         alt = self.roh("b")
         self.lies(el, pdf, bid="a")
-        p = self.lies(el, pdf, bid="b")
+        import pdfplumber
+        with mock.patch.object(pdfplumber, "open", side_effect=AssertionError("pdfplumber fuer Buch B geoeffnet")):
+            p = self.lies(el, pdf, bid="b")
         self.assertEqual(self.roh("b"), alt)
         self.assertNotEqual([e["text"] for e in self.eintraege("a")], [e["text"] for e in self.eintraege("b")])
         neu, vorher = p.als_dict(), p_alt.als_dict()
         for feld, wert in vorher.items():
             with self.subTest(feld=feld):
-                if feld == "pdfplumber_version":            # das Zahlenprotokoll darf pdfplumber oeffnen (Lesart)
-                    self.assertIn(neu[feld], (wert, eqa.versionen()["pdfplumber"]))
-                else:
-                    self.assertEqual(neu[feld], wert)
-        for feld in set(neu) - set(vorher) - {"zahlenprotokoll"}:
+                self.assertEqual(neu[feld], wert)
+        self.assertIsNone(neu["pdfplumber_version"])
+        for feld in set(neu) - set(vorher):
             with self.subTest(neues_feld=feld):
                 self.assertTrue(eqa.ist_leer(neu[feld]), (feld, neu[feld]))
-        self.assertIn("zahlenprotokoll", neu)
 
     @unittest.skip("devloop: REQ-EQ-16 noch nicht implementiert")
     def test_req_eq_16_je_regel_aus_aendert_sich_nur_deren_fall(self):
-        """[REQ-EQ-16] Je Regel ein Lauf mit nur dieser Regel aus -> nur der Abschnitt ihres Falls aendert sich (Buchdatei; fuer EQ-21 die Haeppchen)."""
+        """[REQ-EQ-16] Je Regel ein Lauf mit nur dieser Regel aus -> nur der Abschnitt ihres Falls aendert sich (Buchdatei; fuer EQ-21 die Haeppchen); EQ-3 aus nimmt EQ-6 mit (K2) -> deren beide Abschnitte."""
         self.deklariere(eqa.buchdekl(liste=LISTE, **eqa.ALLE_REGELN))
         self.lies_alle()
         alle = self.texte()
@@ -470,7 +527,8 @@ class TestAbschaltbar(BuchTest):
                     st = rag.buch_stuecke(self.eintraege(), buch, 120, 20)
                     self.assertEqual(len(st), len(alle_st))
                     anders = {tuple(a["abschnittspfad"]) for a, b in zip(st, alle_st) if a["text"] != b["text"]}
-                self.assertEqual(anders, {(KAPITEL[seite - 1],)})
+                seiten = [seite] + [SEITE_DER_REGEL[r] for r in MIT_AUS.get(regel, ())]
+                self.assertEqual(anders, {(KAPITEL[s - 1],) for s in seiten})
 
     @unittest.skip("devloop: REQ-EQ-16 noch nicht implementiert")
     def test_req_eq_16_altbestand_und_spec1_buchdatei_im_index_unveraendert(self):

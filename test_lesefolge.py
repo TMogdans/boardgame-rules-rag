@@ -215,6 +215,27 @@ class TestBaender(LesefolgeTest):
                          ["Alphalinks", "Passion Beta", "Betalinks", "Alpharechts", "Betarechts"])
 
     @unittest.skip("devloop: REQ-EQ-3 noch nicht implementiert")
+    def test_req_eq_3_e_vektorlinie_ohne_docling_element_belegt_nichts(self):
+        """[REQ-EQ-3] K6: (e) mit einer Vektorlinie ueber die volle Breite im PDF, 1 pt unter "Passion Beta" (also im +-2-pt-Fenster), ohne Docling-Element -> belegt die Nachbarspalte nicht, Kopf B bleibt Bandgrenze. Faengt: Nachbarspalte aus PDF-Grafik statt aus Docling-Elementen."""
+        z = eqa.Zeichnung()
+        z.linie(1, 35, 416, 560)
+        z.linie(1, 35, 399, 560, staerke=3)
+        self.deklariere(**mit())
+        self.lies({1: fall_e()}, self.pdf_aus(z, 1))
+        self.assertEqual(self.folge("Alphalinks", "Passion Beta", "Betalinks", "Alpharechts", "Betarechts"),
+                         ["Alphalinks", "Alpharechts", "Passion Beta", "Betalinks", "Betarechts"])
+
+    @unittest.skip("devloop: REQ-EQ-3 noch nicht implementiert")
+    def test_req_eq_3_e_chart_belegt_wie_ein_bild(self):
+        """[REQ-EQ-3] K6: Docling-Element "chart" innerhalb +-2 pt neben "Passion Beta" belegt die Nachbarspalte wie ein Bild -> keine Bandgrenze."""
+        seite = fall_e()
+        seite.insert(4, E("chart", "", (310, 405, 555, 412)))
+        seite.insert(1, seite.pop(6))                                     # Docling: "Alpharechts" zuerst
+        self.lies_seite(seite, **mit())
+        self.assertEqual(self.folge("Alphalinks", "Passion Beta", "Betalinks", "Alpharechts", "Betarechts"),
+                         ["Alphalinks", "Passion Beta", "Betalinks", "Alpharechts", "Betarechts"])
+
+    @unittest.skip("devloop: REQ-EQ-3 noch nicht implementiert")
     def test_req_eq_3_f_talentfall_ueberschrift_in_der_spalte_keine_bandgrenze(self):
         """[REQ-EQ-3] (f) Talentfall: "Talent Xeno" links auf Hoehe eines rechten Absatzes -> keine Bandgrenze, die rechte Spalte folgt nach der ganzen linken. Mutation "alle Koepfe als Bandgrenze" -> rot."""
         self.lies_seite(fall_f(), **mit())
@@ -254,6 +275,24 @@ class TestBaender(LesefolgeTest):
                 soll = (["Waechterrechts", "Waechterlinks", "Waechterblock"] if waechter
                         else ["Waechterlinks", "Waechterrechts", "Waechterblock"])
                 self.assertEqual(self.folge("Waechterlinks", "Waechterrechts", "Waechterblock"), soll)
+
+    @unittest.skip("devloop: REQ-EQ-3 noch nicht implementiert")
+    def test_req_eq_3_i_waechter_durch_zeilenelemente_nicht_durch_bilder(self):
+        """[REQ-EQ-3] K7: Das schmale spaltenuebergreifende Element (300 pt) ist eine Tabelle, ein Listenpunkt oder eine Fussnote -> Waechter, Docling-Folge; ist es ein Bild (picture, chart) -> kein Waechter, umgeordnet."""
+        def block(label):
+            lage = (150, 300, 450, 340)
+            if label == "table":
+                return eqa.tabelle([["Waechterblock", "drei"], ["1", "2"]], kopf=[0], lage=lage)
+            if label == "list_item":
+                return E(label, "Waechterblock drei.", lage, enumerated=False, marker="-")
+            return E(label, "Waechterblock drei." if label == "footnote" else "", lage)
+        for label, waechter in (("table", True), ("list_item", True), ("footnote", True), ("picture", False),
+                                ("chart", False)):
+            with self.subTest(label=label):
+                seite = fall_i()[:-1] + [block(label)]
+                self.lies_seite(seite, **mit())
+                soll = ["Waechterrechts", "Waechterlinks"] if waechter else ["Waechterlinks", "Waechterrechts"]
+                self.assertEqual(self.folge("Waechterlinks", "Waechterrechts"), soll)
 
     @unittest.skip("devloop: REQ-EQ-3 noch nicht implementiert")
     def test_req_eq_3_j_werteblock_2x2_zeilenweise(self):

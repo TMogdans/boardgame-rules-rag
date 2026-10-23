@@ -355,7 +355,9 @@ def T(text, n):
     return E("text", text, (40, 100 + 30 * n, 290, 120 + 30 * n))
 
 
-UMLAUT_FAELLE = [("Fu . . r den Test.", "Für den Test."),
+UMLAUT_FAELLE = [("Fu . . r den Test.", "Für den Test."),               # Leerzeichen nach den Punkten faellt mit weg (K3)
+                 ("Gru. . n ohne Leerzeichen davor", "Grün ohne Leerzeichen davor"),
+                 ("Bla . .tter ohne Leerzeichen danach", "Blätter ohne Leerzeichen danach"),
                  ("Stufen/Aktionswu . . rfel", "Stufen/Aktionswürfel"),
                  ("A . . rger und O . . l", "Ärger und Öl"),
                  ("scho . . n und Ma . . rchen", "schön und Märchen")]
@@ -369,13 +371,15 @@ def umlaut_seite():
 class TestZierumlaut(eqa.EQTest):
     @unittest.skip("devloop: REQ-EQ-7 noch nicht implementiert")
     def test_req_eq_7_zierumlaut_vor_dem_listenabgleich(self):
-        """[REQ-EQ-7] "U . . ber dies", "Fu . . r den", "Stufen/Aktionswu . . rfel" (und a/o/A/O) -> Umlaute; Lesezeichen "Über dies" auf der Seite -> gefunden, Abschnitt "Über dies"."""
+        """[REQ-EQ-7] "U . . ber dies", "Fu . . r den", "Stufen/Aktionswu . . rfel" (und a/o/A/O, Leerzeichen vor bzw. nach den Punkten optional) -> Umlaute, das Leerzeichen nach den Punkten faellt mit weg (K3: "Über", nicht "Ü ber"); Lesezeichen "Über dies" -> gefunden, Abschnitt "Über dies"."""
         self.deklariere(liste=(("Über dies", 1, 1),), zeichen={"zierumlaut": True})
         p = self.lies(umlaut_seite())
         text = self.gesamttext()
         for roh, soll in UMLAUT_FAELLE:
             self.assertIn(soll, text)
             self.assertNotIn(roh, text)
+        for falsch in ("Ü ber", "Fü r", "Grü n", "Aktionswü rfel"):
+            self.assertNotIn(falsch, text)
         self.assertIn(("Über dies", 1), [tuple(g) for g in p.gefunden])
         self.assertEqual(p.nicht_gefunden, [])
         self.assertTrue(self.abschnitt_von("Für den Test.")["text"].startswith("Über dies"))

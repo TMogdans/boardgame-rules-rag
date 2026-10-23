@@ -77,6 +77,8 @@ class Label(str, enum.Enum):
     PAGE_HEADER = "page_header"
     PAGE_FOOTER = "page_footer"
     LIST_ITEM = "list_item"
+    FOOTNOTE = "footnote"
+    CHART = "chart"
 
 
 class Element(da.Element):
@@ -161,6 +163,11 @@ class Zeichnung:
 
     def __init__(self):
         self.seiten = {}
+        self.linien = {}
+
+    def linie(self, seite, x0, y, x1, staerke=1):
+        """Vektorlinie (kein Text, kein Docling-Element) in Hoehe y ab der OBEREN Kante."""
+        self.linien.setdefault(seite, []).append((x0, y, x1, staerke))
 
     @staticmethod
     def breite(text, font=None, groesse=None):
@@ -188,10 +195,13 @@ class Zeichnung:
     def speichere(self, pfad, seiten=None):
         from reportlab.pdfgen import canvas
         c = canvas.Canvas(pfad, pagesize=(BREITE, HOEHE))
-        for s in range(1, (seiten or max(self.seiten, default=1)) + 1):
+        for s in range(1, (seiten or max(list(self.seiten) + list(self.linien), default=1)) + 1):
             for x, grund, text, font, groesse in self.seiten.get(s, []):
                 c.setFont(font, groesse)
                 c.drawString(x, HOEHE - grund, text)
+            for x0, y, x1, staerke in self.linien.get(s, []):
+                c.setLineWidth(staerke)
+                c.line(x0, HOEHE - y, x1, HOEHE - y)
             c.showPage()
         c.save()
         return pfad
