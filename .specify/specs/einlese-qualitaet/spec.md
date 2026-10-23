@@ -3,7 +3,10 @@
 - **Spec-ID:** einlese-qualitaet (Spec 2; Schnitt 2a/2b abgenommen, O-1)
 - **Kontext-Kürzel:** EQ
 - **Tier:** T3 (siehe Abschnitt „Tier")
-- **Status:** **Abgenommen durch Tobias am 2026-10-23 (Fassung 3a).**
+- **Status:** **Abgenommen durch Tobias am 2026-10-23 (Fassung 3c).**
+  - Fassung 3c: Lesarten U1–U4 aus der Teststation, ohne neue Messung, keine Zahl betroffen.
+  - Fassung 3b: Klärungen K1–K7 aus der Teststation, ohne neue Messung. Keine gemessene Zahl ändert
+    sich (siehe Entscheidungen K1–K7).
   - Umfang: Teil 2a mit EQ-1 bis EQ-10 und EQ-15 bis EQ-21. Teil 2b (EQ-11 bis EQ-14) ist in dieser
     Runde übersprungen und folgt später (O-1).
   - Fassung 3a arbeitet die letzte blinde Gegenprüfung ein, nach der es laut vorab festgelegter
@@ -48,7 +51,7 @@ Deshalb verlangt das Messtor jetzt Einzelurteile, Bilder mit mindestens 100 dpi 
 | **Spalte eines Elements** | Maßgeblich ist der **erste** Kasten des Elements (`x0`, `x1`). Spalte *i*, wenn er nicht in die Spaltenlücke links oder rechts von Spalte *i* hineinreicht: `x0 ≥ a_i − tol` (entfällt für die erste Spalte) und `x1 ≤ b_i + tol` (entfällt für die letzte Spalte). Sonst ist das Element **spaltenübergreifend**. Der äußere Rand begrenzt nicht (Fassung 3, wie gemessen; mit Rand-Grenze griffe der Wächter zusätzlich auf S. 20, 59, 68 und nähme auf S. 20 eine richtige Korrektur weg). |
 | **Band** | Bereich einer Seite zwischen zwei Bandgrenzen (nach Oberkante). |
 | **Kopfmenge** | Zeilen, die der Listenabgleich (REQ-MB-12) in der Docling-Folge einem Listeneintrag zuordnet, plus die Zeilen außerhalb des Rands, die nach REQ-MB-20 Layout-Überschrift einer Stufe sind. Eine Menge für alle Regeln und Messungen. |
-| **Bandgrenze** | (1) jedes spaltenübergreifende Element; (2) eine **Überschrift in einer Spalte** (Zeile der Kopfmenge oder Docling-Klasse `section_header`), wenn die Nachbarspalte auf Höhe ihres ersten Kastens ±2 pt **frei** ist **und** sich darunter vor dem nächsten spaltenübergreifenden Element **fortsetzt** (REQ-EQ-3). Für „frei" und „fortsetzt" zählen nur Elemente, die nicht im Rand liegen und **nicht mehrspaltig** sind. Bilder belegen die Nachbarspalte, außer **Eckbildern** (Unterkante ≤ 70 pt und ganz links bis x ≤ 80 pt oder ganz rechts ab x ≥ 500 pt, Zielbuch: Kapitelzierden). Ein Bild belegt die rechte Nachbarspalte, wenn es links vor der Lücke beginnt bzw. rechts hinter ihr endet (x0 < b_1 + tol bzw. x1 > a_2 − tol). |
+| **Bandgrenze** | (1) jedes spaltenübergreifende Element; (2) eine **Überschrift in einer Spalte** (Zeile der Kopfmenge oder Docling-Klasse `section_header`), wenn die Nachbarspalte auf Höhe ihres ersten Kastens ±2 pt **frei** ist **und** sich darunter vor dem nächsten spaltenübergreifenden Element **fortsetzt** (REQ-EQ-3). Für „frei" und „fortsetzt" zählen nur Elemente, die nicht im Rand liegen und **nicht mehrspaltig** sind. Bilder belegen die Nachbarspalte; „Bild" heißt hier ein Docling-Bildelement (`picture`, ebenso `chart`; im Zielbuch gibt es keine `chart`), keine Vektorlinie (K6). Ausgenommen sind **Eckbilder** (Unterkante ≤ 70 pt und ganz links bis x ≤ 80 pt oder ganz rechts ab x ≥ 500 pt, Zielbuch: Kapitelzierden). Ein Bild belegt die rechte Nachbarspalte, wenn es links vor der Lücke beginnt bzw. rechts hinter ihr endet (x0 < b_1 + tol bzw. x1 > a_2 − tol). |
 | **Mehrspaltiges Element** | Docling-Element mit Kästen (`prov`) in verschiedenen Spalten; Docling hat Text über den Spaltenwechsel zusammengelegt. |
 | **Seitenwächter** | Eine Seite mit einem spaltenübergreifenden Element (außerhalb des Rands, nicht Kopfmenge, nicht `section_header`), dessen erster Kasten schmaler ist als der deklarierte Anteil der Breite von `a_1` bis `b_letzte` (Zielbuch 80 % von 35–560 pt), wird nicht umgeordnet. |
 | **Fall** | Eine Änderung der Regel, gezählt über (Abschnittspfad, Vorkommen): andere Elementmenge, andere Folge oder beides. |
@@ -103,7 +106,9 @@ Deshalb verlangt das Messtor jetzt Einzelurteile, Bilder mit mindestens 100 dpi 
 
 **REQ-EQ-2**: *Contract, Wirkungszähler und Messgleichheit*
 - Das Einlese-Protokoll zählt je eingeschalteter Regel die Abschnittsänderungen und Textänderungen
-  mit Seiten. Verglichen wird mit einem Lauf, in dem nur diese Regel aus ist.
+  mit Seiten. Gezählt wird **inkrementell** (K1): gegen den Lauf mit allen Regeln, die in der festen
+  Reihenfolge unten **vor** dieser Regel stehen. Die Zähler addieren sich damit zur Gesamtänderung.
+- EQ-21 zählt im Protokoll ebenfalls, und zwar die Häppchen mit Vorsatz (Zielbuch: 168, K1).
 - Die Regeln wirken in fester Reihenfolge:
   1. Entfernen von U+00AD aus jedem Elementtext (REQ-MB-11, Tabellenzeile 2). Das läuft **vor**
      EQ-5, weil 8 der gemessenen Fälle sonst nicht gefunden würden.
@@ -132,6 +137,9 @@ Deshalb verlangt das Messtor jetzt Einzelurteile, Bilder mit mindestens 100 dpi 
   1. **Seitenwächter:** Trägt die Seite ein spaltenübergreifendes Element, das keine Überschrift ist
      und schmaler als `lesefolge.waechter` × Satzspiegelbreite ist (Zielbuch: 0,8), bleibt die
      Docling-Folge der Seite. Ebenso auf Ausnahmeseiten (REQ-EQ-4).
+     - Auslösen können nur Elemente der Zeilenfolge (Text, Listenpunkt, Fußnote, Tabelle;
+       Überschriften sind ausgenommen), **keine Bildelemente** (K7).
+     - So rechnet der gemessene Prototyp (`ordnung.passt`); so sind die 27 Wächterseiten gemessen.
   2. **Mehrspaltige Elemente** nehmen an Schritt 3 und 4 nicht teil. Danach stehen sie direkt hinter
      ihrem Docling-Vorgänger, also dem letzten Nicht-Rand-Element davor in der Docling-Folge.
   3. Die **Bandgrenzen** (Begriffe) teilen die Seite nach der Oberkante des ersten Kastens in Bänder.
@@ -275,6 +283,8 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
   ignorieren" (`Nah- und`), „U+00AD nach EQ-5 entfernen", „Folgezeile über Kastengrenze hinweg".
 
 **REQ-EQ-6**: *Where, Strichrest mit Quellnachweis (Fassung 2)*
+- `striche.strichrest` ist nur zusammen mit einer `lesefolge`-Deklaration zulässig (K2). Ohne
+  `lesefolge` ist der Schalter ein Schemafehler (REQ-EQ-15).
 - Wo ein Buch `striche.strichrest` einschaltet, wird im Abschnittstext nach REQ-EQ-5 jede Folge
   „Wortstück `X`, `-`, ein oder mehrere Leerzeichen, Wort `y` mit Kleinbuchstaben am Anfang, nicht in
   der Konjunktionsliste" **nur dann** zu `Xy` zusammengefügt, wenn pdfplumber auf einer Seite des
@@ -324,8 +334,10 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
 
 **REQ-EQ-7**: *Where, Zierschrift-Umlaut (G5)*
 - Wo ein Buch `zeichen.zierumlaut` einschaltet, wird in jeder Zeile **vor** dem Listenabgleich
-  (REQ-MB-12) die Folge „Vokal `a o u A O U`, optional ein Leerzeichen, ` . .`" durch den Umlaut des
-  Vokals ersetzt.
+  (REQ-MB-12) die Folge „Vokal `a o u A O U`, optional ein Leerzeichen, ` . .`, optional ein
+  Leerzeichen" durch den Umlaut des Vokals ersetzt. Das Leerzeichen nach den Punkten fällt also mit
+  weg (`U . . ber` → `Über`, K3). Damit folgt der Wortlaut den Beispielen und der Messung (Lesezeichen
+  144 → 146).
 - *Ziel (korrigiert in Fassung 2):* **3 Zeilen** (S. 9, 10, 20) ändern sich, dadurch 4 Abschnitte,
   4 besser, 0 schlechter. Lesezeichen gefunden 144 → 146.
 - S. 216 (`Beschworung . .`, Punkte am Wortende ohne Vokal davor) erfasst die Regel nicht. Welcher
@@ -361,7 +373,9 @@ byte-gleich.
   - den **Kopftext**: je Kopfzeile die Zellen von links nach rechts, U+00AD entfernt, Leerraum zu einem
     Leerzeichen, leere Zellen weg, direkt aufeinanderfolgende gleiche Zellen (Spannzellen) einmal,
     getrennt durch ` | `; Kopfzeilen durch Zeilenumbruch getrennt, am Ende ein Zeilenumbruch. Auf
-    jede Zelle wird vorher **EQ-8** angewendet (Steuerzeichen → Leerzeichen).
+    jede Zelle wird vorher **EQ-8** angewendet (Steuerzeichen → Leerzeichen), aber nur, wenn das Buch
+    `zeichen.steuerzeichen` einschaltet. Ist der Schalter aus, wird auch im Kopftext nichts ersetzt
+    (K5).
 - `rag.py index` zerteilt den Abschnittstext wie heute (REQ-MB-14). Jedes Häppchen, dessen
   Zeichenbereich den einer Tabelle überlappt, **wobei der überlappte Teil mindestens einen Buchstaben
   oder eine Ziffer enthält** (also nicht nur Füllzeichen wie Leerzeichen, `|`, `-`), ohne ihren
@@ -430,7 +444,10 @@ byte-gleich.
 ### D. Zahlentreue-Protokoll (Teil 2a, Detektor für 2b)
 
 **REQ-EQ-9**: *Contract, Zahlenprotokoll und Textverlust*
-- Für ein Buch mit pdfplumber-Zugriff schreibt das Einlesen je Seite ins Protokoll:
+- Das Zahlenprotokoll läuft nur für ein Buch **mit Spec-2-Deklaration** (K4). Ohne sie wird
+  pdfplumber dafür nicht geöffnet, `pdfplumber_version` bleibt wie bisher, und die Buchdatei ist
+  byte-gleich (REQ-EQ-16).
+- Für ein solches Buch mit pdfplumber-Zugriff schreibt das Einlesen je Seite ins Protokoll:
   - **fehlend**: Ziffernfolgen der Quelle ohne Rand (pdfplumber-Wörter, `\d+`) gegen den Text der
     Buchdatei, der dieser Seite zugeordnet ist (`seitenwechsel`, ohne Titelvorsatz). Getrennt nach
     `gar_nicht` (Wert fehlt auf der Seite ganz) und `seltener`;
@@ -560,7 +577,8 @@ nur das dritte Kind steht im Text, Protokoll = 2; Kind knapp außerhalb (1 pt) �
     überlappend), `toleranz` (Zahl ≥ 0, Default 4), `waechter` (Zahl in (0, 1], Default 0,8),
     `ausnahmen` (Liste ganzer Zahlen ≥ 1);
   - `tabellenkopf`: Objekt mit optional `ausnahmen` (Liste ganzer Zahlen ≥ 1);
-  - `striche`: `zeilenenden`, `strichrest` (Wahrheitswerte);
+  - `striche`: `zeilenenden`, `strichrest` (Wahrheitswerte); `strichrest: true` ohne `lesefolge` ist
+    ein Verstoß (K2);
   - `zeichen`: `zierumlaut`, `steuerzeichen`, `listennummern` (Wahrheitswerte);
   - `tabellen`: `form` ∈ {`markdown`, `schablone`};
   - `werteblock`: `schluessel` (nicht-leere Liste nicht-leerer Zeichenketten);
@@ -574,8 +592,8 @@ nur das dritte Kind steht im Text, Protokoll = 2; Kind knapp außerhalb (1 pt) �
 - Wenn ein Buch keine Spec-2-Deklaration trägt, dann ist seine Buchdatei (`knowledge.jsonl`)
   **byte-gleich** zum Einlesen mit dem Stand vor dieser Spec.
 - Das Einlese-Protokoll behält alle bisherigen Felder mit gleichen Werten. Neue Felder dürfen mit
-  Leerwerten hinzukommen. Ausnahme: Das Zahlenprotokoll (REQ-EQ-9) erscheint bei jedem Buch mit
-  pdfplumber-Zugriff. Es ändert keinen Text.
+  Leerwerten hinzukommen. Das Zahlenprotokoll (REQ-EQ-9) erscheint nur mit Spec-2-Deklaration; ohne
+  sie wird pdfplumber dafür nicht geöffnet, und `pdfplumber_version` bleibt wie bisher (K4).
 - Jede Regel lässt sich einzeln abschalten. Abgeschaltet ändert sie keinen Text.
 - Altbestände, der rohe PDF-Weg und alle Referenzen von REQ-MB-3 bleiben unverändert. Die bestehende
   Suite einschließlich `test_mutationen.py` und `messung/` bleibt ohne Änderung ihrer Sollwerte grün.
@@ -651,6 +669,19 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
 - **EQ-9** Ziffernfolgen sind `\d+` auf Wortebene. `5/10` sind zwei Zahlen, `W12+2W6` vier.
 - **EQ-11** Docling-Kennungen für Spaltenköpfe (`column_header`) haben Vorrang. Die Regel „erste
   Nicht-Titel-Zeile" ist der Rückfall und wird im Protokoll gezählt.
+
+## Lesarten der Teststation (Tobias, 2026-10-23, Fassung 3c)
+
+- **U1 (EQ-2, EQ-21)** Der Zähler „Häppchen mit Vorsatz" (EQ-21) steht in der Ausgabe des
+  Index-Laufs je Buch, nicht im Einlese-Protokoll — wie die Häppchenzahl in Spec 1 (Lesart zu
+  MB-14). Erst der Index-Lauf zerteilt; das Einlesen kennt `CHUNK_SIZE`/`CHUNK_OVERLAP` nicht.
+- **U2 (EQ-2)** Eine eingeschaltete Regel ohne Fall steht mit Nullwerten im Protokoll
+  (`{"abschnittsaenderungen": 0, "textaenderungen": 0, "seiten": []}`), sie fehlt nicht.
+- **U3 (EQ-16, EQ-9)** Eine Spec-2-Deklaration, in der alle Schalter aus sind (`false` bzw. ohne
+  wirksamen Schlüssel), gilt wie keine Deklaration: kein Zahlenprotokoll, kein pdfplumber-Öffnen
+  dafür, Buchdatei byte-gleich.
+- **U4 (EQ-16, EQ-9)** Eine deklarierte Regel ohne Fall verändert die Buchdatei nicht; das
+  Zahlenprotokoll steht im Einlese-Protokoll, nicht in der Buchdatei.
 
 ## Abgrenzung (nicht in Spec 2)
 
@@ -740,6 +771,26 @@ unten):
   3 schlechte und 2 gleichwertige.
 - **F3a-2** EQ-8 gilt auch für den Kopftext. Die Tabelle wird über die Lage zugeordnet. EQ-5 bildet
   Grundlinien als Kette.
+
+Fassung 3b (Tobias, 2026-10-23), Klärungen aus der Teststation, ohne neue Messung:
+
+- **K1 (EQ-2):** Wirkungszähler inkrementell gegen den Lauf mit allen vorangehenden Regeln; die
+  Zähler addieren sich. EQ-21 zählt die Häppchen mit Vorsatz (168). Keine Zahl ändert sich, denn die
+  Vorab-Messung lief schon als Kette in dieser Reihenfolge.
+- **K2 (EQ-6, EQ-15):** `striche.strichrest` nur mit `lesefolge`, sonst Schemafehler. Keine Zahl
+  ändert sich; gemessen war mit `lesefolge`.
+- **K3 (EQ-7):** Das Muster nimmt das Leerzeichen nach den Punkten mit. Keine Zahl ändert sich; der
+  Prototyp (`([AOUaou]) ?\. \. ?`) rechnete schon so (3 Zeilen, 144 → 146).
+- **K4 (EQ-9, EQ-16):** Zahlenprotokoll nur mit Spec-2-Deklaration. Keine Zahl ändert sich; die
+  Messung lief mit Deklaration.
+- **K5 (EQ-21):** EQ-8 im Kopftext folgt `zeichen.steuerzeichen`. Keine Zahl ändert sich; gemessen
+  war mit eingeschaltetem Schalter. Mit ausgeschaltetem Schalter blieben U+0007 in 2 Vorsätzen
+  (gemessen in Fassung 3a, Variante ohne EQ-8).
+- **K6 (EQ-3):** Die Nachbarspalte belegen nur Zeilenelemente und Docling-Bildelemente, keine
+  Vektorlinien; Eckbild-Ausnahme wie bisher. Keine Zahl ändert sich (`ordnung._grenze_frei_sh`).
+- **K7 (EQ-3):** Den Seitenwächter lösen nur Elemente der Zeilenfolge aus, keine Bilder. Keine Zahl
+  ändert sich (`ordnung.passt`, 27 Wächterseiten). Tabellen gehören zur Zeilenfolge und können den
+  Wächter auslösen, wie im Prototyp.
 
 **Offene Entscheidungen:** keine.
 
