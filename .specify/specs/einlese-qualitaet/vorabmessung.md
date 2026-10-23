@@ -1,4 +1,4 @@
-# Vorab-Messung Spec 2 (Einlesequalität), Fassung 3
+# Vorab-Messung Spec 2 (Einlesequalität), Fassung 3a (abgenommen 2026-10-23)
 
 Fassung 1 gemessen am 2026-10-22, Fassung 2 am 2026-10-23 (gleiche Daten neu erzeugt, gleiche Versionen) am Zielbuch (Spielerhandbuch ED4, 3. Aufl., 314 S., physische Seite =
 gedruckte + 1). Zahlen in `vorabmessung.json`. In diesem Ordner steht kein Buchtext; Abschnittsnamen
@@ -68,6 +68,17 @@ Docling-Folge + Layout-Köpfe; U+00AD, EQ-8, EQ-10, EQ-5, EQ-7, EQ-3/-4, Abschni
 | `wb_beweis.py` | Eine Bedingung war immer falsch. Korrigiert: genau 2 abweichende Positionen im selben Schlüssel:Wert-Lauf (≤ 8), Menge gleich → **156/156 belegt** (Laufgrößen 4, 6, 7) |
 | EQ-6: „Großbuchstabe nie geändert" | Präzisiert: auch belegte Fälle nie (der Prototyp-Zweig `X-Y` ist verboten, Mutation im Messtor) |
 | Bestätigt | EQ-3/-4 50/50 Urteile, keine verpasste Grenze; EQ-6 36/36; EQ-7 3/3 |
+
+## 0c. Korrekturen aus der letzten Gegenprüfung, eingearbeitet in Fassung 3a
+
+| Fassung 3 | Fassung 3a |
+|---|---|
+| EQ-5: 4.725 Striche, 4.610 unverändert, 5 nicht gefunden | Grundlinien als **Kette** zusammengelegt (Abstand zum letzten Wert der Gruppe): **4.726** Striche = 4.609 unverändert + 94 geändert + 1 gesichert + 16 mehrdeutig + 6 nicht gefunden. Textänderungen gleich, 94/94 besser (bestätigt), Mutation „Sicherung aus" schlägt an |
+| EQ-21: 173 Häppchen mit Vorsatz | 3 Häppchen überlappten die Tabelle nur mit Füllzeichen und bekamen einen fremden Kopf: S. 113 (4 Zeichen am Ende), S. 141 (9 Zeichen am Ende), S. 260 (195 Zeichen leere Kopf- und Trennzeile am Anfang). **Füllzeichen-Bedingung** (Buchstabe oder Ziffer im überlappten Teil) nimmt genau 5 heraus (dazu 2 gleichwertige: S. 96, 231) → **168** |
+| EQ-21: Kopftext ohne EQ-8 | U+0007 stand in den Vorsätzen von S. 136 und S. 141; EQ-8 gilt jetzt auch im Kopftext (mit Füllzeichen-Bedingung bleiben ohne EQ-8 noch 2 betroffene Häppchen, mit EQ-8 0) |
+| EQ-21: Tabellen per Textsuche gefunden | Die textgleiche Tabelle „Sprachen" (S. 85/93) wurde in beiden Abschnitten gefunden, der Vorsatz stand doppelt. Zuordnung jetzt über die Lage des Elements; 79 Tabellen je genau einmal |
+| EQ-21: 178 Häppchen mit Tabelle ohne Kopf | 172 (gezählt mit Füllzeichen-Bedingung; ohne sie 178) |
+| Bestätigt | EQ-21: alle 52 Vorsätze sind der richtige Kopf |
 
 ## 1. Spaltenraster
 
@@ -293,7 +304,7 @@ Leerzeichen bei einer Lücke über 0,25 × Schriftgröße, Zeilen mit der MB-11-
 - Arbeitsbasis ist der Elementtext nach U+00AD, EQ-8 und EQ-10. Zeichen werden den Elementkästen
   zugeordnet (kleinster Kasten, alle Elemente als Kandidaten), Quellzeilen je Kasten gebildet,
   Folgezeile nur im selben Kasten.
-- 4.725 Zeilenend-Striche:
+- 4.725 Zeilenend-Striche (Fassung 3, Anker-Lesart; Fassung 3a mit Kette: 4.726, davon 6 nicht gefunden, siehe 0c):
 
 | Ergebnis | Anzahl |
 |---|---|
@@ -368,7 +379,7 @@ S. 3/4 (Inhaltsverzeichnis), 108 auf S. 117 und 3 auf S. 14.
 | Werteblock als Tabelle | 4 (S. 96, 117, 118 zweimal) |
 | Zeilen-Schablone `Kopf: Wert; …` (erste Rasterzeile als Kopf, Spannzellen einmal) | 1.117 Zeilen, Länge typisch 85, p95 177, Maximum 712; 938 Zeilen höchstens 150 Zeichen lang (`CHUNK_OVERLAP`) |
 
-## 7a. Tabellenkopf je Häppchen (Fassung 3, neu gemessen)
+## 7a. Tabellenkopf je Häppchen (Fassung 3a)
 
 **Wortlaut (REQ-EQ-21):**
 - Kopf = zusammenhängende markierte Rasterzeilen ab Zeile 0 (`column_header` oder Titelzeile).
@@ -376,17 +387,19 @@ S. 3/4 (Inhaltsverzeichnis), 108 auf S. 117 und 3 auf S. 14.
 - Vorsatz an jedes Häppchen, das die Tabelle überlappt, ohne den Kopfbereich ganz zu enthalten. Alle
   Tabellen eines Häppchens zählen.
 - Die Zerteilung läuft auf dem vollen Abschnittstext (800/150).
-- Die Tabelle wird ohne U+00AD gesucht; alle 79 werden gefunden.
+- Die Tabelle wird über die Lage ihres Elements zugeordnet (Fassung 3a); alle 79 genau einmal.
+- Vorsatz nur, wenn der überlappte Teil einen Buchstaben oder eine Ziffer enthält; EQ-8 auf dem Kopftext (Fassung 3a).
 - Ausnahme Index S. 307–311.
 
 | Zahl | Wert |
 |---|---|
 | Tabellen / mit Kopf / ohne Kopf / Ausnahme Index | 79 / 59 / 20 / 5 (unter den 59) |
 | Tabellen mit Vorsatz | 52 (2 mit Kopf schneidet kein Häppchen ohne Kopfbereich an) |
-| Häppchen mit Vorsatz | **173** |
-| Zuwachs je Häppchen | typisch 82, Maximum 260 Zeichen; Summe 15.568 (+1,0 %) |
-| Häppchenlänge mit Vorsatz | typisch 882, Maximum 1.060 |
-| Häppchen, die eine Tabelle ohne Kopf anschneiden | 178 (kein Vorsatz) |
+| Häppchen mit Vorsatz | **168** (Fassung 3a; Fassung 3: 173) |
+| Zuwachs je Häppchen | typisch 82, Maximum 260 Zeichen; Summe 15.139 (+1,0 %) |
+| Häppchenlänge mit Vorsatz | typisch 880, Maximum 1.060 |
+| Häppchen, die eine Tabelle ohne Kopf anschneiden | 172 (kein Vorsatz) |
+| Vorsätze mit Steuerzeichen | 0 |
 
 **Urteil je Tabelle (52, alle einzeln, am Kopftext gegen das Raster):**
 - **51 besser.** 41 davon mit Titel und/oder Spaltenkopf, 10 nur mit dem Titel (Spaltenkopf in

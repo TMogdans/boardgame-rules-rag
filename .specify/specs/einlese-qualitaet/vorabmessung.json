@@ -376,7 +376,7 @@
   "docling_summe": 152,
   "schriftzuordnung_buch": 25.1
  },
- "fassung": 3,
+ "fassung": "3a",
  "lesefolge_f2": {
   "regel": "baender_an_ueberschriften",
   "bandgrenze": "kopf_nachbarspalte_frei_und_fortgesetzt",
@@ -561,15 +561,15 @@
   "layout": 391
  },
  "eq5_f3": {
-  "zeilenend_striche": 4725,
-  "unveraendert": 4610,
+  "zeilenend_striche": 4726,
+  "unveraendert": 4609,
   "geaendert": 94,
   "strich": 52,
   "trennung": 36,
   "konj": 6,
   "gesichert": 1,
   "mehrdeutig": 16,
-  "nicht_gefunden": 5,
+  "nicht_gefunden": 6,
   "elemente": 83,
   "urteil": {
    "besser": 94,
@@ -581,7 +581,12 @@
    "schlechter": 1,
    "seite": 296
   },
-  "prototyp_f2": 60
+  "prototyp_f2": 60,
+  "grundlinie": "kette",
+  "anker_lesart": {
+   "zeilenend_striche": 4725,
+   "nicht_gefunden": 5
+  }
  },
  "eq6_f3": {
   "stellen": 32,
@@ -603,17 +608,17 @@
    311
   ],
   "mit_vorsatz": 52,
-  "haeppchen_mit_vorsatz": 173,
+  "haeppchen_mit_vorsatz": 168,
   "zuwachs": {
    "typisch": 82,
    "maximum": 260,
-   "summe": 15568
+   "summe": 15139
   },
   "laenge_mit_vorsatz": {
-   "typisch": 882,
+   "typisch": 880,
    "maximum": 1060
   },
-  "haeppchen_ohne_kopf": 178,
+  "haeppchen_ohne_kopf": 172,
   "urteil": {
    "besser": 51,
    "davon_nur_titel": 10,
@@ -632,6 +637,24 @@
   },
   "fassung2_ueberholt": {
    "haeppchen": 104
+  },
+  "vorsaetze_mit_steuerzeichen": 0,
+  "zuordnung": "lage",
+  "fuellzeichen_bedingung": {
+   "entfernt": 5,
+   "schlechter_entfernt": [
+    113,
+    141,
+    260
+   ],
+   "gleichwertig_entfernt": [
+    96,
+    231
+   ]
+  },
+  "fassung3": {
+   "haeppchen": 173,
+   "summe": 15568
   }
  }
 }

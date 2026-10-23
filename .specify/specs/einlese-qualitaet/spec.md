@@ -3,19 +3,13 @@
 - **Spec-ID:** einlese-qualitaet (Spec 2; Schnitt 2a/2b abgenommen, O-1)
 - **Kontext-Kürzel:** EQ
 - **Tier:** T3 (siehe Abschnitt „Tier")
-- **Status:** **Entwurf Fassung 3, nicht abgenommen.** Fassung 3 arbeitet die blinde
-  Gegenprüfung 2 (2026-10-23) ein; das Vorgehen hat Tobias abgenommen.
-  - EQ-5 ist auf den Elementtext festgeschrieben und hat eine Sicherung für den Konjunktionsfall.
-  - EQ-21 hat einen genau gefassten Tabellenkopf und ist neu gemessen.
-  - Wortlaut und Zählung von EQ-3 sind an den Prototyp angeglichen; EQ-6 ist präzisiert.
-  - Bekannte Grenzen sind ergänzt.
-
-  Ab Fassung 3 läuft jede Messung nach dem Spec-Wortlaut, nicht nach einem abweichenden Prototyp.
-  Fassung 2 (Bänder an Überschriften, Strichrest mit Nachweis, Tabellenkopf) und Fassung 1 sind im
-  Verlauf der Vorab-Messung dokumentiert (`vorabmessung.md`, Abschnitte 0 und 0b). Offen: O-2, O-3,
-  O-5, O-10 bis O-17.
-- **Abbruchbedingung (Tobias, vorab):** Nach Fassung 3 prüft ein frischer Agent blind nur EQ-5 und
-  EQ-21. Blockieren darf nur eine Verschlechterung am echten Buch durch eine dieser beiden Regeln.
+- **Status:** **Abgenommen durch Tobias am 2026-10-23 (Fassung 3a).**
+  - Umfang: Teil 2a mit EQ-1 bis EQ-10 und EQ-15 bis EQ-21. Teil 2b (EQ-11 bis EQ-14) ist in dieser
+    Runde übersprungen und folgt später (O-1).
+  - Fassung 3a arbeitet die letzte blinde Gegenprüfung ein, nach der es laut vorab festgelegter
+    Abbruchbedingung keine weitere Runde gibt: Füllzeichen-Bedingung, EQ-8 im Kopftext und
+    Tabellenzuordnung über die Lage in EQ-21 sowie Zählkorrekturen in EQ-5.
+  - Verlauf (Fassung 1, 2, 3) in `vorabmessung.md`, Abschnitte 0, 0b, 0c.
 
 ## User Story
 
@@ -223,7 +217,9 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
     Randzeilen eingeschlossen; bei mehreren gewinnt der kleinste, bei Gleichstand der erste in
     Docling-Folge.
   - Je Kasten eines Elements (mehrere Kästen: je Kasten getrennt) bilden die Zeichen Zeilen nach
-    Grundlinie: `bottom` auf ganze pt gerundet, benachbarte Werte mit Abstand ≤ 1 pt zusammengelegt.
+    Grundlinie: `bottom` auf ganze pt gerundet. Die Werte werden aufsteigend als **Kette**
+    zusammengelegt: Ein Wert kommt zur laufenden Gruppe, wenn er höchstens 1 pt über dem *letzten*
+    Wert dieser Gruppe liegt (nicht über ihrem ersten).
   - Innerhalb einer Zeile gilt die Folge nach `x0`. Zwischen zwei Zeichen mit einer Lücke über 1,2 pt
     steht ein Leerzeichen; Leerraum wird zu einem Leerzeichen zusammengefasst.
   - Die **Folgezeile** ist die nächste Zeile desselben Kastens. Über Kasten- und Elementgrenzen gibt
@@ -252,10 +248,14 @@ Seite 1 neu geordnet, Seite 2 in Docling-Folge, Protokoll nennt Seite 2.
 - Die Verdachtszähler aus REQ-MB-32 laufen danach.
 
 *Ziel (Vorab-Messung Fassung 3, genau nach diesem Wortlaut):*
-- 4.725 Zeilenend-Striche: 4.610 unverändert, **94 geändert** (52 Striche wiederhergestellt,
-  36 Trennungen zusammengefügt, 6 Ergänzungsstriche vor Konjunktion), 1 gesichert, 16 mehrdeutig,
-  5 nicht gefunden. 83 Elemente ändern sich.
-- Einzeln gelesen: **94 besser, 0 gleichwertig, 0 schlechter**.
+- **4.726** Zeilenend-Striche (Fassung 3a, Kette): 4.609 unverändert, **94 geändert** (52 Striche
+  wiederhergestellt, 36 Trennungen zusammengefügt, 6 Ergänzungsstriche vor Konjunktion), 1 gesichert,
+  16 mehrdeutig, 6 nicht gefunden; 4.609 + 94 + 1 + 16 + 6 = 4.726. 83 Elemente ändern sich.
+  - Fassung 3 fasste Grundlinien über den ersten Wert der Gruppe zusammen (Anker) und meldete
+    4.725 / 5 nicht gefunden. Der gesicherte Fall war dort unter „unverändert" gezählt. Die
+    Textänderungen sind in beiden Lesarten gleich.
+- Einzeln gelesen: **94 besser, 0 gleichwertig, 0 schlechter** (letzte Gegenprüfung: 94/94 besser;
+  die Mutation „Sicherung aus" schlägt an).
 - Gesichert ist S. 296: Ohne Sicherung würde `Throals` zu `Thro- als` (1 schlechter, Gegenprüfung 2).
   `Throals` steht im Buch sonst als Wort, also bleibt es.
 - Fassung 2 maß einen abweichenden Prototyp (Abschnittstext je Seite, Spaltenzeilen der Seite): 60
@@ -354,12 +354,18 @@ byte-gleich.
 - Wo ein Buch `tabellenkopf` einschaltet, schreibt das Einlesen für jede Docling-Tabelle mit
   Tabellenkopf (Begriffe) in die Buchdatei:
   - den Zeichenbereich der Tabelle im Abschnittstext und den Bereich ihres **Kopfbereichs**
-    (Begriffe);
+    (Begriffe). Bestimmt wird er über die **Lage des Tabellen-Elements** in der Elementfolge des
+    Abschnitts (dort, wo `_Verbinder` den Elementtext anfügt), **nicht** über eine Textsuche. Eine
+    Tabelle, deren Text in mehreren Abschnitten gleich vorkommt (S. 85/93), gehört so nur zu ihrem
+    eigenen Abschnitt. Spätere Textänderungen am Abschnitt (EQ-6) verschieben den Bereich mit;
   - den **Kopftext**: je Kopfzeile die Zellen von links nach rechts, U+00AD entfernt, Leerraum zu einem
     Leerzeichen, leere Zellen weg, direkt aufeinanderfolgende gleiche Zellen (Spannzellen) einmal,
-    getrennt durch ` | `; Kopfzeilen durch Zeilenumbruch getrennt, am Ende ein Zeilenumbruch.
+    getrennt durch ` | `; Kopfzeilen durch Zeilenumbruch getrennt, am Ende ein Zeilenumbruch. Auf
+    jede Zelle wird vorher **EQ-8** angewendet (Steuerzeichen → Leerzeichen).
 - `rag.py index` zerteilt den Abschnittstext wie heute (REQ-MB-14). Jedes Häppchen, dessen
-  Zeichenbereich den einer Tabelle überlappt, ohne ihren Kopfbereich ganz zu enthalten, bekommt den
+  Zeichenbereich den einer Tabelle überlappt, **wobei der überlappte Teil mindestens einen Buchstaben
+  oder eine Ziffer enthält** (also nicht nur Füllzeichen wie Leerzeichen, `|`, `-`), ohne ihren
+  Kopfbereich ganz zu enthalten, bekommt den
   Kopftext als **Tabellenkopf-Vorsatz**: nach dem Titelvorsatz (REQ-MB-15), vor dem Häppchentext, im
   eingebetteten wie im Prompt-Text.
 - Mehrere solche Tabellen in einem Häppchen: Die Vorsätze stehen in Tabellenreihenfolge.
@@ -368,26 +374,33 @@ byte-gleich.
 - Kein Vorsatz entsteht bei Tabellen ohne Kopf; das Protokoll zählt sie mit Seite
   (`tabellen_ohne_kopf`). Ebenso keiner auf Ausnahmeseiten `tabellenkopf.ausnahmen` (REQ-EQ-4).
 
-*Ziel (Vorab-Messung Fassung 3, genau nach diesem Wortlaut):*
+*Ziel (Vorab-Messung Fassung 3a, genau nach diesem Wortlaut):*
 - Die Kette läuft wie REQ-EQ-2 bis EQ-6, zerteilt mit 800/150; Ausnahme Index S. 307–311.
-- 79 Tabellen, alle im Abschnittstext gefunden.
-  - **59** haben einen Kopf. Davon schneiden **52** ein Häppchen ohne Kopfbereich an und bekommen
-    einen Vorsatz; 5 sind Index-Ausnahmen, 2 schneidet kein Häppchen so an.
+- 79 Tabellen, alle über ihre Lage einem Abschnitt zugeordnet, jede genau einmal.
+  - **59** haben einen Kopf. Davon bekommen **52** einen Vorsatz; 5 sind Index-Ausnahmen, 2 schneidet
+    kein Häppchen ohne Kopfbereich an.
   - **20** haben keinen Kopf (Zeile 0 unmarkiert: Beispielcharaktere, Preis- und Ausrüstungslisten,
     Talentlisten, 3 Werteblöcke).
-- **173 Häppchen** bekommen einen Vorsatz. Zuwachs je Häppchen typisch 82, Maximum 260 Zeichen,
-  Summe 15.568 (+1,0 % Text); Häppchenlänge mit Vorsatz typisch 882, Maximum 1.060. Die Häppchenzahl
-  bleibt gleich.
-- 178 Häppchen schneiden eine Tabelle ohne Kopf an und bleiben ohne Vorsatz.
+- **168 Häppchen** bekommen einen Vorsatz. Zuwachs je Häppchen typisch 82, Maximum 260 Zeichen,
+  Summe 15.139 (+1,0 % Text); Häppchenlänge mit Vorsatz typisch 880, Maximum 1.060. Die Häppchenzahl
+  bleibt gleich. Kein Vorsatz enthält ein Steuerzeichen.
+- 172 Häppchen überlappen eine Tabelle ohne Kopf (mit Buchstabe oder Ziffer) und bleiben ohne Vorsatz.
+- Gegenüber Fassung 3 (173 Häppchen):
+  - Die Füllzeichen-Bedingung nimmt genau 5 Häppchen heraus: 3 schlechter (S. 113, 141, 260: nur
+    Füllzeichen am Tabellenrand, fremder Kopf) und 2 gleichwertig (S. 96, 231).
+  - Die Lagezuordnung beseitigt den doppelten Vorsatz der Tabelle „Sprachen" (S. 85/93).
+  - EQ-8 im Kopftext entfernt U+0007 aus den Vorsätzen von S. 136 und S. 141.
 - **Urteil je Tabelle (52), einzeln:**
   - **51 besser**. Davon tragen 41 Titel und/oder Spaltenkopf. Bei 10 ist es nur der Titel, weil
     Docling den Spaltenkopf darunter nicht markiert (S. 106, 110, 112, 118, 119, 124, 156, 219,
     267, 270).
   - **1 gleichwertig**: S. 136, der Kopf ist schon in Docling verstümmelt.
   - **0 schlechter.**
-- Die in Fassung 2 übergangenen Spaltenköpfe (S. 39, 96, 153, 231, 260) stehen jetzt mit Titel im
-  Kopf. S. 45 hat keinen Kopf mehr, denn die verbundene Datenzeile steht in Zeile 2, und Zeile 0 ist
-  unmarkiert.
+  - Die letzte Gegenprüfung bestätigt: Alle 52 Vorsätze sind der richtige Kopf.
+- **Je Häppchen:** Die 3 schlechten Häppchen der letzten Gegenprüfung sind herausgenommen;
+  0 schlechter.
+- Die in Fassung 2 übergangenen Spaltenköpfe (S. 39, 96, 153, 231, 260) stehen mit Titel im Kopf.
+  S. 45 hat keinen Kopf (die verbundene Datenzeile steht in Zeile 2, Zeile 0 ist unmarkiert).
 
 *Detektor:*
 - Synthetische Tabelle: Zeile 0 Titel (eine Spannzelle über alle Spalten), Zeile 1 `column_header`
@@ -403,8 +416,15 @@ byte-gleich.
 - Kopf mit U+00AD in einer Zelle → Vorsatz ohne U+00AD; die Tabelle wird im Abschnittstext ohne
   U+00AD gefunden.
 - Ausnahmeseite → kein Vorsatz.
+- Füllzeichen: Ein Häppchen überlappt die Tabelle nur mit `| --- |` und Leerzeichen am Rand → kein
+  Vorsatz; mit einem Buchstaben der Tabelle → Vorsatz.
+- Kopfzelle mit U+0007 → Vorsatz mit Leerzeichen statt U+0007.
+- Zwei Abschnitte mit textgleicher Tabelle → jeder Abschnitt hat genau seine Tabelle, kein doppelter
+  Vorsatz.
 - Mutationen machen je einen Fall rot: „Vorsatz zählt zu `CHUNK_SIZE`", „nur erste Tabelle je
-  Häppchen", „Titelzeile mitten in der Tabelle als Kopf".
+  Häppchen", „Titelzeile mitten in der Tabelle als Kopf", „Füllzeichen-Bedingung aus", „EQ-8 im
+  Kopftext aus", „Zuordnung über Textsuche statt Lage". Die Füllzeichen-Mutation gehört ausdrücklich
+  ins Messtor (REQ-EQ-1).
 - Ohne `tabellenkopf` → Index-Inhalt byte-gleich.
 
 ### D. Zahlentreue-Protokoll (Teil 2a, Detektor für 2b)
@@ -446,7 +466,7 @@ byte-gleich.
 Aufzählungspunkt ohne Nummer → `1. …`, `2. …`, der Aufzählungspunkt unverändert; ohne Schalter →
 byte-gleich.
 
-### E. Tabellen und Werteblöcke (Teil 2b)
+### E. Tabellen und Werteblöcke (Teil 2b, in dieser Runde übersprungen, folgt später)
 
 **REQ-EQ-11**: *Where, Tabellen-Schablone*
 - Wo ein Buch `tabellen.form = "schablone"` deklariert, wird jede Docling-Tabelle statt als
@@ -610,7 +630,7 @@ Spec-2-Deklaration liest trotz fehlender Spec-2-Datei ein.
 *Detektor:* Messskript mit typisch und Maximum je Seite (beide Zahlen im Ergebnis); Zeittests zählen
 in Mutationsproben nicht als Fang (wie REQ-MB-19).
 
-## Lesarten (Entwurf, zur Bestätigung)
+## Lesarten (abgenommen mit Fassung 3a)
 
 - **EQ-1** „Vor der Abnahme" heißt: Die Regel-Messung liegt im Spec-Ordner in einem Commit, der
   **vor** dem Implementierungs-Commit der Regel liegt. Messtor und Messgleichheit (EQ-2) sind
@@ -634,6 +654,11 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
 
 ## Abgrenzung (nicht in Spec 2)
 
+- **Teil 2b** (EQ-11 Tabellen-Schablone, EQ-12 Zahlentreue der Schablone, EQ-13 doppelte Tabelle aus
+  Bild-Kindern, EQ-14 Werteblock-Zeilen) ist in dieser Runde **übersprungen** und folgt später
+  (O-1). EQ-11 wird erst nach dem Retrieval-Vergleich mit dem Golden Set aus Spec 3 eingeschaltet
+  (O-4), EQ-14 erst mit dem Kreaturenband (O-9). Die Kriterien bleiben mit stabilen IDs stehen.
+
 - **Hausregeln** als Markdown (Art neu/ergänzt/ersetzt, Bezug, feste Mitlieferung): eigene Spec.
 - **FTS5-Trigram bzw. Komposita-Suche** und **Earthdawn-Golden-Set**: Spec 3. Ohne Golden Set ist
   der Nutzen der Tabellen-Schablone für das Retrieval **nicht** messbar; Spec 2 misst nur Form und
@@ -653,7 +678,7 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
 - **S. 117**: 2 Zeilen am Spaltenende fehlen in Docling (108 Zeichen). Das Zahlenprotokoll zeigt es
   (EQ-9), eine Reparatur ist nicht vorgesehen (O-8).
 
-## Bekannte Grenzen (vorab)
+## Bekannte Grenzen
 
 - **REQ-EQ-3** kennt keine Kästen und keine Werte-Raster. Den zweispaltigen Kasten (S. 237) und den
   Tabellenkopf aus Text-Elementen (S. 274) fangen Ausnahmeseiten, überbreite Blöcke und Werte-Raster
@@ -663,16 +688,16 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
   Abhilfe wäre die Teilung an `charspan` (O-10).
 - **REQ-EQ-6** fügt `X- Großbuchstabe` nie zusammen; 6 echte Komposita bleiben mit `- `.
 - **REQ-EQ-5** lässt 16 mehrdeutige Fälle stehen (dieselbe Form mehrfach im Element, z. B.
-  `SpruchzaubereiProbe` zweimal auf S. 197), dazu 5 nicht gefundene. Eine Zuordnung über die
+  `SpruchzaubereiProbe` zweimal auf S. 197), dazu 6 nicht gefundene. Eine Zuordnung über die
   Position statt über die Eindeutigkeit wäre eine neue Regel (O-17).
 - **Docling und Regel liegen beide falsch, keine Verschlechterung** (Gegenprüfung 2):
   - S. 284: Ein mehrspaltiges Element verbindet den Anfang von „Astendar" mit der Einleitung der
     Passionen.
   - S. 111 und S. 141: Ein Seitenkasten steht vor der Fortsetzung des Fließtexts.
 - **REQ-EQ-21:** 10 Tabellen tragen nur den Titel als Kopf (Spaltenkopf in Docling nicht markiert),
-  20 Tabellen haben keinen Kopf (178 Häppchen ohne Vorsatz). Docling verschmilzt Kopf und erste
+  20 Tabellen haben keinen Kopf (172 Häppchen ohne Vorsatz). Docling verschmilzt Kopf und erste
   Datenzeile ungekennzeichnet auf S. 263, 265, 266 (Tabellen ohne Kopf, also kein Vorsatz).
-- **REQ-EQ-21** gibt 20 Tabellen ohne Docling-Kopf (178 Häppchen) keinen Vorsatz (O-11).
+- **REQ-EQ-21** gibt 20 Tabellen ohne Docling-Kopf (172 Häppchen) keinen Vorsatz (O-11).
 - **REQ-EQ-5** findet Fälle nur, wenn Docling-Form und pdfplumber-Wörter übereinstimmen. 5
   echte Striche und 1 Trennung wurden nicht gefunden. Laufweiten-Artefakte von pdfplumber (gemessen
   5 Werteblock-Paare) können Fälle verdecken.
@@ -695,7 +720,40 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
   - Umlaut-Zahl korrigiert.
   - Tabellenkopf je Häppchen in 2a (EQ-21).
 
-## Offene Entscheidungen (Fassung 3)
+Fassung 3a (Tobias, 2026-10-23, je mit der Empfehlung der Spec; die Begründungen stehen im Verlauf
+unten):
+
+- **O-2 (a)** Seitenwächter + Ausnahmeseiten S. 237 und S. 274 (REQ-EQ-3, -4).
+- **O-3 (a)** Im Messtor ist nur die mechanisch belegte 2×2-Werteblock-Klasse zugelassen (REQ-EQ-1).
+- **O-5 (a)** Strichrest mit pdfplumber-Nachweis; „X- Großbuchstabe" wird nur gezählt (REQ-EQ-6).
+- **O-10 (a)** Teilung mehrspaltiger Elemente über `charspan` nicht jetzt, sondern als späterer
+  Nachtrag mit eigenem Messtor.
+- **O-11 (a)** Kein Vorsatz für Tabellen ohne Kopf (REQ-EQ-21).
+- **O-12 (a)** Der Tabellenkopf-Vorsatz zählt nicht zu `CHUNK_SIZE` (REQ-EQ-21).
+- **O-13 (a)** Index S. 307–311 als deklarierte Ausnahme für den Tabellenkopf.
+- **O-14 (a)** S. 216 bleibt bekannte Grenze (REQ-EQ-7).
+- **O-15 (a)** EQ-5 mit Sicherung im Konjunktionsfall.
+- **O-16 (a)** Tabellenkopf = Titel + Spaltenkopf (markierte Zeilen ab Zeile 0).
+- **O-17 (a)** Mehrdeutige EQ-5-Fälle bleiben stehen und werden gezählt.
+- **F3a-1 (neu)** Füllzeichen-Bedingung in EQ-21: Ein Vorsatz entsteht nur, wenn der überlappte Teil
+  einen Buchstaben oder eine Ziffer der Tabelle enthält. Gemessen nimmt sie genau 5 Häppchen heraus,
+  3 schlechte und 2 gleichwertige.
+- **F3a-2** EQ-8 gilt auch für den Kopftext. Die Tabelle wird über die Lage zugeordnet. EQ-5 bildet
+  Grundlinien als Kette.
+
+**Offene Entscheidungen:** keine.
+
+## Umfang der Tests (Runde 2a)
+
+Die Tests dieser Runde decken **alle REQs von Teil 2a** ab, jeweils mit den Detektoren und
+Mutationen des Kriteriums: EQ-1 bis EQ-10 und EQ-15 bis EQ-21.
+- EQ-1 prüft das Format von `vorabmessung.json`. Messtor und Messgleichheit (EQ-2) sind
+  Review-Schritte am echten Buch und bleiben außerhalb der Tests.
+- EQ-11 bis EQ-14 (Teil 2b) sind nicht Teil dieser Runde; ihre Tests entstehen mit 2b.
+- Alle Tests sind synthetisch (REQ-EQ-17, -18).
+
+## Verlauf: Entscheidungsvorlagen Fassung 3
+
 
 **O-2 (neu gefasst): Ausnahmen der Lesefolge, Ausnahmeseiten oder Erkennung?**
 - (a) Seitenwächter (generisch) + 2 deklarierte Ausnahmeseiten (S. 237, 274), wie gemessen.
