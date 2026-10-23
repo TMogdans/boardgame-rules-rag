@@ -3,7 +3,8 @@
 - **Spec-ID:** einlese-qualitaet (Spec 2; Schnitt 2a/2b abgenommen, O-1)
 - **Kontext-Kürzel:** EQ
 - **Tier:** T3 (siehe Abschnitt „Tier")
-- **Status:** **Abgenommen durch Tobias am 2026-10-23 (Fassung 3b).**
+- **Status:** **Abgenommen durch Tobias am 2026-10-23 (Fassung 3c).**
+  - Fassung 3c: Lesarten U1–U4 aus der Teststation, ohne neue Messung, keine Zahl betroffen.
   - Fassung 3b: Klärungen K1–K7 aus der Teststation, ohne neue Messung. Keine gemessene Zahl ändert
     sich (siehe Entscheidungen K1–K7).
   - Umfang: Teil 2a mit EQ-1 bis EQ-10 und EQ-15 bis EQ-21. Teil 2b (EQ-11 bis EQ-14) ist in dieser
@@ -668,6 +669,19 @@ in Mutationsproben nicht als Fang (wie REQ-MB-19).
 - **EQ-9** Ziffernfolgen sind `\d+` auf Wortebene. `5/10` sind zwei Zahlen, `W12+2W6` vier.
 - **EQ-11** Docling-Kennungen für Spaltenköpfe (`column_header`) haben Vorrang. Die Regel „erste
   Nicht-Titel-Zeile" ist der Rückfall und wird im Protokoll gezählt.
+
+## Lesarten der Teststation (Tobias, 2026-10-23, Fassung 3c)
+
+- **U1 (EQ-2, EQ-21)** Der Zähler „Häppchen mit Vorsatz" (EQ-21) steht in der Ausgabe des
+  Index-Laufs je Buch, nicht im Einlese-Protokoll — wie die Häppchenzahl in Spec 1 (Lesart zu
+  MB-14). Erst der Index-Lauf zerteilt; das Einlesen kennt `CHUNK_SIZE`/`CHUNK_OVERLAP` nicht.
+- **U2 (EQ-2)** Eine eingeschaltete Regel ohne Fall steht mit Nullwerten im Protokoll
+  (`{"abschnittsaenderungen": 0, "textaenderungen": 0, "seiten": []}`), sie fehlt nicht.
+- **U3 (EQ-16, EQ-9)** Eine Spec-2-Deklaration, in der alle Schalter aus sind (`false` bzw. ohne
+  wirksamen Schlüssel), gilt wie keine Deklaration: kein Zahlenprotokoll, kein pdfplumber-Öffnen
+  dafür, Buchdatei byte-gleich.
+- **U4 (EQ-16, EQ-9)** Eine deklarierte Regel ohne Fall verändert die Buchdatei nicht; das
+  Zahlenprotokoll steht im Einlese-Protokoll, nicht in der Buchdatei.
 
 ## Abgrenzung (nicht in Spec 2)
 
